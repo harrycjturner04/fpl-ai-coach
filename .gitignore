@@ -1,0 +1,19 @@
+# Data pulls (raw snapshots and processed tables are regenerated locally)
+data/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# Environment / secrets
+.env
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
