@@ -79,3 +79,11 @@ class FPLClient:
     def entry_picks(self, entry_id: int, gameweek: int) -> dict:
         """A manager's 15 picks, captaincy and chip for a given gameweek."""
         return self.get(f"entry/{entry_id}/event/{gameweek}/picks")
+
+    def entry_history(self, entry_id: int) -> dict:
+        """Per-GW points/bank/transfers/hits this season, chips played, past seasons."""
+        return self.get(f"entry/{entry_id}/history")
+
+    def entry_transfers(self, entry_id: int) -> list[dict]:
+        """Every transfer this season, with purchase (`element_in_cost`) prices."""
+        return self.get(f"entry/{entry_id}/transfers")

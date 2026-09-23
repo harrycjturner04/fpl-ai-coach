@@ -5,6 +5,20 @@ import pytest
 def bootstrap():
     """Minimal bootstrap-static payload mirroring the live API's shape."""
     return {
+        "chips": [
+            {"id": 1, "name": "wildcard", "number": 1, "start_event": 2, "stop_event": 19, "chip_type": "transfer"},
+            {"id": 2, "name": "wildcard", "number": 1, "start_event": 20, "stop_event": 38, "chip_type": "transfer"},
+            {"id": 3, "name": "freehit", "number": 1, "start_event": 2, "stop_event": 19, "chip_type": "transfer"},
+            {"id": 4, "name": "bboost", "number": 1, "start_event": 1, "stop_event": 19, "chip_type": "team"},
+            {"id": 5, "name": "3xc", "number": 1, "start_event": 1, "stop_event": 19, "chip_type": "team"},
+            {"id": 6, "name": "freehit", "number": 1, "start_event": 20, "stop_event": 38, "chip_type": "transfer"},
+            {"id": 7, "name": "bboost", "number": 1, "start_event": 20, "stop_event": 38, "chip_type": "team"},
+            {"id": 8, "name": "3xc", "number": 1, "start_event": 20, "stop_event": 38, "chip_type": "team"},
+        ],
+        "game_settings": {
+            "squad_squadplay": 11, "squad_squadsize": 15, "squad_team_limit": 3,
+            "squad_total_spend": 1000, "transfers_sell_on_fee": 0.5, "max_extra_free_transfers": 4,
+        },
         "teams": [
             {"id": 1, "code": 3, "name": "Arsenal", "short_name": "ARS", "strength": 5,
              "strength_overall_home": 1350, "strength_overall_away": 1370,
@@ -34,12 +48,12 @@ def bootstrap():
         ],
         "elements": [
             {"id": 10, "code": 100, "web_name": "Saka", "first_name": "Bukayo", "second_name": "Saka",
-             "team": 1, "element_type": 3, "now_cost": 105, "status": "a",
+             "team": 1, "element_type": 3, "now_cost": 105, "cost_change_start": 5, "status": "a",
              "chance_of_playing_next_round": None, "news": "", "news_added": None,
              "total_points": 30, "event_points": 8, "points_per_game": "7.5", "form": "8.0",
              "minutes": 360, "selected_by_percent": "35.2", "expected_goals": "1.80"},
             {"id": 11, "code": 101, "web_name": "Martinez", "first_name": "Emiliano", "second_name": "Martinez",
-             "team": 2, "element_type": 1, "now_cost": 50, "status": "d",
+             "team": 2, "element_type": 1, "now_cost": 50, "cost_change_start": 0, "status": "d",
              "chance_of_playing_next_round": 75, "news": "Knock - 75% chance of playing",
              "news_added": "2026-09-20T10:00:00Z",
              "total_points": 12, "event_points": 2, "points_per_game": "3.0", "form": "2.5",
@@ -64,6 +78,21 @@ def raw_fixtures():
          "team_h_score": None, "team_a_score": None, "started": False, "finished": False,
          "finished_provisional": False, "minutes": 0, "stats": []},
     ]
+
+
+@pytest.fixture
+def entry_history():
+    """Manager: joined GW1, bench boost in GW1, 2 transfers for a -4 hit in GW2 (current GW)."""
+    return {
+        "current": [
+            {"event": 1, "points": 60, "total_points": 60, "rank": 100, "overall_rank": 100,
+             "bank": 5, "value": 1000, "event_transfers": 0, "event_transfers_cost": 0, "points_on_bench": 9},
+            {"event": 2, "points": 50, "total_points": 110, "rank": 200, "overall_rank": 150,
+             "bank": 5, "value": 1003, "event_transfers": 2, "event_transfers_cost": 4, "points_on_bench": 3},
+        ],
+        "chips": [{"name": "bboost", "time": "2026-08-21T10:00:00Z", "event": 1}],
+        "past": [{"season_name": "2025/26", "total_points": 2200, "rank": 500000}],
+    }
 
 
 @pytest.fixture

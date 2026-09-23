@@ -52,3 +52,15 @@ def save_table(df: pd.DataFrame, name: str, data_dir: Path = DATA_DIR) -> Path:
 
 def load_table(name: str, data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return pd.read_parquet(data_dir / "processed" / f"{name}.parquet")
+
+
+def save_json(payload: Any, name: str, data_dir: Path = DATA_DIR) -> Path:
+    """Processed (derived) JSON, e.g. game rules or a manager's state summary."""
+    path = data_dir / "processed" / f"{name}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+    return path
+
+
+def load_json(name: str, data_dir: Path = DATA_DIR) -> Any:
+    return json.loads((data_dir / "processed" / f"{name}.json").read_text(encoding="utf-8"))

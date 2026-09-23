@@ -12,7 +12,9 @@ import argparse
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import storage, transform
+import pandas as pd
+
+from . import manager_state, storage, transform
 from .fpl_client import FPLClient
 
 
@@ -45,16 +47,67 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
         storage.save_raw(snapshot, "element-summaries", summaries)
         tables["player_history"] = transform.player_history(summaries)
 
-    if entry_id is not None and current_gw is not None:
-        storage.save_raw(snapshot, f"entry-{entry_id}", client.entry(entry_id))
-        picks = client.entry_picks(entry_id, current_gw)
-        storage.save_raw(snapshot, f"entry-{entry_id}-gw{current_gw}-picks", picks)
-        tables["entry_picks"] = transform.entry_picks(picks, entry_id, current_gw)
+    tables["chips"] = transform.chips(bootstrap)
+    rules = transform.game_rules(bootstrap)
+    storage.save_json(rules, "game_rules", data_dir)
+
+    state = None
+    if entry_id is not None:
+        state = _pull_entry(client, snapshot, tables, rules, entry_id, current_gw)
+        storage.save_json(state, f"manager_state_{entry_id}", data_dir)
 
     for name, df in tables.items():
         storage.save_table(df, name, data_dir)
 
-    return {"snapshot": snapshot, "tables": tables, "current_gw": current_gw}
+    return {"snapshot": snapshot, "tables": tables, "current_gw": current_gw, "manager_state": state}
+
+
+def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,
+                entry_id: int, current_gw: int | None) -> dict:
+    """Pull everything public about one manager and derive their current state."""
+    entry = client.entry(entry_id)
+    history = client.entry_history(entry_id)
+    raw_transfers = client.entry_transfers(entry_id)
+    storage.save_raw(snapshot, f"entry-{entry_id}", entry)
+    storage.save_raw(snapshot, f"entry-{entry_id}-history", history)
+    storage.save_raw(snapshot, f"entry-{entry_id}-transfers", raw_transfers)
+
+    overview = transform.entry_overview(entry)
+    gameweeks = transform.entry_gameweeks(history)
+    chips_used = transform.entry_chips_used(history)
+    transfers = transform.entry_transfers(raw_transfers)
+    if gameweeks.empty or current_gw is None:
+        raise SystemExit(f"Entry {entry_id} has no gameweeks played yet — nothing to derive.")
+
+    ft_table, ft_next = manager_state.free_transfers(gameweeks, rules["max_free_transfers"], rules["hit_cost"])
+    gameweeks = gameweeks.merge(ft_table[["gameweek", "ft_available", "ft_observed"]], on="gameweek")
+    chip_table = manager_state.chip_status(tables["chips"], chips_used, transform.next_gameweek(tables["gameweeks"]))
+
+    squad_gw = manager_state.persistent_squad_gameweek(gameweeks, current_gw)
+    picks_by_gw = {}
+    for gw in sorted({current_gw, squad_gw} & set(gameweeks["gameweek"])):
+        payload = client.entry_picks(entry_id, gw)
+        storage.save_raw(snapshot, f"entry-{entry_id}-gw{gw}-picks", payload)
+        picks_by_gw[gw] = transform.entry_picks(payload, entry_id, gw)
+
+    squad = manager_state.squad_prices(
+        picks_by_gw[squad_gw]["player_id"].tolist(), transfers, tables["players"], chips_used,
+        int(overview["started_event"].iloc[0]), tables.get("player_history"), rules["sell_on_fee"],
+    )
+    bank = float(gameweeks.loc[gameweeks["gameweek"] == squad_gw, "bank"].iloc[0])
+
+    tables.update({
+        "entry_overview": overview,
+        "entry_leagues": transform.entry_leagues(entry),
+        "entry_gameweeks": gameweeks,
+        "entry_chips": chip_table,
+        "entry_transfers": transfers,
+        "entry_past_seasons": transform.entry_past_seasons(history),
+        "entry_picks": pd.concat(picks_by_gw.values(), ignore_index=True),
+        "entry_squad": squad,
+    })
+    return manager_state.summary(overview, gameweeks, ft_next, chip_table, squad, bank,
+                                 transform.next_gameweek(tables["gameweeks"]), squad_gw, transfers)
 
 
 def summarise(result: dict) -> str:
@@ -72,6 +125,23 @@ def summarise(result: dict) -> str:
     players = tables["players"]
     flagged = players[players["status"] != "a"]
     lines.append(f"Players flagged (injured/doubtful/suspended/unavailable): {len(flagged)}")
+
+    state = result.get("manager_state")
+    if state:
+        used = ", ".join(f"{c['name']} (GW{c['gameweek']})" for c in state["chips_used"])
+        lines += [
+            "",
+            f"Manager: {state['team_name']} ({state['manager']}), rank {state['overall_rank']}, "
+            f"{state['overall_points']} pts",
+            f"Free transfers for GW{state['next_gameweek']}: {state['free_transfers']}   "
+            f"Bank: £{state['bank']}m   Budget (selling value + bank): £{state['budget_available']}m",
+            f"Chips available: {', '.join(state['chips_available']) or 'none'}",
+            f"Chips used: {used or 'none'}",
+            f"Chips unlocking later: {', '.join(state['chips_upcoming']) or 'none'}",
+            f"Transfers this season: {state['transfers_total']} total, {state['transfers_counted']} "
+            f"outside Wildcard/Free Hit   Points spent on hits: {state['total_hit_points']}",
+        ]
+        lines += [f"Note: {w}" for w in state["warnings"]]
     return "\n".join(lines)
 
 

@@ -12,7 +12,7 @@ This is a personal portfolio project, built incrementally, demonstrating both ML
 
 Five layers, each with a single responsibility. Data flows top to bottom; only clean, structured output should cross a layer boundary.
 
-1. **Ingestion** — pulls the raw state of the world: official FPL API (`bootstrap-static`, `fixtures`, `entry/{id}/event/{gw}/picks`), a vision-model parse of the user's squad screenshot into structured JSON, and injury/news scraping (Premier Injuries, Fantasy Football Scout, press-conference roundups) plus underlying stats (Understat/FBref for xG/xA).
+1. **Ingestion** — pulls the raw state of the world: official FPL API (`bootstrap-static`, `fixtures`, `element-summary/{id}`, `entry/{id}`, `entry/{id}/history`, `entry/{id}/transfers`, `entry/{id}/event/{gw}/picks`), a vision-model parse of the user's squad screenshot into structured JSON, and injury/news scraping (Premier Injuries, Fantasy Football Scout, press-conference roundups) plus underlying stats (Understat/FBref for xG/xA).
 2. **Feature engineering** — turns raw data into a versioned feature table: rolling form (3/5/10 GW), per-90 rates, fixture difficulty (FPL's FDR to start, own Elo-based rating later), home/away split, minutes reliability, set-piece duty, team strength.
 3. **Prediction (ML)** — expected points per player for the next 1–5 gameweeks. Baseline: form weighted by fixture difficulty. Next: gradient-boosted trees (XGBoost/LightGBM) on the feature table. Minutes/start-probability should be modelled as its own signal, not folded silently into the points estimate.
 4. **Optimisation (ILP)** — PuLP-based integer linear program. Maximises predicted points subject to budget, squad composition (2/5/5/3), max 3 per club, valid XI formation, captain doubling, and the -4-points-per-extra-transfer cost.
@@ -81,7 +81,10 @@ Build in this order — each stage should produce something runnable end-to-end 
 - `storage.py` — raw JSON snapshots + Parquet read/write.
 - `transform.py` — pure raw→DataFrame functions (players, teams, positions, gameweeks, fixtures, player_history, entry_picks); prices in £m.
 - `cli.py` — `python -m ingestion.cli [--history] [--entry ID]`, prints a shape/freshness summary.
-- 11 offline pytest tests pass. Live run verified: 667 players, 20 teams, 38 GWs, 380 fixtures, 3216 player-history rows (GW1–5); current GW 5.
+- `manager_state.py` — reconstructs what the public API doesn't expose: free transfers for next GW, chip status (8 chip instances, one set per season half), purchase/selling prices, and the persistent (pre-Free-Hit) squad. Output: `data/processed/manager_state_<id>.json` + `entry_*` tables (overview, leagues, gameweeks, chips, transfers, past seasons, picks, squad). Game rules (budget, club cap, FT cap, sell-on fee) come from bootstrap into `game_rules.json` rather than being hardcoded.
+- Free-transfer rule verified empirically (`scripts/validate_free_transfers.py`): +1/GW capped at 5; Wildcard/Free Hit keep banked FTs but add none. 0 mismatches across 2,885 real manager-GWs; the alternative (+1 on chip weeks) gave 42 mismatches.
+- 28 offline pytest tests pass. Live run verified: 667 players, 20 teams, 38 GWs, 380 fixtures, 3216 player-history rows (GW1–5); current GW 5; manager state verified on public entry 1 (incl. Free Hit revert).
+- Known gaps: transfers made for the upcoming GW aren't public until its deadline; late joiners' initial purchase prices need `--history` to be exact (flagged otherwise). The authenticated `my-team` endpoint would give exact values — deliberately not used (would require storing FPL login).
 
 Not yet covered in ingestion (deferred to later iterations): Understat/FBref xG, injury/news scraping, screenshot parsing (Stage 4). Note FPL's own API now exposes xG/xA per player and per match, which may reduce the need for Understat.
 
@@ -91,3 +94,4 @@ Next: Stage 2 — PuLP ILP optimiser run on current stats.
 
 - **2026-09-16** — Initial plan drafted (architecture, tech stack, roadmap).
 - **2026-09-23** — Stage 1 built: `ingestion/` package (FPL client, storage, transforms, CLI) + tests. Decided storage = raw JSON snapshots + Parquet flat files. Project put under git and pushed to GitHub (`fpl-ai-coach`, public).
+- **2026-09-23** — Added manager-state ingestion (entry history, transfers, chips, derived free transfers and selling prices) from public endpoints only; authenticated `my-team` endpoint deferred. Free-transfer rule validated against real data.

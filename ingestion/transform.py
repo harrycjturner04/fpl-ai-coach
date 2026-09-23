@@ -38,7 +38,7 @@ PLAYER_COLUMNS = [
     "expected_goals", "expected_assists", "expected_goal_involvements",
     "expected_goals_conceded", "defensive_contribution",
     "ep_next", "ep_this", "selected_by_percent",
-    "transfers_in_event", "transfers_out_event", "cost_change_event",
+    "transfers_in_event", "transfers_out_event", "cost_change_event", "cost_change_start",
     "penalties_order", "direct_freekicks_order", "corners_and_indirect_freekicks_order",
 ]
 
@@ -133,6 +133,90 @@ def entry_picks(picks_payload: dict, entry_id: int, gameweek: int) -> pd.DataFra
     df["squad_value"] = history.get("value", 0) / 10
     df["active_chip"] = picks_payload.get("active_chip")
     return df
+
+
+def chips(bootstrap: dict) -> pd.DataFrame:
+    """Chip definitions: one row per chip instance with its playable GW window.
+
+    Since 2025/26 each chip exists twice (one per half of the season).
+    """
+    df = pd.DataFrame(bootstrap["chips"])
+    cols = ["id", "name", "number", "start_event", "stop_event", "chip_type"]
+    return df[[c for c in cols if c in df.columns]].sort_values("id").reset_index(drop=True)
+
+
+def game_rules(bootstrap: dict) -> dict:
+    """Game rules relevant to squad building and transfers, prices in £m."""
+    rules = bootstrap["game_settings"]
+    return {
+        "squad_size": rules["squad_squadsize"],
+        "starting_xi": rules["squad_squadplay"],
+        "max_per_club": rules["squad_team_limit"],
+        "total_budget": rules["squad_total_spend"] / 10,
+        "sell_on_fee": rules["transfers_sell_on_fee"],
+        "max_free_transfers": 1 + rules["max_extra_free_transfers"],
+        "hit_cost": 4,
+        "squad_composition": {
+            p["singular_name_short"]: p["squad_select"] for p in bootstrap["element_types"]
+        },
+    }
+
+
+def entry_overview(entry: dict) -> pd.DataFrame:
+    cols = [
+        "id", "name", "player_first_name", "player_last_name", "started_event",
+        "current_event", "favourite_team", "summary_overall_points", "summary_overall_rank",
+        "summary_event_points", "summary_event_rank", "last_deadline_bank",
+        "last_deadline_value", "last_deadline_total_transfers", "years_active", "joined_time",
+    ]
+    df = pd.DataFrame([{c: entry.get(c) for c in cols}]).rename(columns={"id": "entry_id"})
+    for col in ("last_deadline_bank", "last_deadline_value"):
+        df[col] = df[col] / 10
+    return df
+
+
+def entry_leagues(entry: dict) -> pd.DataFrame:
+    rows = [
+        {"league_id": lg["id"], "league_name": lg["name"], "league_type": kind,
+         "entry_rank": lg.get("entry_rank"), "entry_last_rank": lg.get("entry_last_rank")}
+        for kind in ("classic", "h2h")
+        for lg in entry.get("leagues", {}).get(kind, [])
+    ]
+    return pd.DataFrame(rows, columns=["league_id", "league_name", "league_type", "entry_rank", "entry_last_rank"])
+
+
+def entry_gameweeks(history: dict) -> pd.DataFrame:
+    """One row per GW played this season: points, rank, bank, value, transfers, hits, chip."""
+    df = pd.DataFrame(history["current"])
+    if df.empty:
+        return df
+    df = df.rename(columns={"event": "gameweek"})
+    df["bank"] = df["bank"] / 10
+    df["value"] = df["value"] / 10
+    chip_by_gw = {c["event"]: c["name"] for c in history.get("chips", [])}
+    df["chip"] = df["gameweek"].map(chip_by_gw)
+    return df.sort_values("gameweek").reset_index(drop=True)
+
+
+def entry_chips_used(history: dict) -> pd.DataFrame:
+    df = pd.DataFrame(history.get("chips", []), columns=["name", "time", "event"])
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    return df.rename(columns={"event": "gameweek"}).sort_values("gameweek").reset_index(drop=True)
+
+
+def entry_past_seasons(history: dict) -> pd.DataFrame:
+    return pd.DataFrame(history.get("past", []), columns=["season_name", "total_points", "rank"])
+
+
+def entry_transfers(raw_transfers: list[dict]) -> pd.DataFrame:
+    df = pd.DataFrame(raw_transfers, columns=[
+        "entry", "event", "time", "element_in", "element_in_cost", "element_out", "element_out_cost",
+    ])
+    df = df.rename(columns={"entry": "entry_id", "event": "gameweek"})
+    df["element_in_cost"] = df["element_in_cost"] / 10
+    df["element_out_cost"] = df["element_out_cost"] / 10
+    df["time"] = pd.to_datetime(df["time"], utc=True)
+    return df.sort_values("time").reset_index(drop=True)
 
 
 def current_gameweek(gw: pd.DataFrame) -> int | None:
