@@ -78,6 +78,12 @@ exact, don't scale to these constraints, or need a season simulator).
 Stage 2 scores players with `0.7 × ep_next + 0.3 × form`, scaled by chance of playing (`prediction/current_stats.py`):
 a placeholder until Stage 3's prediction model.
 
+## How this project is built
+
+I use [Claude Code](https://claude.com/claude-code) as a development tool, in the same way I'd use any tool that makes me faster: it writes much of the implementation and tests, and runs an automated review pass. The thinking behind the project is mine. I set the vision and architecture, decide the approach for each problem, and choose between alternatives after weighing them up. The reasoning behind the key decisions, such as why the optimiser is an integer linear program and how free transfers are valued, is documented in the sections above.
+
+The most important parts of the system, the theory and maths behind the decision making and the research into which approaches are best, are driven by meticulous direction from me rather than left to the tool. Every change is planned with me before any code is written; I review the code manually on top of the automated review, and I make my own edits to it directly. Correctness is backed by evidence rather than trust: the optimiser is cross-checked against brute-force enumeration, an independent validator re-checks every FPL rule after each solve, the free-transfer model was validated against thousands of real manager-gameweeks, and the reconstructed team data was checked against my own FPL account. Commits that Claude contributed to are marked with a `Co-Authored-By` line.
+
 ## Data layout
 
 ```
