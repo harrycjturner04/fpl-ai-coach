@@ -62,6 +62,9 @@ A single integer linear program (PuLP + CBC) chooses squad, starting XI, captain
 XI points + captain bonus + 0.1 × bench points − 4 × hits, subject to budget, 2/5/5/3 composition, max 3 per club and a
 valid formation (limits read from FPL's own data). In transfer mode, owned players are valued at their selling price and
 the solver only takes a hit when it gains more than 4 points; transfers are capped at free transfers + 2 by default.
+Next week's free-transfer bank is part of the model: each free transfer rolled over (up to the cap of 5) is worth
+`--ft-value` points (default 1.5), so the optimiser won't spend a transfer on a tiny gain. This is the single-week case
+of the planned multi-week optimiser, where the same value prices free transfers left at the end of the horizon.
 
 Correctness is enforced three ways: an independent legality checker (`optimisation/validate.py`) re-checks every rule
 after each solve; hand-built cases with known answers (club cap, budget, formation, hits, selling prices); and 50

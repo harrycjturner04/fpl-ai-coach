@@ -33,7 +33,8 @@ def ensure_fresh_data(entry_id: int | None) -> str:
 
 
 def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float = 0.1,
-        max_transfers: int | None = None, budget: float | None = None) -> tuple[Solution, dict]:
+        max_transfers: int | None = None, budget: float | None = None,
+        ft_value: float = 1.5) -> tuple[Solution, dict]:
     players = storage.load_table("players")
     game_rules = storage.load_json("game_rules")
     rules = SquadRules.from_data(game_rules, storage.load_table("positions"))
@@ -49,6 +50,7 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
             bank=state["bank"],
             free_transfers=free if free is not None else rules.squad_size,
             max_transfers=max_transfers if max_transfers is not None else (None if free is None else free + 2),
+            ft_value=ft_value,
         )
         context.update(mode=f"transfers for {state['team_name']}", state=state,
                        free_transfers=free, max_transfers=kwargs["max_transfers"])
@@ -89,6 +91,7 @@ def format_solution(sol: Solution, context: dict) -> str:
             out.append(f"  OUT {p.at[o, 'web_name']} (sell £{owned[o]:.1f}m)  ->  "
                        f"IN {p.at[i, 'web_name']} (£{p.at[i, 'price']:.1f}m)")
         out.append(f"  Hits: {sol.hits} (-{context['rules'].hit_cost * sol.hits} pts)")
+        out.append(f"  Free transfers next gameweek: {sol.free_transfers_next}")
 
     out += ["", f"Squad cost: £{sol.cost:.1f}m   Money left: £{sol.money_left:.1f}m",
             f"Projected points (XI + captain - hits): {sol.projected_points:.2f}"]
@@ -102,9 +105,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--bench-weight", type=float, default=0.1, help="value of bench points (default 0.1)")
     parser.add_argument("--max-transfers", type=int, help="cap on transfers (default: free transfers + 2)")
     parser.add_argument("--budget", type=float, help="budget in £m for from-scratch mode (default 100)")
+    parser.add_argument("--ft-value", type=float, default=1.5,
+                        help="points each banked free transfer is worth (default 1.5; must be below 4)")
     args = parser.parse_args(argv)
     print(ensure_fresh_data(args.entry))
-    sol, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget)
+    sol, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget,
+                       args.ft_value)
     print(format_solution(sol, context))
 
 

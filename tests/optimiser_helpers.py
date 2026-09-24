@@ -15,6 +15,7 @@ FULL_RULES = SquadRules(
     starting_xi=11,
     max_per_club=3,
     hit_cost=4,
+    max_free_transfers=5,
 )
 
 MINI_RULES = SquadRules(
@@ -24,6 +25,7 @@ MINI_RULES = SquadRules(
     starting_xi=4,
     max_per_club=2,
     hit_cost=4,
+    max_free_transfers=2,  # small cap so random tests exercise it
 )
 
 
@@ -48,8 +50,14 @@ def full_pool(filler_price: float = 4.5, filler_score: float = 1.0, start_id: in
 
 
 def brute_force(players, scores, rules, budget, bench_weight=0.1,
-                current_squad=None, bank=0.0, free_transfers=1, max_transfers=None, hit_cost=4):
-    """Best objective by exhaustive enumeration (small pools only)."""
+                current_squad=None, bank=0.0, free_transfers=1, max_transfers=None, ft_value=0.0):
+    """Best objective by exhaustive enumeration (small pools only).
+
+    Free-transfer value uses FPL's rule directly: next week's bank is
+    min(max_ft, max(ft - transfers, 0) + 1), and each FT beyond the 1 you'd
+    get anyway is worth `ft_value`.
+    """
+    hit_cost = rules.hit_cost
     by_pos = {pos: players.loc[players["position"] == pos, "id"].tolist() for pos in rules.composition}
     price = players.set_index("id")["price"].to_dict()
     club = players.set_index("id")["team"].to_dict()
@@ -66,19 +74,20 @@ def brute_force(players, scores, rules, budget, bench_weight=0.1,
             continue
         if max(pd.Series([club[i] for i in squad]).value_counts()) > rules.max_per_club:
             continue
-        hits = 0
+        hits, banked = 0, 0
         if owned:
             transfers = sum(1 for i in squad if i not in owned)
             if max_transfers is not None and transfers > max_transfers:
                 continue
             hits = max(0, transfers - free_transfers)
+            banked = min(rules.max_free_transfers, max(free_transfers - transfers, 0) + 1) - 1
         for xi in itertools.combinations(squad, rules.starting_xi):
             counts = pd.Series([pos_of[i] for i in xi]).value_counts()
             if any(not (rules.xi_min[p] <= counts.get(p, 0) <= rules.xi_max[p]) for p in rules.composition):
                 continue
             starters = sum(scores.get(i, 0) for i in xi) + max(scores.get(i, 0) for i in xi)
             bench = sum(scores.get(i, 0) for i in squad if i not in xi)
-            value = starters + bench_weight * bench - hit_cost * hits
+            value = starters + bench_weight * bench - hit_cost * hits + ft_value * banked
             if best is None or value > best:
                 best = value
     return best

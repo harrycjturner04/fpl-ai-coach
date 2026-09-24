@@ -2,6 +2,7 @@
 
 Maximises   sum(score * starts) + sum(score * captain)
           + bench_weight * sum(score * bench) - hit_cost * hits
+          + ft_value * free transfers banked for next week
 subject to squad composition, budget, club cap, formation and captaincy.
 
 Two modes, one model:
@@ -37,6 +38,7 @@ class SquadRules:
     starting_xi: int
     max_per_club: int
     hit_cost: int
+    max_free_transfers: int
 
     @property
     def squad_size(self) -> int:
@@ -53,6 +55,7 @@ class SquadRules:
             starting_xi=int(game_rules["starting_xi"]),
             max_per_club=int(game_rules["max_per_club"]),
             hit_cost=int(game_rules["hit_cost"]),
+            max_free_transfers=int(game_rules["max_free_transfers"]),
         )
 
 
@@ -66,10 +69,11 @@ class Solution:
     transfers_in: list[int] = field(default_factory=list)
     transfers_out: list[int] = field(default_factory=list)
     hits: int = 0
+    free_transfers_next: int | None = None  # transfer mode only
     cost: float = 0.0           # squad value at buy/sell prices
     money_left: float = 0.0
     projected_points: float = 0.0  # XI + captain bonus - hit cost
-    objective: float = 0.0         # projected_points + weighted bench
+    objective: float = 0.0         # projected_points + weighted bench + value of banked FTs
 
 
 def _tenths(x: float) -> int:
@@ -87,8 +91,17 @@ def solve(
     bank: float = 0.0,
     free_transfers: int = 1,
     max_transfers: int | None = None,
+    ft_value: float = 0.0,
 ) -> Solution:
-    """Optimal squad/XI/captain (and transfers, if `current_squad` is given)."""
+    """Optimal squad/XI/captain (and transfers, if `current_squad` is given).
+
+    `ft_value` is the worth (in points) of each free transfer carried into next
+    week beyond the one you'd get anyway. It is the single-week case of a
+    multi-week plan, where it becomes the value of FTs left at the horizon end.
+    """
+    if ft_value >= rules.hit_cost:
+        # Otherwise the solver could take a hit just to "bank" a free transfer.
+        raise ValueError(f"ft_value ({ft_value}) must be below the hit cost ({rules.hit_cost})")
     owned = current_squad or {}
     if owned:
         budget = bank + sum(owned.values())
@@ -110,11 +123,18 @@ def solve(
     y = prob.add_variable_dicts("start", ids, cat="Binary")
     c = prob.add_variable_dicts("captain", ids, cat="Binary")
     hits = prob.add_variable("hits", lowBound=0, cat="Integer")
+    # FT bank for next week: `free_used` transfers are covered by free ones and
+    # `banked` = unused FTs carried over (capped). Because ft_value < hit_cost,
+    # the solver always uses FTs before taking hits, which reproduces FPL's rule
+    # next_ft = min(max_ft, max(ft - transfers, 0) + 1) = 1 + banked.
+    free_used = prob.add_variable("free_used", lowBound=0, upBound=free_transfers, cat="Integer")
+    banked = prob.add_variable("banked", lowBound=0, upBound=rules.max_free_transfers - 1, cat="Integer")
 
     new = [i for i in ids if i not in owned]
     prob += (
         pulp.lpSum(score[i] * (y[i] + c[i] + bench_weight * (x[i] - y[i])) for i in ids)
         - rules.hit_cost * hits
+        + ft_value * banked
         # Tie-break only: never make a transfer that gains nothing.
         - TRANSFER_TIEBREAK * pulp.lpSum(x[i] for i in new if owned)
     )
@@ -136,11 +156,15 @@ def solve(
 
     if owned:
         transfers = pulp.lpSum(x[i] for i in new)
-        prob += hits >= transfers - free_transfers
+        prob += free_used <= transfers
+        prob += hits == transfers - free_used
+        prob += banked <= free_transfers - free_used
         if max_transfers is not None:
             prob += transfers <= max_transfers
     else:
         prob += hits == 0
+        prob += free_used == 0
+        prob += banked == 0
 
     status = prob.solve(pulp.PULP_CBC_CMD(msg=False))
     if pulp.LpStatus[status] != "Optimal":
@@ -157,6 +181,9 @@ def solve(
     vice = next(i for i in starting if i != captain)
 
     n_hits = round(hits.value() or 0)
+    # From FPL's rule, not the `banked` variable: with ft_value = 0 nothing pushes it to its true value.
+    n_transfers = sum(1 for i in squad if i not in owned)
+    n_banked = min(rules.max_free_transfers - 1, max(free_transfers - n_transfers, 0)) if owned else 0
     cost = sum(price[i] for i in squad) / 10
     projected = sum(score[i] for i in starting) + score[captain] - rules.hit_cost * n_hits
     return Solution(
@@ -168,8 +195,9 @@ def solve(
         transfers_in=[i for i in squad if i not in owned] if owned else [],
         transfers_out=[i for i in owned if i not in squad],
         hits=n_hits,
+        free_transfers_next=1 + n_banked if owned else None,
         cost=cost,
         money_left=round(budget - cost, 1),
         projected_points=projected,
-        objective=projected + bench_weight * sum(score[i] for i in bench),
+        objective=projected + bench_weight * sum(score[i] for i in bench) + ft_value * n_banked,
     )

@@ -72,4 +72,7 @@ def check_squad(
             problems.append("transfers in/out don't match the squad change")
         if sol.hits != max(0, len(bought) - free_transfers):
             problems.append(f"hits {sol.hits} != max(0, {len(bought)} transfers - {free_transfers} free)")
+        expected_next = min(rules.max_free_transfers, max(free_transfers - len(bought), 0) + 1)
+        if sol.free_transfers_next != expected_next:
+            problems.append(f"free transfers next week {sol.free_transfers_next} != {expected_next}")
     return problems

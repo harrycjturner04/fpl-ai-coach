@@ -24,7 +24,8 @@ def test_rules_from_game_data():
         "position": ["GKP", "DEF", "MID", "FWD"], "squad_select": [2, 5, 5, 3],
         "squad_min_play": [1, 3, 2, 1], "squad_max_play": [1, 5, 5, 3],
     })
-    rules = SquadRules.from_data({"starting_xi": 11, "max_per_club": 3, "hit_cost": 4}, positions)
+    rules = SquadRules.from_data(
+        {"starting_xi": 11, "max_per_club": 3, "hit_cost": 4, "max_free_transfers": 5}, positions)
     assert rules == FULL_RULES
     assert rules.squad_size == 15
 
@@ -192,6 +193,52 @@ def test_no_improvement_no_transfers():
     assert sol.transfers_in == [] and sol.hits == 0
 
 
+# ---------- value of banking free transfers ----------
+
+def _upgrade_scenario(gain):
+    """Owned fillers plus one MID upgrade; the upgrade also becomes captain, so total gain = 2 x gain."""
+    rows, owned, _ = _owned_squad()
+    return pool(_upgrade_for(rows, owned, "MID", gain=gain)), owned
+
+
+def test_small_gain_not_worth_using_a_free_transfer():
+    (players, scores), owned = _upgrade_scenario(gain=0.5)  # +1.0 total < 1.5 value of banking
+    sol = _solve_checked(players, scores, FULL_RULES, budget=None, current_squad=owned,
+                         free_transfers=2, ft_value=1.5)
+    assert sol.transfers_in == [] and sol.free_transfers_next == 3
+
+
+def test_bigger_gain_uses_the_free_transfer():
+    (players, scores), owned = _upgrade_scenario(gain=1.0)  # +2.0 total > 1.5
+    sol = _solve_checked(players, scores, FULL_RULES, budget=None, current_squad=owned,
+                         free_transfers=2, ft_value=1.5)
+    assert sol.transfers_in == [1] and sol.free_transfers_next == 2
+
+
+def test_at_the_cap_a_free_transfer_costs_nothing_to_use():
+    # With 5 FTs banked, not transferring still leaves 5 next week (capped), so any gain is worth it.
+    (players, scores), owned = _upgrade_scenario(gain=0.1)
+    sol = _solve_checked(players, scores, FULL_RULES, budget=None, current_squad=owned,
+                         free_transfers=5, ft_value=1.5)
+    assert sol.transfers_in == [1] and sol.free_transfers_next == 5
+
+
+def test_hit_leaves_one_free_transfer_next_week():
+    rows, owned, _ = _owned_squad()
+    rows = _upgrade_for(rows, owned, "MID", gain=6.0, pid=1)
+    rows = _upgrade_for(rows, owned, "FWD", gain=6.0, pid=2)
+    players, scores = pool(rows)
+    sol = _solve_checked(players, scores, FULL_RULES, budget=None, current_squad=owned,
+                         free_transfers=1, ft_value=1.5)
+    assert sol.hits == 1 and sol.free_transfers_next == 1
+
+
+def test_ft_value_must_be_below_hit_cost():
+    (players, scores), owned = _upgrade_scenario(gain=1.0)
+    with pytest.raises(ValueError, match="below the hit cost"):
+        solve(players, scores, FULL_RULES, current_squad=owned, ft_value=4.0)
+
+
 # ---------- brute-force cross-check on a scaled-down game ----------
 
 def _random_mini_pool(rng):
@@ -225,7 +272,8 @@ def test_matches_brute_force_transfers(seed):
     squad = [i for p, n in MINI_RULES.composition.items() for i in rng.sample(by_pos[p], n)]
     price = players.set_index("id")["price"]
     owned = {i: round(float(price[i]) - rng.choice([0.0, 0.1, 0.2]), 1) for i in squad}
-    kw = dict(bank=round(rng.uniform(0, 2), 1), free_transfers=rng.randint(1, 2), max_transfers=rng.randint(1, 4))
+    kw = dict(bank=round(rng.uniform(0, 2), 1), free_transfers=rng.randint(1, 2), max_transfers=rng.randint(1, 4),
+              ft_value=round(rng.uniform(0, 3), 2))
     expected = brute_force(players, scores, MINI_RULES, None, current_squad=owned, **kw)
     if expected is None:  # starting squad itself breaks the club cap
         with pytest.raises(InfeasibleError):
