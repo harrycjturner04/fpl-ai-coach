@@ -34,15 +34,17 @@ def check(history: dict) -> tuple[int, int, int]:
     no_hits = gws.assign(event_transfers_cost=0)
     table, _ = manager_state.free_transfers(no_hits)
     checked = exact = violations = 0
-    for model, row in zip(table.itertuples(), gws.itertuples()):
-        if pd.isna(model.ft_available) or model.chip in manager_state.TRANSFER_CHIPS:
+    for model, row in zip(table.to_dict("records"), gws.to_dict("records")):
+        if pd.isna(model["ft_available"]) or model["chip"] in manager_state.TRANSFER_CHIPS:
             continue
         checked += 1
-        if row.event_transfers_cost > 0:
+        ft = int(model["ft_available"])
+        transfers, cost = int(row["event_transfers"]), int(row["event_transfers_cost"])
+        if cost > 0:
             exact += 1
-            violations += model.ft_available != row.event_transfers - row.event_transfers_cost // 4
+            violations += int(ft != transfers - cost // 4)
         else:
-            violations += model.ft_available < row.event_transfers
+            violations += int(ft < transfers)
     return checked, exact, violations
 
 

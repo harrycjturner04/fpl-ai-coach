@@ -2,7 +2,15 @@
 
 An AI-assisted Fantasy Premier League coach. It combines a statistical/ML prediction layer, an integer linear programming (ILP) squad optimiser, and an LLM reasoning layer to recommend transfers, starting XI and captaincy — with explanations.
 
-See [CLAUDE.md](CLAUDE.md) for the full architecture and roadmap.
+## Architecture
+
+Five layers, each with a single responsibility; only clean, structured output crosses a layer boundary.
+
+1. **Ingestion** — official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks), later squad-screenshot parsing and injury/news sources.
+2. **Feature engineering** — rolling form, per-90 rates, fixture difficulty, minutes reliability, set-piece duty, team strength.
+3. **Prediction** — expected points per player for the next 1–5 gameweeks: a form × fixture-difficulty baseline, then gradient-boosted trees validated walk-forward by gameweek. Minutes/start probability is modelled separately.
+4. **Optimisation** — a PuLP integer linear program: budget, 2/5/5/3 squad, max 3 per club, valid formation, captaincy, and the −4 transfer hit.
+5. **Reasoning** — an LLM that turns news into structured risk flags, reviews the optimiser's output, plans chip timing, and writes the recommendation, calling the optimiser as a tool to test scenarios.
 
 ## Status
 
