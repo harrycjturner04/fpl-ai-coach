@@ -35,7 +35,8 @@ python -m ingestion.cli --entry 1234567  # + your team: history, chips, transfer
 python -m optimisation.cli                   # best squad from scratch (£100m)
 python -m optimisation.cli --entry 1234567   # best transfers for your team (after ingesting it)
 
-pytest
+pytest                                      # offline tests
+pytest -m live                              # check the real FPL API still has every field we use
 python scripts/validate_free_transfers.py   # re-check the free-transfer model against real managers
 ```
 

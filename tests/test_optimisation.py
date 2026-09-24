@@ -239,6 +239,40 @@ def test_ft_value_must_be_below_hit_cost():
         solve(players, scores, FULL_RULES, current_squad=owned, ft_value=4.0)
 
 
+# ---------- full-size performance and determinism ----------
+
+def _full_size_pool(seed=0):
+    """~670 players across 20 clubs, like a real season."""
+    rng = random.Random(seed)
+    rows, pid = [], 1
+    for pos, n in {"GKP": 75, "DEF": 220, "MID": 290, "FWD": 85}.items():
+        for _ in range(n):
+            rows.append((pid, pos, rng.randint(1, 20), round(rng.uniform(4.0, 14.0), 1), round(rng.uniform(0, 10), 2)))
+            pid += 1
+    return pool(rows)
+
+
+def test_full_size_solve_is_fast_and_deterministic():
+    import time
+    players, scores = _full_size_pool()
+    start = time.perf_counter()
+    first = _solve_checked(players, scores, FULL_RULES, budget=100.0)
+    elapsed = time.perf_counter() - start
+    second = solve(players, scores, FULL_RULES, budget=100.0)
+    assert elapsed < 5.0, f"full-size solve took {elapsed:.1f}s"
+    assert (sorted(first.squad), first.captain, first.objective) == (sorted(second.squad), second.captain,
+                                                                     second.objective)
+
+
+def test_full_size_transfer_solve():
+    players, scores = _full_size_pool(seed=1)
+    base = solve(players, scores.mul(0).add(1), FULL_RULES, budget=100.0)  # an arbitrary legal squad
+    owned = {i: float(players.set_index("id").at[i, "price"]) for i in base.squad}
+    sol = _solve_checked(players, scores, FULL_RULES, budget=None, current_squad=owned,
+                         free_transfers=2, max_transfers=4, ft_value=1.5)
+    assert len(sol.transfers_in) <= 4
+
+
 # ---------- brute-force cross-check on a scaled-down game ----------
 
 def _random_mini_pool(rng):
