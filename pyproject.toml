@@ -7,6 +7,7 @@ dependencies = [
     "requests>=2.31",
     "pandas>=2.1",
     "pyarrow>=14",
+    "pulp>=3.3,<4",  # <4: 4.0 drops the bundled CBC solver
 ]
 
 [project.optional-dependencies]
@@ -15,3 +16,4 @@ dev = ["pytest>=8"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+filterwarnings = ["ignore:PULP_CBC_CMD is deprecated:DeprecationWarning"]

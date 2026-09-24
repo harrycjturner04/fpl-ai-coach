@@ -15,7 +15,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 ## Status
 
 - [x] Stage 1 — Ingestion skeleton (FPL API → raw JSON snapshots + Parquet tables)
-- [ ] Stage 2 — ILP optimiser on current stats
+- [x] Stage 2 — ILP optimiser on current stats (from-scratch squads and transfer plans)
 - [ ] Stage 3 — Baseline prediction
 - [ ] Stage 4 — Screenshot parsing
 - [ ] Stage 5 — ML prediction model
@@ -30,6 +30,9 @@ pip install -e ".[dev]"
 python -m ingestion.cli                  # players, teams, gameweeks, fixtures
 python -m ingestion.cli --history        # + per-player gameweek history (~670 requests, a few minutes)
 python -m ingestion.cli --entry 1234567  # + your team: history, chips, transfers, squad prices
+
+python -m optimisation.cli                   # best squad from scratch (£100m)
+python -m optimisation.cli --entry 1234567   # best transfers for your team (after ingesting it)
 
 pytest
 python scripts/validate_free_transfers.py   # re-check the free-transfer model against real managers
@@ -51,6 +54,24 @@ The public FPL API doesn't expose free transfers, remaining chips or selling pri
 Written to `data/processed/manager_state_<id>.json` (compact summary for later stages) plus `entry_*` Parquet tables: overview, leagues, per-GW history, chips, transfers, past seasons, picks, squad.
 
 Limitation: transfers already made for the upcoming GW aren't public until its deadline.
+
+## Optimiser
+
+A single integer linear program (PuLP + CBC) chooses squad, starting XI, captain and transfers together, maximising
+XI points + captain bonus + 0.1 × bench points − 4 × hits, subject to budget, 2/5/5/3 composition, max 3 per club and a
+valid formation (limits read from FPL's own data). In transfer mode, owned players are valued at their selling price and
+the solver only takes a hit when it gains more than 4 points; transfers are capped at free transfers + 2 by default.
+
+Correctness is enforced three ways: an independent legality checker (`optimisation/validate.py`) re-checks every rule
+after each solve; hand-built cases with known answers (club cap, budget, formation, hits, selling prices); and 50
+randomised cross-checks against brute-force enumeration on a scaled-down game, for both modes.
+
+Why an ILP: expected squad points are a sum of player expected points, so the problem is linear and the ILP returns the
+proven optimum in under a second. Greedy, knapsack DP, genetic algorithms and RL were considered and rejected (not
+exact, don't scale to these constraints, or need a season simulator).
+
+Stage 2 scores players with `0.7 × ep_next + 0.3 × form`, scaled by chance of playing (`prediction/current_stats.py`) —
+a placeholder until Stage 3's prediction model.
 
 ## Data layout
 

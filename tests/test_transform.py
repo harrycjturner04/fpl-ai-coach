@@ -10,6 +10,7 @@ def test_players_prices_positions_and_teams(bootstrap):
     assert saka["position"] == "MID"
     assert saka["team_short"] == "ARS"
     assert saka["form"] == 8.0  # string -> float
+    assert bool(saka["can_select"])
     assert df.set_index("id").loc[11, "position"] == "GKP"
 
 

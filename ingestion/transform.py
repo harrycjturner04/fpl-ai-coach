@@ -30,7 +30,7 @@ _NUMERIC_STRING_COLUMNS = [
 PLAYER_COLUMNS = [
     "id", "code", "web_name", "first_name", "second_name",
     "team", "team_name", "team_short", "element_type", "position",
-    "price", "status", "chance_of_playing_next_round", "news", "news_added",
+    "price", "status", "can_select", "chance_of_playing_next_round", "news", "news_added",
     "total_points", "event_points", "points_per_game", "form",
     "minutes", "starts", "goals_scored", "assists", "clean_sheets",
     "goals_conceded", "saves", "bonus", "bps", "yellow_cards", "red_cards",

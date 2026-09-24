@@ -48,7 +48,7 @@ def bootstrap():
         ],
         "elements": [
             {"id": 10, "code": 100, "web_name": "Saka", "first_name": "Bukayo", "second_name": "Saka",
-             "team": 1, "element_type": 3, "now_cost": 105, "cost_change_start": 5, "status": "a",
+             "team": 1, "element_type": 3, "now_cost": 105, "cost_change_start": 5, "status": "a", "can_select": True,
              "chance_of_playing_next_round": None, "news": "", "news_added": None,
              "total_points": 30, "event_points": 8, "points_per_game": "7.5", "form": "8.0",
              "minutes": 360, "selected_by_percent": "35.2", "expected_goals": "1.80"},
