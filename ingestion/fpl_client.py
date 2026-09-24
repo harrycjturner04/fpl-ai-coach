@@ -16,7 +16,7 @@ USER_AGENT = "fpl-ai-coach/0.1"
 class FPLClient:
     """Fetches raw JSON from the FPL API.
 
-    Returns parsed JSON exactly as served — no transformation happens here,
+    Returns parsed JSON exactly as served; no transformation happens here,
     so raw snapshots stay faithful to the source.
     """
 
@@ -47,7 +47,9 @@ class FPLClient:
         return session
 
     def url(self, path: str) -> str:
-        return f"{self.base_url}{path.strip('/')}/"
+        """FPL paths end in '/'; any query string goes after it."""
+        path, _, query = path.partition("?")
+        return f"{self.base_url}{path.strip('/')}/" + (f"?{query}" if query else "")
 
     def get(self, path: str) -> Any:
         # Polite rate limit: FPL has no published limit, but hammering it

@@ -9,16 +9,27 @@ Run `python -m ingestion.cli [--entry ID]` first to refresh the data.
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 
-import pandas as pd
-
-from ingestion import storage
+from ingestion import cli as ingestion_cli
+from ingestion import freshness, storage
 from prediction.current_stats import score_players
 
 from .model import Solution, SquadRules, solve
 from .validate import check_squad
 
 POSITION_ORDER = ["GKP", "DEF", "MID", "FWD"]
+
+
+def ensure_fresh_data(entry_id: int | None) -> str:
+    """Re-pull the data if it's too old to optimise on; returns a one-line status."""
+    reasons = freshness.stale_reasons(storage.load_json_or_none("metadata"), datetime.now(timezone.utc), entry_id)
+    if reasons:
+        print(f"Refreshing data ({'; '.join(reasons)})...")
+        ingestion_cli.run(entry_id=entry_id)
+    pulled_at = datetime.fromisoformat(storage.load_json("metadata")["pulled_at"])
+    minutes = (datetime.now(timezone.utc) - pulled_at).total_seconds() / 60
+    return f"Data pulled {minutes:.0f} min ago ({pulled_at:%a %d %b %H:%M} UTC)"
 
 
 def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float = 0.1,
@@ -29,7 +40,7 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
     scores = score_players(players, ep_weight)
 
     kwargs: dict = {"bench_weight": bench_weight}
-    context: dict = {"players": players, "scores": scores, "mode": "from scratch"}
+    context: dict = {"players": players, "scores": scores, "rules": rules, "mode": "from scratch"}
     if entry_id is not None:
         state = storage.load_json(f"manager_state_{entry_id}")
         free = state["free_transfers"]  # None = unlimited (first gameweek)
@@ -77,7 +88,7 @@ def format_solution(sol: Solution, context: dict) -> str:
         for o, i in zip(outs, ins):
             out.append(f"  OUT {p.at[o, 'web_name']} (sell £{owned[o]:.1f}m)  ->  "
                        f"IN {p.at[i, 'web_name']} (£{p.at[i, 'price']:.1f}m)")
-        out.append(f"  Hits: {sol.hits} (-{4 * sol.hits} pts)")
+        out.append(f"  Hits: {sol.hits} (-{context['rules'].hit_cost * sol.hits} pts)")
 
     out += ["", f"Squad cost: £{sol.cost:.1f}m   Money left: £{sol.money_left:.1f}m",
             f"Projected points (XI + captain - hits): {sol.projected_points:.2f}"]
@@ -92,6 +103,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--max-transfers", type=int, help="cap on transfers (default: free transfers + 2)")
     parser.add_argument("--budget", type=float, help="budget in £m for from-scratch mode (default 100)")
     args = parser.parse_args(argv)
+    print(ensure_fresh_data(args.entry))
     sol, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget)
     print(format_solution(sol, context))
 

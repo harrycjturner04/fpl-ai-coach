@@ -1,8 +1,12 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "fpl-ai-coach"
 version = "0.1.0"
 description = "AI-assisted Fantasy Premier League coach: prediction + ILP optimisation + LLM reasoning."
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "requests>=2.31",
     "pandas>=2.1",
@@ -12,6 +16,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+
+[tool.setuptools]
+packages = ["ingestion", "prediction", "optimisation"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

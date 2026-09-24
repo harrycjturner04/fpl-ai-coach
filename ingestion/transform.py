@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import pandas as pd
 
+HIT_COST = 4  # points per extra transfer; not exposed by the API, so defined once here
+
 # FPL serves these stats as strings ("4.5"); make them numeric.
 _NUMERIC_STRING_COLUMNS = [
     "form",
@@ -155,7 +157,7 @@ def game_rules(bootstrap: dict) -> dict:
         "total_budget": rules["squad_total_spend"] / 10,
         "sell_on_fee": rules["transfers_sell_on_fee"],
         "max_free_transfers": 1 + rules["max_extra_free_transfers"],
-        "hit_cost": 4,
+        "hit_cost": HIT_COST,
         "squad_composition": {
             p["singular_name_short"]: p["squad_select"] for p in bootstrap["element_types"]
         },

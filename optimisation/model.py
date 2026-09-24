@@ -36,7 +36,7 @@ class SquadRules:
     xi_max: dict[str, int]
     starting_xi: int
     max_per_club: int
-    hit_cost: int = 4
+    hit_cost: int
 
     @property
     def squad_size(self) -> int:
@@ -52,7 +52,7 @@ class SquadRules:
             xi_max=pos["squad_max_play"].astype(int).to_dict(),
             starting_xi=int(game_rules["starting_xi"]),
             max_per_club=int(game_rules["max_per_club"]),
-            hit_cost=int(game_rules.get("hit_cost", 4)),
+            hit_cost=int(game_rules["hit_cost"]),
         )
 
 
@@ -94,6 +94,10 @@ def solve(
         budget = bank + sum(owned.values())
     if budget is None:
         raise ValueError("budget is required when no current squad is given")
+    unknown = sorted(set(owned) - set(players["id"]))
+    if unknown:
+        raise ValueError(f"Owned players {unknown} are missing from the player table; "
+                         "the team and player data are probably from different pulls.")
 
     # Pool: scored players plus anything already owned (it may be kept or sold).
     pool = players[players["id"].isin(set(scores.index) | set(owned))].set_index("id")

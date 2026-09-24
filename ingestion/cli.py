@@ -13,13 +13,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pandas as pd
+import requests
 
-from . import manager_state, storage, transform
+from . import freshness, manager_state, storage, transform
 from .fpl_client import FPLClient
 
 
 def run(history: bool = False, entry_id: int | None = None, data_dir: Path = storage.DATA_DIR,
-        client: FPLClient | None = None) -> dict:
+        client: FPLClient | None = None, keep_raw: int = 1) -> dict:
     client = client or FPLClient()
     snapshot = storage.new_snapshot_dir(data_dir)
 
@@ -50,21 +51,38 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     tables["chips"] = transform.chips(bootstrap)
     rules = transform.game_rules(bootstrap)
     storage.save_json(rules, "game_rules", data_dir)
+    # Save the general tables first, so a failed team pull doesn't lose them.
+    for name, df in tables.items():
+        storage.save_table(df, name, data_dir)
+    metadata = freshness.pull_metadata(
+        storage.load_json_or_none("metadata", data_dir), pulled_at=datetime.now(timezone.utc),
+        gameweeks=tables["gameweeks"],
+    )
+    storage.save_json(metadata, "metadata", data_dir)
 
     state = None
     if entry_id is not None:
-        state = _pull_entry(client, snapshot, tables, rules, entry_id, current_gw)
+        try:
+            entry_tables, state = _pull_entry(client, snapshot, tables, rules, entry_id, current_gw)
+        except requests.HTTPError as err:
+            if err.response is not None and err.response.status_code == 404:
+                raise SystemExit(f"FPL team ID {entry_id} not found. Check the number in your "
+                                 "team's Points page URL.") from err
+            raise
+        for name, df in entry_tables.items():
+            storage.save_table(df, name, data_dir)
         storage.save_json(state, f"manager_state_{entry_id}", data_dir)
+        tables.update(entry_tables)
+        metadata["entries"][str(entry_id)] = metadata["pulled_at"]
+        storage.save_json(metadata, "metadata", data_dir)
 
-    for name, df in tables.items():
-        storage.save_table(df, name, data_dir)
-
+    storage.prune_snapshots(keep_raw, data_dir)
     return {"snapshot": snapshot, "tables": tables, "current_gw": current_gw, "manager_state": state}
 
 
 def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,
-                entry_id: int, current_gw: int | None) -> dict:
-    """Pull everything public about one manager and derive their current state."""
+                entry_id: int, current_gw: int | None) -> tuple[dict, dict]:
+    """Pull everything public about one manager; returns (entry tables, derived state)."""
     entry = client.entry(entry_id)
     history = client.entry_history(entry_id)
     raw_transfers = client.entry_transfers(entry_id)
@@ -77,7 +95,7 @@ def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,
     chips_used = transform.entry_chips_used(history)
     transfers = transform.entry_transfers(raw_transfers)
     if gameweeks.empty or current_gw is None:
-        raise SystemExit(f"Entry {entry_id} has no gameweeks played yet — nothing to derive.")
+        raise SystemExit(f"Entry {entry_id} has no gameweeks played yet; nothing to derive.")
 
     ft_table, ft_next = manager_state.free_transfers(gameweeks, rules["max_free_transfers"], rules["hit_cost"])
     gameweeks = gameweeks.merge(ft_table[["gameweek", "ft_available", "ft_observed"]], on="gameweek")
@@ -96,7 +114,7 @@ def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,
     )
     bank = float(gameweeks.loc[gameweeks["gameweek"] == squad_gw, "bank"].iloc[0])
 
-    tables.update({
+    entry_tables = {
         "entry_overview": overview,
         "entry_leagues": transform.entry_leagues(entry),
         "entry_gameweeks": gameweeks,
@@ -105,9 +123,10 @@ def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,
         "entry_past_seasons": transform.entry_past_seasons(history),
         "entry_picks": pd.concat(picks_by_gw.values(), ignore_index=True),
         "entry_squad": squad,
-    })
-    return manager_state.summary(overview, gameweeks, ft_next, chip_table, squad, bank,
-                                 transform.next_gameweek(tables["gameweeks"]), squad_gw, transfers)
+    }
+    state = manager_state.summary(overview, gameweeks, ft_next, chip_table, squad, bank,
+                                  transform.next_gameweek(tables["gameweeks"]), squad_gw, transfers)
+    return entry_tables, state
 
 
 def summarise(result: dict) -> str:
@@ -149,8 +168,9 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Pull FPL data into data/raw and data/processed.")
     parser.add_argument("--history", action="store_true", help="also pull per-player gameweek history (~670 requests)")
     parser.add_argument("--entry", type=int, help="FPL team (entry) ID to pull current picks for")
+    parser.add_argument("--keep-raw", type=int, default=1, help="raw snapshots to keep (default 1: latest only)")
     args = parser.parse_args(argv)
-    print(summarise(run(history=args.history, entry_id=args.entry)))
+    print(summarise(run(history=args.history, entry_id=args.entry, keep_raw=args.keep_raw)))
 
 
 if __name__ == "__main__":

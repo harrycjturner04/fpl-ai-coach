@@ -68,6 +68,19 @@ def test_validator_catches_formation():
     assert any("GKP" in m for m in check_squad(sol, players, FULL_RULES, budget=100.0))
 
 
+def test_validator_reports_unknown_player_instead_of_crashing():
+    players, _, sol = _legal_solution()
+    sol.squad[0] = 999999
+    assert check_squad(sol, players, FULL_RULES, budget=100.0) == [
+        "unknown player ids (not in player table): [999999]"]
+
+
+def test_owned_player_missing_from_player_table_raises():
+    players, scores = pool(full_pool())
+    with pytest.raises(ValueError, match="missing from the player table"):
+        solve(players, scores, FULL_RULES, current_squad={999999: 5.0})
+
+
 # ---------- known-answer cases ----------
 
 def test_club_cap_binds():

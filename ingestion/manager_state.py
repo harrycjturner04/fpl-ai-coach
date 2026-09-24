@@ -10,7 +10,7 @@ managers, zero mismatches with observed hit costs):
     - Normal GW:  next = min(max_ft, max(ft - transfers, 0) + 1)
     - Wildcard / Free Hit GW: banked FTs are kept but no FT is added.
 Whenever a hit was taken, the exact FT count is observable
-(transfers - cost / 4), so the series re-anchors on it — this absorbs
+(transfers - cost / hit cost), so the series re-anchors on it, which absorbs
 one-off rule events such as league-wide FT top-ups.
 """
 
@@ -20,10 +20,13 @@ import math
 
 import pandas as pd
 
+from .transform import HIT_COST
+
 TRANSFER_CHIPS = ("wildcard", "freehit")
 
 
-def free_transfers(gameweeks: pd.DataFrame, max_ft: int = 5, hit_cost: int = 4) -> tuple[pd.DataFrame, int | None]:
+def free_transfers(gameweeks: pd.DataFrame, max_ft: int = 5,
+                   hit_cost: int = HIT_COST) -> tuple[pd.DataFrame, int | None]:
     """Per-GW free transfers available, plus the count for the next GW.
 
     `gameweeks` is `transform.entry_gameweeks` output. Returns (per-GW frame,
@@ -190,7 +193,8 @@ def summary(
         "team_name": o["name"],
         "manager": f"{o['player_first_name']} {o['player_last_name']}",
         "next_gameweek": next_gw,
-        "overall_points": int(o["summary_overall_points"] or 0),
+        # A brand-new team has no points or rank yet (NaN, which `x or 0` would not catch).
+        "overall_points": 0 if pd.isna(o["summary_overall_points"]) else int(o["summary_overall_points"]),
         "overall_rank": None if pd.isna(o["summary_overall_rank"]) else int(o["summary_overall_rank"]),
         "bank": bank,
         "free_transfers": ft_next,

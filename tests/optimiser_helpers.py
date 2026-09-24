@@ -14,6 +14,7 @@ FULL_RULES = SquadRules(
     xi_max={"GKP": 1, "DEF": 5, "MID": 5, "FWD": 3},
     starting_xi=11,
     max_per_club=3,
+    hit_cost=4,
 )
 
 MINI_RULES = SquadRules(
@@ -22,6 +23,7 @@ MINI_RULES = SquadRules(
     xi_max={"GKP": 1, "DEF": 2, "MID": 2, "FWD": 1},
     starting_xi=4,
     max_per_club=2,
+    hit_cost=4,
 )
 
 

@@ -30,6 +30,10 @@ def check_squad(
     p = players.set_index("id")
     problems = []
 
+    unknown = sorted(i for i in {*sol.squad, *sol.starting, sol.captain} if i not in p.index)
+    if unknown:
+        return [f"unknown player ids (not in player table): {unknown}"]
+
     squad, starting = list(sol.squad), list(sol.starting)
     if len(squad) != rules.squad_size or len(set(squad)) != len(squad):
         problems.append(f"squad size: {len(squad)} (unique {len(set(squad))}), expected {rules.squad_size}")
