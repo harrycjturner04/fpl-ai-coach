@@ -60,6 +60,16 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     )
     storage.save_json(metadata, "metadata", data_dir)
 
+    current_rows = _update_current_season(client, tables, data_dir)
+    storage.save_table(current_rows, "current_season_rows", data_dir)
+    archive = storage.load_table_or_none("archive_match_log", data_dir)
+    if archive is None:
+        print("  no archive yet: run `python -m ingestion.archive` for past seasons")
+    parts = [x for x in (archive, current_rows) if x is not None and not x.empty]
+    if parts:
+        match_log = pd.concat(parts, ignore_index=True).sort_values(["kickoff", "fixture_id", "player_code"])
+        storage.save_table(match_log, "match_log", data_dir)
+
     state = None
     if entry_id is not None:
         try:
@@ -78,6 +88,24 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
 
     storage.prune_snapshots(keep_raw, data_dir)
     return {"snapshot": snapshot, "tables": tables, "current_gw": current_gw, "manager_state": state}
+
+
+def _update_current_season(client: FPLClient, tables: dict, data_dir: Path) -> pd.DataFrame:
+    """This season's match-log rows. Finished, confirmed gameweeks are fetched once and
+    cached; unconfirmed and in-progress gameweeks are re-fetched every run."""
+    gws = tables["gameweeks"]
+    season = transform.season_label(gws)
+    cached = storage.load_table_or_none("current_season_rows", data_dir)
+    if cached is not None:
+        cached = cached[cached["season"] == season]
+    have = set() if cached is None else set(cached["gameweek"])
+    todo = [int(g.id) for g in gws[gws["finished"] | gws["is_current"]].itertuples()
+            if g.id not in have or not g.data_checked or g.is_current]
+    fresh = [transform.live_match_rows(client.event_live(g), g, tables["fixtures"], tables["players"],
+                                       tables["teams"], season) for g in todo]
+    keep = None if cached is None else cached[~cached["gameweek"].isin(todo)]
+    parts = [x for x in (keep, *fresh) if x is not None and not x.empty]
+    return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=transform.MATCH_COLUMNS)
 
 
 def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,

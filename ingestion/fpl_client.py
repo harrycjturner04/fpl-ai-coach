@@ -89,3 +89,7 @@ class FPLClient:
     def entry_transfers(self, entry_id: int) -> list[dict]:
         """Every transfer this season, with purchase (`element_in_cost`) prices."""
         return self.get(f"entry/{entry_id}/transfers")
+
+    def event_live(self, gameweek: int) -> dict:
+        """Every player's stats for one gameweek, with per-fixture points in `explain`."""
+        return self.get(f"event/{gameweek}/live")

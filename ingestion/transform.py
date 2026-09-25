@@ -229,6 +229,64 @@ def entry_transfers(raw_transfers: list[dict]) -> pd.DataFrame:
     return df.sort_values("time").reset_index(drop=True)
 
 
+_LIVE_STATS = {
+    "starts": "starts", "goals": "goals_scored", "assists": "assists", "xg": "expected_goals",
+    "xa": "expected_assists", "xgc": "expected_goals_conceded", "clean_sheets": "clean_sheets",
+    "goals_conceded": "goals_conceded", "own_goals": "own_goals", "penalties_saved": "penalties_saved",
+    "penalties_missed": "penalties_missed", "saves": "saves", "bonus": "bonus",
+    "defensive_contribution": "defensive_contribution", "yellow_cards": "yellow_cards",
+    "red_cards": "red_cards",
+}
+
+
+def season_label(gameweeks: pd.DataFrame) -> str:
+    """'2026-27' style label from the first gameweek's deadline."""
+    year = int(gameweeks.sort_values("id")["deadline_time"].iloc[0].year)
+    return f"{year}-{str(year + 1)[-2:]}"
+
+
+def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: pd.DataFrame,
+                    teams: pd.DataFrame, season: str) -> pd.DataFrame:
+    """Match-log rows for one gameweek from `event/{gw}/live`.
+
+    Only finished fixtures are included. In a double gameweek FPL reports one
+    combined stat line, so stats are split by the minutes played in each
+    fixture (from `explain`), and points come from `explain` per fixture.
+    Players with no live entry get zero-minute rows (they didn't play).
+    """
+    code_of = teams.set_index("id")["code"]
+    done = fixtures[(fixtures["event"] == gameweek) & fixtures["finished_provisional"].astype(bool)]
+    by_id = {e["id"]: e for e in live.get("elements", [])}
+    rows = []
+    for p in players.itertuples():
+        team_fx = done[(done["team_h"] == p.team) | (done["team_a"] == p.team)]
+        if team_fx.empty:
+            continue
+        entry = by_id.get(p.id, {"stats": {}, "explain": []})
+        stats = entry.get("stats", {})
+        explain = {x["fixture"]: {s["identifier"]: s for s in x["stats"]} for x in entry.get("explain", [])}
+        mins = {f: explain.get(f, {}).get("minutes", {}).get("value", 0) for f in team_fx["id"]}
+        total = sum(mins.values())
+        single = len(team_fx) == 1
+        for fx in team_fx.itertuples():
+            share = 1.0 if single else (mins[fx.id] / total if total else 0.0)
+            home = fx.team_h == p.team
+            row = {
+                "season": season, "gameweek": gameweek, "fixture_id": int(fx.id),
+                "kickoff": fx.kickoff_time, "player_code": int(p.code),
+                "team_code": int(code_of[p.team]),
+                "opponent_code": int(code_of[fx.team_a if home else fx.team_h]),
+                "was_home": bool(home), "position": p.position, "price": float(p.price), "xp": float("nan"),
+                "minutes": float(stats.get("minutes", 0)) if single else float(mins[fx.id]),
+                "points": float(stats.get("total_points", 0)) if single
+                else float(sum(s["points"] for s in explain.get(fx.id, {}).values())),
+            }
+            for col, key in _LIVE_STATS.items():
+                row[col] = float(stats.get(key, 0) or 0) * share
+            rows.append(row)
+    return pd.DataFrame(rows, columns=MATCH_COLUMNS)
+
+
 def current_gameweek(gw: pd.DataFrame) -> int | None:
     current = gw.loc[gw["is_current"], "id"]
     return int(current.iloc[0]) if not current.empty else None

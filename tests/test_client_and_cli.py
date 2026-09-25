@@ -46,7 +46,8 @@ def test_client_url_keeps_query_after_trailing_slash():
 
 
 def test_unknown_entry_gives_clear_message_and_keeps_general_tables(tmp_path, bootstrap, raw_fixtures):
-    client = FPLClient(session=FakeSession({"bootstrap-static/": bootstrap, "fixtures/": raw_fixtures}),
+    client = FPLClient(session=FakeSession({"bootstrap-static/": bootstrap, "fixtures/": raw_fixtures,
+                                            "event/1/live/": {"elements": []}, "event/2/live/": {"elements": []}}),
                        min_interval=0)
     with pytest.raises(SystemExit, match="FPL team ID 7 not found"):
         cli.run(entry_id=7, data_dir=tmp_path, client=client)
@@ -54,7 +55,8 @@ def test_unknown_entry_gives_clear_message_and_keeps_general_tables(tmp_path, bo
 
 
 def test_only_latest_raw_snapshot_is_kept(tmp_path, bootstrap, raw_fixtures):
-    routes = {"bootstrap-static/": bootstrap, "fixtures/": raw_fixtures}
+    routes = {"bootstrap-static/": bootstrap, "fixtures/": raw_fixtures,
+              "event/1/live/": {"elements": []}, "event/2/live/": {"elements": []}}
     for stamp in ("2026-01-01_000000", "2026-01-02_000000"):
         (tmp_path / "raw" / stamp).mkdir(parents=True)
     result = cli.run(data_dir=tmp_path, client=FPLClient(session=FakeSession(routes), min_interval=0))
@@ -65,6 +67,8 @@ def test_cli_run_end_to_end_offline(tmp_path, bootstrap, raw_fixtures, element_s
     routes = {
         "bootstrap-static/": bootstrap,
         "fixtures/": raw_fixtures,
+        "event/1/live/": {"elements": []},
+        "event/2/live/": {"elements": []},
         "element-summary/10/": element_summary,
         "element-summary/11/": {"history": []},
         "entry/42/": {
