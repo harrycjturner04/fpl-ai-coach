@@ -10,6 +10,14 @@ import pandas as pd
 
 HIT_COST = 4  # points per extra transfer; not exposed by the API, so defined once here
 
+# One row per player per fixture, for past seasons (archive) and this season (event/live).
+MATCH_COLUMNS = [
+    "season", "gameweek", "fixture_id", "kickoff", "player_code", "team_code", "opponent_code",
+    "was_home", "position", "minutes", "starts", "goals", "assists", "xg", "xa", "xgc",
+    "clean_sheets", "goals_conceded", "own_goals", "penalties_saved", "penalties_missed", "saves",
+    "bonus", "defensive_contribution", "yellow_cards", "red_cards", "points", "price", "xp",
+]
+
 # FPL serves these stats as strings ("4.5"); make them numeric.
 _NUMERIC_STRING_COLUMNS = [
     "form",

@@ -71,3 +71,14 @@ def test_entry_endpoints(client):
     picks = client.entry_picks(PUBLIC_ENTRY, history["current"][-1]["event"])
     assert _missing(picks, {"picks", "entry_history", "active_chip"}) == set()
     assert _missing(picks["picks"][0], {"element", "position", "multiplier", "is_captain"}) == set()
+
+
+def test_archive_schema_and_scoring_reconstruction():
+    """Every archive row's points must be rebuildable from its stats with our scoring rules."""
+    from ingestion.archive import ARCHIVE_SEASONS, load_archive
+    from prediction.scoring import points_from_stats, rules_for_season
+
+    log = load_archive(ARCHIVE_SEASONS)
+    for season, rows in log.groupby("season"):
+        exact = (points_from_stats(rows, rules_for_season(season)) == rows["points"]).mean()
+        assert exact == 1.0, f"{season}: only {exact:.2%} of rows reconstruct exactly"
