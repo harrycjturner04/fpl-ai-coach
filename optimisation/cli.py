@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from pathlib import Path
 
 from ingestion import cli as ingestion_cli
 from ingestion import freshness, storage
@@ -21,29 +22,31 @@ from .validate import check_squad
 POSITION_ORDER = ["GKP", "DEF", "MID", "FWD"]
 
 
-def ensure_fresh_data(entry_id: int | None) -> str:
+def ensure_fresh_data(entry_id: int | None, data_dir: Path = storage.DATA_DIR,
+                      refresh=None, now: datetime | None = None) -> str:
     """Re-pull the data if it's too old to optimise on; returns a one-line status."""
-    reasons = freshness.stale_reasons(storage.load_json_or_none("metadata"), datetime.now(timezone.utc), entry_id)
+    now = now or datetime.now(timezone.utc)
+    reasons = freshness.stale_reasons(storage.load_json_or_none("metadata", data_dir), now, entry_id)
     if reasons:
         print(f"Refreshing data ({'; '.join(reasons)})...")
-        ingestion_cli.run(entry_id=entry_id)
-    pulled_at = datetime.fromisoformat(storage.load_json("metadata")["pulled_at"])
-    minutes = (datetime.now(timezone.utc) - pulled_at).total_seconds() / 60
+        (refresh or (lambda: ingestion_cli.run(entry_id=entry_id, data_dir=data_dir)))()
+    pulled_at = datetime.fromisoformat(storage.load_json("metadata", data_dir)["pulled_at"])
+    minutes = (now - pulled_at).total_seconds() / 60
     return f"Data pulled {minutes:.0f} min ago ({pulled_at:%a %d %b %H:%M} UTC)"
 
 
 def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float = 0.1,
         max_transfers: int | None = None, budget: float | None = None,
-        ft_value: float = 1.5) -> tuple[Solution, dict]:
-    players = storage.load_table("players")
-    game_rules = storage.load_json("game_rules")
-    rules = SquadRules.from_data(game_rules, storage.load_table("positions"))
+        ft_value: float = 1.5, data_dir: Path = storage.DATA_DIR) -> tuple[Solution, dict]:
+    players = storage.load_table("players", data_dir)
+    game_rules = storage.load_json("game_rules", data_dir)
+    rules = SquadRules.from_data(game_rules, storage.load_table("positions", data_dir))
     scores = score_players(players, ep_weight)
 
     kwargs: dict = {"bench_weight": bench_weight}
     context: dict = {"players": players, "scores": scores, "rules": rules, "mode": "from scratch"}
     if entry_id is not None:
-        state = storage.load_json(f"manager_state_{entry_id}")
+        state = storage.load_json(f"manager_state_{entry_id}", data_dir)
         free = state["free_transfers"]  # None = unlimited (first gameweek)
         kwargs.update(
             current_squad={p["player_id"]: p["selling_price"] for p in state["squad"]},
