@@ -44,9 +44,23 @@ def test_double_gameweek_splits_stats_by_minutes_and_skips_unfinished():
     assert mid.loc[1, "points"] == 7 and mid.loc[2, "points"] == 2   # from explain per fixture
     assert abs(mid.loc[1, "xg"] - 0.54) < 1e-9                  # 0.90 x 90/150
     assert mid.loc[1, "opponent_code"] == 7 and bool(mid.loc[1, "was_home"])
+    assert mid.loc[1, "goals"] == 1 and mid.loc[2, "goals"] == 0   # exact from explain, not minutes-split
 
 
 def test_player_without_live_entry_gets_zero_minute_rows():
     rows = live_match_rows(LIVE, 6, FIXTURES, PLAYERS, TEAMS, "2026-27")
     defender = rows[rows.player_code == 200]
     assert len(defender) == 2 and defender.minutes.eq(0).all() and defender.xp.isna().all()
+
+
+def test_stat_not_fully_covered_by_explain_falls_back_to_minutes_split():
+    live = {"elements": [
+        {"id": 10, "stats": _stat(minutes=150, saves=4, total_points=9),
+         "explain": [{"fixture": 1, "stats": [{"identifier": "minutes", "value": 90, "points": 2},
+                                               {"identifier": "saves", "value": 3, "points": 1}]},
+                     {"fixture": 2, "stats": [{"identifier": "minutes", "value": 60, "points": 2}]}]},
+    ]}
+    rows = live_match_rows(live, 6, FIXTURES, PLAYERS, TEAMS, "2026-27")
+    mid = rows[rows.player_code == 100].set_index("fixture_id")
+    assert abs(mid.loc[1, "saves"] - 2.4) < 1e-9   # 4 x 90/150: explain's 3 doesn't cover the total of 4
+    assert abs(mid.loc[2, "saves"] - 1.6) < 1e-9   # 4 x 60/150
