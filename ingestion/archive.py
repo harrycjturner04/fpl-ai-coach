@@ -36,16 +36,22 @@ def fetch_season(season: str, session: requests.Session | None = None) -> dict[s
     return frames
 
 
+def _check_mapped(df: pd.DataFrame, mapped_col: str, source_col: str, season: str, what: str) -> None:
+    unmapped = sorted(df.loc[df[mapped_col].isna(), source_col].unique())
+    if unmapped:
+        raise ValueError(f"{season}: {what}: {unmapped}")
+
+
 def season_match_rows(merged: pd.DataFrame, players_raw: pd.DataFrame, teams: pd.DataFrame,
                       season: str) -> pd.DataFrame:
     df = merged[merged["position"] != "AM"].copy()  # 2024/25 Assistant Manager chip rows
     df["position"] = df["position"].replace({"GK": "GKP"})
     df["player_code"] = df["element"].map(players_raw.set_index("id")["code"])
+    _check_mapped(df, "player_code", "element", season, "element ids not in players_raw.csv")
     df["team_code"] = df["team"].map(teams.set_index("name")["code"])
-    unmapped = sorted(df.loc[df["team_code"].isna(), "team"].unique())
-    if unmapped:
-        raise ValueError(f"{season}: team names not in teams.csv: {unmapped}")
+    _check_mapped(df, "team_code", "team", season, "team names not in teams.csv")
     df["opponent_code"] = df["opponent_team"].map(teams.set_index("id")["code"])
+    _check_mapped(df, "opponent_code", "opponent_team", season, "opponent_team ids not in teams.csv")
     df = df.rename(columns=_RENAME)
     df["season"] = season
     df["price"] = df["value"] / 10

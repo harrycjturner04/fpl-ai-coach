@@ -39,6 +39,20 @@ def test_unmapped_team_name_raises():
         season_match_rows(merged, players_raw, teams, "2023-24")
 
 
+def test_unmapped_element_id_raises():
+    merged, players_raw, teams = _season_frames()
+    merged.loc[0, "element"] = 999
+    with pytest.raises(ValueError, match="999"):
+        season_match_rows(merged, players_raw, teams, "2023-24")
+
+
+def test_unmapped_opponent_team_id_raises():
+    merged, players_raw, teams = _season_frames()
+    merged.loc[0, "opponent_team"] = 999
+    with pytest.raises(ValueError, match="999"):
+        season_match_rows(merged, players_raw, teams, "2023-24")
+
+
 def test_load_archive_concatenates_seasons():
     frames = dict(zip(["merged", "players_raw", "teams"], _season_frames()))
     log = load_archive(["2022-23", "2023-24"], fetch=lambda s: frames)
