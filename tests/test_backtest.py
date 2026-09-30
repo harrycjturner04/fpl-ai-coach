@@ -89,3 +89,11 @@ def test_run_backtest_and_calibration():
     assert set(per_gw.loc[per_gw.model == "xp", "horizon"]) == {0}
     table = calibration(per_player, "naive")
     assert list(table.columns) == ["mean_predicted", "mean_actual", "players"]
+
+
+def test_component_predictor_runs_in_backtest():
+    from prediction.backtest import make_component_predictor
+    from prediction.component_model import ModelParams
+    per_gw, _ = run_backtest(synthetic_log(), ["2023-24"], {"component": make_component_predictor(ModelParams())},
+                             horizons=2, decision=False)
+    assert set(per_gw.horizon) == {0, 1} and per_gw.mae.notna().all()

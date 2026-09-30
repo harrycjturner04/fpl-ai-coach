@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from dataclasses import dataclass
 from typing import Callable
 
@@ -15,6 +16,8 @@ from scipy.stats import spearmanr
 
 from ingestion import storage
 from optimisation.model import SquadRules, solve
+
+from .component_model import COMPONENTS, ModelParams, per_gameweek, predict
 
 STANDARD_RULES = SquadRules(
     composition={"GKP": 2, "DEF": 5, "MID": 5, "FWD": 3},
@@ -161,9 +164,32 @@ def calibration(per_player: pd.DataFrame, model: str, horizon: int = 0) -> pd.Da
                                     players=("actual", "size")).round(2)
 
 
-def build_predictors(names: list[str], params_path: str | None = None) -> dict[str, Predictor]:
-    predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor}
-    return {n: predictors[n] for n in names}
+def make_component_predictor(params: ModelParams, components=COMPONENTS) -> Predictor:
+    def predictor(snap: Snapshot) -> pd.DataFrame:
+        pred = predict(snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, snap.season,
+                       snap.teams_in_season, params, components)
+        return per_gameweek(pred)
+    return predictor
+
+
+def load_params(path: str | None) -> ModelParams:
+    if path is None:
+        return ModelParams()
+    with open(path, encoding="utf-8") as f:
+        return ModelParams.from_dict(json.load(f))
+
+
+def build_predictors(names: list[str], params_path: str | None = None,
+                     ablation: bool = False) -> dict[str, Predictor]:
+    params = load_params(params_path)
+    predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor,
+                                        "component": make_component_predictor(params)}
+    chosen = {n: predictors[n] for n in names}
+    if ablation:  # the component model with one component switched off at a time
+        for name in COMPONENTS:
+            chosen[f"without_{name}"] = make_component_predictor(
+                params, tuple(c for c in COMPONENTS if c != name))
+    return chosen
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -173,10 +199,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--params", help="model_params.json for the component model")
     parser.add_argument("--every", type=int, default=1, help="use every Nth gameweek (faster)")
     parser.add_argument("--no-decision", action="store_true")
+    parser.add_argument("--ablation", action="store_true")
     args = parser.parse_args(argv)
     log = storage.load_table("archive_match_log")
     per_gw, per_player = run_backtest(log, args.seasons.split(","),
-                                      build_predictors(args.models.split(","), args.params),
+                                      build_predictors(args.models.split(","), args.params, ablation=args.ablation),
                                       decision=not args.no_decision, every=args.every)
     print(summary(per_gw).to_string())
     for model in args.models.split(","):
