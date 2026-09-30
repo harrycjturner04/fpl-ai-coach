@@ -44,3 +44,22 @@ def test_transferred_player_uses_latest_team_and_context():
     log.loc[late, "team_code"] = 2
     feats, _ = player_features(log, CUTOFF, "2023-24", FLAT, PlayerParams())
     assert feats.loc[103].team_code == 2
+
+
+def test_dc_thresholds_from_scoring_rules():
+    # Relabel the two synthetic seasons so the predicted season (2025-26) is a DC season,
+    # with some of its matches before CUTOFF and some after.
+    log = synthetic_log()
+    log.loc[log.season == "2022-23", "season"] = "2024-25"
+    log.loc[log.season == "2023-24", "season"] = "2025-26"
+    def_player, mid_player, gkp_player = 101, 103, 100  # k=1 DEF, k=3 MID, k=0 GKP; all always play 90
+    played60 = log.minutes >= 60
+    log.loc[(log.player_code == def_player) & played60, "defensive_contribution"] = 10  # DEF threshold
+    log.loc[(log.player_code == mid_player) & played60, "defensive_contribution"] = 11  # below MID threshold (12)
+    log.loc[(log.player_code == gkp_player) & played60, "defensive_contribution"] = 999  # never counts for GKP
+
+    feats, _ = player_features(log, CUTOFF, "2025-26", FLAT, PlayerParams(kappa_dc=1e-9))
+
+    assert feats.loc[def_player].p_dc == pytest.approx(1.0, abs=1e-6)
+    assert feats.loc[mid_player].p_dc == pytest.approx(0.0, abs=1e-6)
+    assert feats.loc[gkp_player].p_dc == pytest.approx(0.0, abs=1e-6)

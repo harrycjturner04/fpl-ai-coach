@@ -15,12 +15,12 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from prediction.scoring import DC_FIRST_SEASON
+from prediction.scoring import DC_FIRST_SEASON, rules_for_season
 
 from .team_ratings import TeamRatings
 
 PRICE_BANDS = (5.5, 7.5, 10.0)
-DC_THRESHOLD = {"DEF": 10, "MID": 12, "FWD": 12}
+DC_THRESHOLD = rules_for_season(DC_FIRST_SEASON).dc_threshold  # GKP maps to inf: never counts
 RATE_COLUMNS = ["p60", "psub", "m60", "msub", "xg_rel", "xa_rel", "bonus90", "saves_rel", "p_dc",
                 "yellow90", "red90"]
 TYPICAL_MINUTES = {"m60": 87.0, "msub": 25.0}
