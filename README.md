@@ -75,8 +75,29 @@ Why an ILP: expected squad points are a sum of player expected points, so the pr
 proven optimum in under a second. Greedy, knapsack DP, genetic algorithms and RL were considered and rejected (not
 exact, don't scale to these constraints, or need a season simulator).
 
-Stage 2 scores players with `0.7 × ep_next + 0.3 × form`, scaled by chance of playing (`prediction/current_stats.py`):
-a placeholder until Stage 3's prediction model.
+Stage 3a replaces that placeholder with a component model of expected points (see docs/stage-3a-prediction-design.md); the optimiser switches to it in the next step.
+
+## Prediction results
+
+Walk-forward backtest on the held-out 2025/26 season (parameters tuned on 2022/23 to 2024/25 only; 2025/26 was
+evaluated once). Lower RMSE (primary) and MAE are better; higher rank correlation (rho, within position) is better;
+decision value is the average real points per gameweek of the XI and captain the optimiser picks from each model's
+predictions.
+
+| Model | RMSE (next GW) | MAE (next GW) | rho (next GW) | Decision value | RMSE (5 GWs ahead) |
+|---|---|---|---|---|---|
+| Component model | 2.660 | 1.752 | 0.521 | 57.8 | 2.803 |
+| Rebuilt FPL form | 2.999 | 1.990 | 0.446 | 48.1 | 3.108 |
+| Naive (last 5 average) | 2.908 | 1.986 | 0.410 | 47.5 | 2.989 |
+
+At the next gameweek, the component model's RMSE is 0.345 lower than rebuilt FPL form (95% bootstrap interval -0.403
+to -0.295) and its rank correlation is 0.075 higher (95% bootstrap interval 0.042 to 0.103); both intervals sit
+entirely on the side that favours the component model, so the gain over form is unlikely to be noise. FPL's own `xP`
+from the archive was excluded as a benchmark because the archive captures it after each gameweek is played rather
+than before the deadline, so it already reflects the result it should be forecasting (design doc section 10.1).
+Known limitation: the archive holds the final fixture schedule, so predictions more than one week ahead see double
+gameweeks slightly earlier than they were announced. Defensive contribution scoring exists only from 2025/26, so
+this holdout is also its first evaluation.
 
 ## How this project is built
 
