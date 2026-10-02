@@ -265,7 +265,9 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
     """Match-log rows for one gameweek from `event/{gw}/live`.
 
     Only finished fixtures are included. In a double gameweek FPL reports one
-    combined stat line: each `_LIVE_STATS` column uses `explain`'s exact
+    combined stat line (covering every fixture, including one still in
+    progress), so it is split across all of the team's fixtures and only the
+    finished ones are kept: each `_LIVE_STATS` column uses `explain`'s exact
     per-fixture value where available (see `_split_stat`), and otherwise falls
     back to a split by minutes played in each fixture; points always come from
     `explain` per fixture. Players with no live entry get zero-minute rows
@@ -279,11 +281,11 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
     """
     code_of = teams.set_index("id")["code"]
     gw_fixtures = fixtures[fixtures["event"] == gameweek]
-    done = gw_fixtures[gw_fixtures["finished_provisional"].astype(bool)]
     by_id = {e["id"]: e for e in live.get("elements", [])}
     rows = []
     for p in players.itertuples():
-        team_fx = done[(done["team_h"] == p.team) | (done["team_a"] == p.team)]
+        all_team_fx = gw_fixtures[(gw_fixtures["team_h"] == p.team) | (gw_fixtures["team_a"] == p.team)]
+        team_fx = all_team_fx[all_team_fx["finished_provisional"].astype(bool)]
         if team_fx.empty:
             continue
         entry = by_id.get(p.id, {"stats": {}, "explain": []})
@@ -291,17 +293,17 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
         explain_list = entry.get("explain", [])
         explain_fixture_ids = {x["fixture"] for x in explain_list}
         if explain_fixture_ids:
-            current_team_fx_ids = set(gw_fixtures.loc[(gw_fixtures["team_h"] == p.team)
-                                                       | (gw_fixtures["team_a"] == p.team), "id"])
-            if not explain_fixture_ids & current_team_fx_ids:
+            if not explain_fixture_ids & set(all_team_fx["id"]):
                 if skipped is not None:
                     skipped.append(int(p.code))
                 continue
         explain = {x["fixture"]: {s["identifier"]: s for s in x["stats"]} for x in explain_list}
-        fixture_ids = list(team_fx["id"])
+        # Split over ALL the team's fixtures this gameweek, finished or not: the live stat line is a
+        # gameweek total, so an in-progress second fixture must not be credited to the finished one.
+        fixture_ids = list(all_team_fx["id"])
         mins = {f: explain.get(f, {}).get("minutes", {}).get("value", 0) for f in fixture_ids}
         total_mins = sum(mins.values())
-        single = len(team_fx) == 1
+        single = len(all_team_fx) == 1
         share_of = {} if single else {f: (mins[f] / total_mins if total_mins else 0.0) for f in fixture_ids}
         splits = {} if single else {
             col: _split_stat(key, float(stats.get(key, 0) or 0), explain, fixture_ids, share_of)

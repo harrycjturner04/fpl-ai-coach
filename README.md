@@ -119,6 +119,12 @@ matches 5 days on next-gameweek RMSE and beats it at every later horizon. The sh
 The holdout was not re-run, to keep it a single, untouched evaluation; a horizon-dependent minutes model is planned
 for Stage 3b.
 
+Backtest fix after the holdout: code review found that players whose club had no fixture in a gameweek (a blank)
+were left out of that gameweek's snapshot, so they were not predicted for the following weeks either. They are now
+included. Blanks affect a few gameweeks per season (two in 2025/26); on the tuning seasons the fix shifts every
+model's metrics slightly and leaves the comparison unchanged (component minus form: RMSE -0.31, rank correlation
++0.07, both intervals excluding zero). The holdout figures above predate this fix.
+
 Reproduce the holdout: `python -m prediction.backtest --seasons 2025-26 --models naive,form,component --params
 data/processed/model_params.json` (`--models` defaults to `naive,form`; add `component` explicitly, with `--params`
 pointing at a tuned parameters file, to include it).

@@ -132,3 +132,17 @@ def test_paired_bootstrap_raises_when_no_shared_gameweeks():
                        "mae": 1.0, "rmse": 1.0, "rho": 0.5}])
     with pytest.raises(ValueError, match="share no gameweeks"):
         paired_bootstrap(pd.concat([a, b]), "component", "form")
+
+
+def test_snapshot_keeps_players_whose_team_blanks_this_gameweek():
+    log = synthetic_log()
+    # Teams 3 and 4 have no fixture in GW3 of 2023-24 (a blank), but play again in GW4.
+    blank = (log.season == "2023-24") & (log.gameweek == 3) & log.team_code.isin([3, 4])
+    log = log[~blank]
+    snap = snapshot(log, "2023-24", 3)
+    assert {1, 2, 3, 4} == set(snap.players_now.team_code)
+    assert 300 in set(snap.players_now.player_code)
+    pred = naive_predictor(snap)
+    blank_player = pred[pred.player_code == 300]
+    assert 3 not in set(blank_player.gameweek)   # no fixture this week
+    assert 4 in set(blank_player.gameweek)       # but predicted for the next one

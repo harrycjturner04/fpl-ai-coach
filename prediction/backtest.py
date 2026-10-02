@@ -49,6 +49,13 @@ def snapshot(match_log: pd.DataFrame, season: str, gameweek: int, horizon: int =
     s = match_log[match_log["season"] == season]
     cutoff = s.loc[s["gameweek"] == gameweek, "kickoff"].min()
     now = s[s["gameweek"] == gameweek].sort_values("kickoff").drop_duplicates("player_code")
+    # A club with no fixture this gameweek (a blank) has no rows in it, but its players are still
+    # registered and may play later in the horizon: take them from their latest row before the cutoff.
+    blank_teams = set(s["team_code"]) - set(now["team_code"])
+    if blank_teams:
+        latest = s[s["kickoff"] < cutoff].sort_values("kickoff").drop_duplicates("player_code", keep="last")
+        extra = latest[latest["team_code"].isin(blank_teams) & ~latest["player_code"].isin(now["player_code"])]
+        now = pd.concat([now, extra])
     ahead = s[(s["gameweek"] >= gameweek) & (s["gameweek"] < gameweek + horizon) & s["was_home"]]
     fixtures = (ahead[["gameweek", "fixture_id", "kickoff", "team_code", "opponent_code"]]
                 .drop_duplicates("fixture_id")

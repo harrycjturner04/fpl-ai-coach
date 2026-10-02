@@ -88,3 +88,24 @@ def test_stat_not_fully_covered_by_explain_falls_back_to_minutes_split():
     mid = rows[rows.player_code == 100].set_index("fixture_id")
     assert abs(mid.loc[1, "saves"] - 2.4) < 1e-9   # 4 x 90/150: explain's 3 doesn't cover the total of 4
     assert abs(mid.loc[2, "saves"] - 1.6) < 1e-9   # 4 x 60/150
+
+
+def test_double_gameweek_with_second_fixture_in_progress_keeps_only_the_finished_part():
+    fixtures = pd.DataFrame({
+        "id": [1, 2], "event": [6, 6], "team_h": [1, 2], "team_a": [2, 1],
+        "kickoff_time": pd.to_datetime(["2026-10-10T14:00Z", "2026-10-12T19:00Z"], utc=True),
+        "finished_provisional": [True, False],
+    })
+    live = {"elements": [
+        {"id": 10, "stats": _stat(minutes=135, goals_scored=2, expected_goals="0.90", total_points=14),
+         "explain": [{"fixture": 1, "stats": [{"identifier": "minutes", "value": 90, "points": 2},
+                                              {"identifier": "goals_scored", "value": 1, "points": 5}]},
+                     {"fixture": 2, "stats": [{"identifier": "minutes", "value": 45, "points": 1},
+                                              {"identifier": "goals_scored", "value": 1, "points": 5}]}]},
+    ]}
+    rows = live_match_rows(live, 6, fixtures, PLAYERS, TEAMS, "2026-27")
+    mid = rows[rows.player_code == 100]
+    assert list(mid.fixture_id) == [1]                 # the in-progress fixture is excluded
+    row = mid.iloc[0]
+    assert row.minutes == 90 and row.goals == 1 and row.points == 7   # not the gameweek totals
+    assert abs(row.xg - 0.90 * 90 / 135) < 1e-9
