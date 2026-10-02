@@ -7,7 +7,9 @@ season up front and read from a cache in the workers.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
@@ -108,20 +110,46 @@ def run_replay(job: tuple[PlanSettings, str, bool, int | None]) -> pd.DataFrame:
 
 # ---- orchestration side ----
 
+def fingerprint(seasons: list[str], data_dir: Path) -> dict:
+    """What a saved file depends on: the shipped prediction parameters, the archive size and the seasons."""
+    return dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
+                archive_rows=len(storage.load_table("archive_match_log", data_dir)), seasons=sorted(seasons))
+
+
+def _meta_matches(name: str, data_dir: Path, fp: dict) -> bool:
+    """True when `name` (a table or JSON file) can be reused; exits if it exists but was made from other inputs."""
+    processed = data_dir / "processed"
+    if not any((processed / f"{name}{ext}").exists() for ext in (".parquet", ".json")):
+        return False
+    if storage.load_json_or_none(f"{name}_meta", data_dir) != fp:
+        raise SystemExit(f"{name} is missing its fingerprint or was made from different inputs; pass --fresh to recompute")
+    return True
+
+
 def precompute_predictions(seasons: list[str], workers: int, data_dir: Path, limit: int | None = None, *,
                            name: str = "replay_predictions", fresh: bool = False) -> pd.DataFrame:
-    existing = None if fresh else storage.load_table_or_none(name, data_dir)
-    if existing is not None and set(seasons) <= set(existing["season"]):
-        return existing
+    fp = fingerprint(seasons, data_dir)
+    if not fresh and _meta_matches(name, data_dir, fp):
+        return storage.load_table(name, data_dir)
     with ProcessPoolExecutor(max_workers=workers) as pool:
         preds = pd.concat(pool.map(_predict_season, [(s, data_dir, limit) for s in seasons]), ignore_index=True)
     storage.save_table(preds, name, data_dir)
+    storage.save_json(fp, f"{name}_meta", data_dir)
     return preds
 
 
 def _save_results(results: dict, data_dir: Path, name: str) -> None:
-    frames = [f.assign(config=key) for by_season in results.values() for f in by_season.values()]
-    storage.save_table(pd.concat(frames, ignore_index=True), name, data_dir)
+    frames = [f.assign(config=key) for key, by_season in results.items() for f in by_season.values()]
+    storage.save_table(pd.concat(frames, ignore_index=True), f"{name}_tmp", data_dir)
+    processed = data_dir / "processed"
+    os.replace(processed / f"{name}_tmp.parquet", processed / f"{name}.parquet")
+
+
+def load_results(name: str, data_dir: Path) -> dict:
+    results: dict = {}
+    for (key, season), f in storage.load_table(name, data_dir).groupby(["config", "season"], sort=False):
+        results.setdefault(key, {})[season] = f.drop(columns="config").reset_index(drop=True)
+    return results
 
 
 def evaluate(settings_list, pool, seasons, results, limit, *, data_dir: Path, name: str = "replay_results") -> None:
@@ -156,10 +184,10 @@ def main(argv=None) -> None:
     precompute_predictions(seasons, args.workers, data_dir, limit, name=pred_name, fresh=args.fresh)
 
     results: dict = {}
-    saved = None if args.fresh else storage.load_table_or_none(res_name, data_dir)
-    if saved is not None:
-        for (key, season), f in saved.groupby(["config", "season"]):
-            results.setdefault(key, {})[season] = f.drop(columns="config").reset_index(drop=True)
+    fp = fingerprint(seasons, data_dir)
+    if not args.fresh and _meta_matches(res_name, data_dir, fp):
+        results = load_results(res_name, data_dir)
+    storage.save_json(fp, f"{res_name}_meta", data_dir)
 
     benchmarks = [SINGLE_WEEK, HOLD, SUMMED]
     pass_logs: list[str] = []
@@ -174,7 +202,7 @@ def main(argv=None) -> None:
         say("benchmarks")
         run(benchmarks)
 
-        say("leftover values")
+        left_name = f"leftover_table{suffix}"
 
         def run_states(s):
             frames = list(pool.map(run_replay, [(s, x, True, limit) for x in seasons]))
@@ -184,8 +212,16 @@ def main(argv=None) -> None:
             pass_logs.append(msg)
             say(msg)
 
-        base = fixed_point(run_states, PlanSettings(discount=0.9), passes=passes, log=log_pass, map_fn=pool.map)
-        base_table = base.leftover_values
+        if not args.fresh and _meta_matches(left_name, data_dir, fp):
+            say("leftover values: reusing saved table")
+            saved_left = storage.load_json(left_name, data_dir)
+            base_table, pass_logs = tuple(saved_left["base_table"]), saved_left["passes"]
+        else:
+            say("leftover values")
+            base = fixed_point(run_states, PlanSettings(discount=0.9), passes=passes, log=log_pass, map_fn=pool.map)
+            base_table = base.leftover_values
+            storage.save_json(dict(base_table=list(base_table), passes=pass_logs), left_name, data_dir)
+            storage.save_json(fp, f"{left_name}_meta", data_dir)
 
         say("coordinate descent")
         best = PlanSettings(discount=0.9, leftover_values=base_table)
@@ -208,18 +244,17 @@ def main(argv=None) -> None:
         if total(no_hits) > total(best):
             margins = [replace(best, hit_margin=m) for m in (1.0, 2.0)]
             run(margins)
-            top = max(margins, key=total)
-            beat = total(top) > total(best)
-            say(f"max_hits=0 scored {total(no_hits):.1f} vs best {total(best):.1f}; hit_margin {top.hit_margin} "
-                f"scored {total(top):.1f}, {'adopted' if beat else 'not adopted'}")
-            if beat:
-                best = top
+            options = [("current best", best), ("hit_margin 1.0", margins[0]), ("hit_margin 2.0", margins[1]),
+                       ("max_hits=0", no_hits)]
+            label, best = max(options, key=lambda o: total(o[1]))
+            say("hits: " + ", ".join(f"{l} {total(s):.1f}" for l, s in options) + f"; adopted {label}")
         else:
-            say(f"max_hits=0 scored {total(no_hits):.1f} vs best {total(best):.1f}; keeping best")
+            say(f"hits kept: max_hits=0 scored {total(no_hits):.1f} vs best {total(best):.1f}")
 
         say("report")
         horizons = [replace(best, horizon=h) for h in (3, 4, 5)]
-        run(horizons)
+        no_hits = replace(best, max_hits=0, hit_margin=0.0)
+        run(horizons + [no_hits])
 
     def per_season(s):
         return {x: int(results[config_key(s)][x]["points"].sum()) for x in seasons}
@@ -234,20 +269,24 @@ def main(argv=None) -> None:
                           for k, by_season in results.items() if k not in skip for x, f in by_season.items()])
     loso = leave_one_season_out(table)
     lines += ["Leave-one-season-out (config chosen on the other seasons)", loso.drop(columns="config").to_string(index=False)]
+    lines += [f"  {r.season} chose {r.config}" for r in loso.itertuples() if r.season != "total"]
     held = pd.concat([results[r.config][r.season] for r in loso.itertuples() if r.season != "total"], ignore_index=True)
     single = pd.concat([results[config_key(SINGLE_WEEK)][x] for x in seasons], ignore_index=True)
     clean = _clean_gameweeks(storage.load_table("archive_match_log", data_dir), 5)
     keep = [(s, g) in clean for s, g in zip(held["season"], held["gameweek"])]
     lines.append("Held-out multi-week minus single week, points per gameweek (95% interval)")
     for label, frame in [("all gameweeks", held), ("no double or blank in next 5", held[keep])]:
+        if frame.empty:
+            lines.append(f"  {label}: no gameweeks free of doubles and blanks in this run")
+            continue
         r = points_bootstrap(frame, single)
         lines.append(f"  {label}: {r['difference']:+.3f} [{r['low']:+.3f}, {r['high']:+.3f}] over {r['gameweeks']} gameweeks")
 
-    def hits(s):
-        return int(sum(f["hits"].sum() for f in results[config_key(s)].values()))
-
-    lines.append(f"Hits taken: best {hits(best)}, single week {hits(SINGLE_WEEK)}; max_hits=0 scored "
-                 f"{total(no_hits):.0f} vs best {total(best):.0f}")
+    lines.append("Hits and points, like with like")
+    for label, s in [("final best", best), ("same settings, max_hits=0 and hit_margin=0", no_hits),
+                     ("single week", SINGLE_WEEK)]:
+        n = int(sum(f["hits"].sum() for f in results[config_key(s)].values()))
+        lines.append(f"  {label}: {n} hits, {total(s):.0f} points")
     lines += ["Leftover table, every fixed-point pass", *pass_logs, "Final settings", json.dumps(best.to_dict())]
 
     text = "\n".join(lines)
