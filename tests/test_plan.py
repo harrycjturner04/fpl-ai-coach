@@ -245,3 +245,26 @@ def test_chip_in_the_first_week_of_a_from_scratch_plan_is_rejected():
     players, base = pool(full_pool())
     with pytest.raises(ValueError):
         solve_plan(players, table({1: base, 2: base}), FULL_RULES, budget=100.0, chips={1: "wildcard"})
+
+
+def test_free_hit_cannot_overspend():
+    dear = [(i, pos, club, 6.0, 9.0) for i, pos, club, _, _ in FIVE]   # 1.5 dearer than what they replace
+    owned, players, base = chip_case(dear)            # the squad sells for 67.5; bank 3.0 buys exactly 2
+    wk = base.copy()
+    chips = {7: "freehit"}
+    kw = dict(current_squad=owned, bank=3.0, free_transfers=1)
+    plan = solve_plan(players, table({7: wk, 8: base}), FULL_RULES, chips=chips, **kw)
+    checked(plan, players, FULL_RULES, chips=chips, **kw)
+    assert len({1, 2, 3, 4, 5} & set(plan.weeks[0].squad)) == 2
+
+
+def test_wildcard_carries_banked_transfers_through_solve_plan():
+    owned, players, base = chip_case(FIVE)
+    wk = base.copy()
+    wk[[1, 2, 3, 4, 5]] = 9.0
+    chips = {7: "wildcard"}
+    kw = dict(current_squad=owned, free_transfers=2)
+    plan = solve_plan(players, table({7: wk, 8: base}), FULL_RULES, chips=chips, **kw)
+    checked(plan, players, FULL_RULES, chips=chips, **kw)
+    assert len(plan.weeks[0].transfers_in) > 2
+    assert plan.weeks[0].hits == 0 and plan.weeks[0].free_transfers_next == 2
