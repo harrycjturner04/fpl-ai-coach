@@ -83,6 +83,11 @@ def load_table(name: str, data_dir: Path = DATA_DIR) -> pd.DataFrame:
     return pd.read_parquet(data_dir / "processed" / f"{name}.parquet")
 
 
+def load_table_or_none(name: str, data_dir: Path = DATA_DIR) -> pd.DataFrame | None:
+    path = data_dir / "processed" / f"{name}.parquet"
+    return pd.read_parquet(path) if path.exists() else None
+
+
 def save_json(payload: Any, name: str, data_dir: Path = DATA_DIR) -> Path:
     """Processed (derived) JSON, e.g. game rules or a manager's state summary."""
     path = data_dir / "processed" / f"{name}.json"

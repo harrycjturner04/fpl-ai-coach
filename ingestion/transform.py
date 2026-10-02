@@ -10,6 +10,14 @@ import pandas as pd
 
 HIT_COST = 4  # points per extra transfer; not exposed by the API, so defined once here
 
+# One row per player per fixture, for past seasons (archive) and this season (event/live).
+MATCH_COLUMNS = [
+    "season", "gameweek", "fixture_id", "kickoff", "player_code", "team_code", "opponent_code",
+    "was_home", "position", "minutes", "starts", "goals", "assists", "xg", "xa", "xgc",
+    "clean_sheets", "goals_conceded", "own_goals", "penalties_saved", "penalties_missed", "saves",
+    "bonus", "defensive_contribution", "yellow_cards", "red_cards", "points", "price", "xp",
+]
+
 # FPL serves these stats as strings ("4.5"); make them numeric.
 _NUMERIC_STRING_COLUMNS = [
     "form",
@@ -219,6 +227,104 @@ def entry_transfers(raw_transfers: list[dict]) -> pd.DataFrame:
     df["element_out_cost"] = df["element_out_cost"] / 10
     df["time"] = pd.to_datetime(df["time"], utc=True)
     return df.sort_values("time").reset_index(drop=True)
+
+
+_LIVE_STATS = {
+    "starts": "starts", "goals": "goals_scored", "assists": "assists", "xg": "expected_goals",
+    "xa": "expected_assists", "xgc": "expected_goals_conceded", "clean_sheets": "clean_sheets",
+    "goals_conceded": "goals_conceded", "own_goals": "own_goals", "penalties_saved": "penalties_saved",
+    "penalties_missed": "penalties_missed", "saves": "saves", "bonus": "bonus",
+    "defensive_contribution": "defensive_contribution", "yellow_cards": "yellow_cards",
+    "red_cards": "red_cards",
+}
+
+
+def season_label(gameweeks: pd.DataFrame) -> str:
+    """'2026-27' style label from the first gameweek's deadline."""
+    year = int(gameweeks.sort_values("id")["deadline_time"].iloc[0].year)
+    return f"{year}-{str(year + 1)[-2:]}"
+
+
+def _split_stat(key: str, total: float, explain: dict, fixture_ids: list, share_of: dict) -> dict:
+    """Per-fixture values for one stat in a multi-fixture gameweek.
+
+    `explain` only lists identifiers that affected points, so it can be
+    incomplete: if the per-fixture values it gives for this key sum to the
+    player's `stats` total, they're used exactly; otherwise (including stats
+    `explain` never carries, e.g. expected_goals) fall back to the minutes
+    split.
+    """
+    exact = {f: explain.get(f, {}).get(key, {}).get("value", 0) for f in fixture_ids}
+    if sum(exact.values()) == total:
+        return {f: float(v) for f, v in exact.items()}
+    return {f: total * share_of[f] for f in fixture_ids}
+
+
+def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: pd.DataFrame,
+                    teams: pd.DataFrame, season: str, skipped: list | None = None) -> pd.DataFrame:
+    """Match-log rows for one gameweek from `event/{gw}/live`.
+
+    Only finished fixtures are included. In a double gameweek FPL reports one
+    combined stat line (covering every fixture, including one still in
+    progress), so it is split across all of the team's fixtures and only the
+    finished ones are kept: each `_LIVE_STATS` column uses `explain`'s exact
+    per-fixture value where available (see `_split_stat`), and otherwise falls
+    back to a split by minutes played in each fixture; points always come from
+    `explain` per fixture. Players with no live entry get zero-minute rows
+    (they didn't play).
+
+    A player's team comes from today's bootstrap, so a player who transferred
+    clubs mid-gameweek would otherwise have his old club's minutes/stats
+    credited to his new club's fixtures. If his `explain` lists fixtures and
+    none of them belongs to his current team's fixtures this gameweek, he's
+    skipped for this gameweek (his player_code is appended to `skipped` if given).
+    """
+    code_of = teams.set_index("id")["code"]
+    gw_fixtures = fixtures[fixtures["event"] == gameweek]
+    by_id = {e["id"]: e for e in live.get("elements", [])}
+    rows = []
+    for p in players.itertuples():
+        all_team_fx = gw_fixtures[(gw_fixtures["team_h"] == p.team) | (gw_fixtures["team_a"] == p.team)]
+        team_fx = all_team_fx[all_team_fx["finished_provisional"].astype(bool)]
+        if team_fx.empty:
+            continue
+        entry = by_id.get(p.id, {"stats": {}, "explain": []})
+        stats = entry.get("stats", {})
+        explain_list = entry.get("explain", [])
+        explain_fixture_ids = {x["fixture"] for x in explain_list}
+        if explain_fixture_ids:
+            if not explain_fixture_ids & set(all_team_fx["id"]):
+                if skipped is not None:
+                    skipped.append(int(p.code))
+                continue
+        explain = {x["fixture"]: {s["identifier"]: s for s in x["stats"]} for x in explain_list}
+        # Split over ALL the team's fixtures this gameweek, finished or not: the live stat line is a
+        # gameweek total, so an in-progress second fixture must not be credited to the finished one.
+        fixture_ids = list(all_team_fx["id"])
+        mins = {f: explain.get(f, {}).get("minutes", {}).get("value", 0) for f in fixture_ids}
+        total_mins = sum(mins.values())
+        single = len(all_team_fx) == 1
+        share_of = {} if single else {f: (mins[f] / total_mins if total_mins else 0.0) for f in fixture_ids}
+        splits = {} if single else {
+            col: _split_stat(key, float(stats.get(key, 0) or 0), explain, fixture_ids, share_of)
+            for col, key in _LIVE_STATS.items()
+        }
+        for fx in team_fx.itertuples():
+            home = fx.team_h == p.team
+            row = {
+                "season": season, "gameweek": gameweek, "fixture_id": int(fx.id),
+                "kickoff": fx.kickoff_time, "player_code": int(p.code),
+                "team_code": int(code_of[p.team]),
+                "opponent_code": int(code_of[fx.team_a if home else fx.team_h]),
+                "was_home": bool(home), "position": p.position, "price": float(p.price), "xp": float("nan"),
+                "minutes": float(stats.get("minutes", 0)) if single else float(mins[fx.id]),
+                "points": float(stats.get("total_points", 0)) if single
+                else float(sum(s["points"] for s in explain.get(fx.id, {}).values())),
+            }
+            for col, key in _LIVE_STATS.items():
+                row[col] = float(stats.get(key, 0) or 0) if single else splits[col][fx.id]
+            rows.append(row)
+    return pd.DataFrame(rows, columns=MATCH_COLUMNS)
 
 
 def current_gameweek(gw: pd.DataFrame) -> int | None:

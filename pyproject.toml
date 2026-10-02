@@ -12,13 +12,17 @@ dependencies = [
     "pandas>=2.1",
     "pyarrow>=14",
     "pulp>=3.3,<4",  # <4: 4.0 drops the bundled CBC solver
+    "scipy>=1.11",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "pytest-cov>=5"]
 
 [tool.setuptools]
-packages = ["ingestion", "prediction", "optimisation"]
+packages = ["ingestion", "prediction", "optimisation", "features"]
+
+[tool.setuptools.package-data]
+prediction = ["model_params.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

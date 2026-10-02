@@ -221,3 +221,51 @@ before continuing.
 - Missing `model_params.json`: documented defaults with a warning.
 - Rating fit fails to converge: stop with a message.
 - Players with no history: flagged in output.
+
+## 10. Amendment (2026-10-02): benchmark and tuning metric
+
+Checkpoint 1 (default parameters, tuning seasons, next gameweek) found two problems with the original evaluation
+design. Both were investigated before any tuning.
+
+### 10.1 The archive's `xP` is not a pre-match forecast
+
+Among players who played 60+ minutes, the rank correlation with a gameweek's actual points is 0.129 for FPL's `xP`
+from the previous gameweek, 0.476 for the archive's `xP` of that gameweek, and 0.435 for next gameweek's `xP` (which
+is built from form that includes the gameweek's own points). A genuine pre-match forecast cannot beat one that has
+seen the result, so the archive's `xP` was captured after the gameweek was played. It is dropped as a benchmark.
+
+Replacement benchmarks:
+
+- **Rebuilt FPL form** (primary): points in the last 30 days divided by the player's team matches in that window,
+  rebuilt at every past deadline. This reproduces FPL's live `form` exactly for 97% of players (the rest are recent
+  arrivals, where FPL counts only matches since joining, which the archive's rows already reflect). FPL's live
+  `ep_next` equals `form` for about 92% of players, so this is FPL's own pre-deadline method.
+- **Naive** last-5 average (unchanged).
+- **Recorded `ep_next`**: from now on, FPL's real forecast is saved at every deadline, giving a true benchmark,
+  including injury news, as the season progresses.
+
+### 10.2 MAE was the wrong tuning metric
+
+With MAE, removing goals, assists, bonus or clean sheets appeared to improve the model. By RMSE every one of them
+helps (for example RMSE 2.637 with goals, 2.708 without). MAE is minimised by the median, and FPL points are heavily
+skewed; the model estimates expected (mean) points, which is what the optimiser needs. The tuning objective becomes
+
+```
+J = RMSE_model / RMSE_form + (1 - rho_model) / (1 - rho_form)
+```
+
+MAE is still reported. Every model-versus-benchmark difference is reported with a 95% confidence interval from a
+paired bootstrap over gameweeks; a model is called better only when the interval excludes zero.
+
+### 10.3 Other findings
+
+Team ratings are unbiased (mean predicted team goals 1.48 vs actual xG 1.47). Player xG rates rank next-match xG
+better than a raw recent xG/90 average. The minutes model is close to calibrated and slightly under-confident; less
+shrinkage and a shorter memory improve it, which tuning searches. All components are kept; the ablation is re-run on
+RMSE after tuning.
+
+### 10.4 Early-season reporting (deferred)
+
+Section 5.1 asked for gameweeks 1 to 5 of each season to be reported separately. The tuning and holdout results pool
+them with the rest of the season. The split is deferred to Stage 3b, where it can be reported without re-running the
+locked 2025/26 evaluation for a new breakdown.
