@@ -19,7 +19,8 @@ HOLD = PlanSettings(horizon=1, hold=True)          # never transfers after the f
 def score_table(pred: pd.DataFrame, gameweek: int, settings: PlanSettings) -> pd.DataFrame:
     """Player x gameweek predictions for `gameweek .. gameweek + horizon - 1` (those that exist);
     with `settings.summed`, one column `gameweek` holding the discounted sum."""
-    cols = [g for g in range(gameweek, gameweek + settings.horizon) if g in set(pred["gameweek"])]
+    present = set(pred["gameweek"])
+    cols = [g for g in range(gameweek, gameweek + settings.horizon) if g in present]
     table = pred.pivot(index="player_code", columns="gameweek", values="total").reindex(columns=cols).fillna(0.0)
     if settings.summed:
         weights = [settings.discount ** (g - gameweek) for g in cols]

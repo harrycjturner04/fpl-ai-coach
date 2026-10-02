@@ -2,9 +2,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
+import evaluation.replay as replay_module
 from evaluation.replay import HOLD, SINGLE_WEEK, replay_season, score_table
 from optimisation import settings as settings_module
 from optimisation.settings import PlanSettings, load_settings
+from ingestion.manager_state import selling_price
 from ingestion.transform import MATCH_COLUMNS
 from prediction.backtest import naive_predictor
 
@@ -61,13 +63,51 @@ def test_single_week_runs():
     assert len(run(SINGLE_WEEK)) == 7
 
 
+PRICES = LOG[LOG.season == "2023-24"].set_index(["gameweek", "player_code"])["price"]
+
+
+def check_bank_flow(r):
+    """Recompute each week's bank from the squads entering the weeks (kept states) and the log's prices;
+    returns the sales as (week index, player, credited price)."""
+    squads = [set(s["current_squad"]) for s in r["state"].iloc[1:]]   # squad entering week 1, 2, ...
+    purchase = {p: PRICES[1, p] for p in squads[0]}                    # original squad bought in gameweek 1
+    sales = []
+    for k in range(1, len(squads)):                                     # week k, gameweek k + 1
+        before, after, gw = squads[k - 1], squads[k], k + 1
+        credit = {p: selling_price(purchase[p], PRICES[gw, p]) for p in before - after}
+        spend = sum(PRICES[gw, p] for p in after - before)
+        assert r.bank.iloc[k] == pytest.approx(r.bank.iloc[k - 1] + sum(credit.values()) - spend, abs=1e-4)
+        purchase = {p: purchase.get(p, PRICES[gw, p]) for p in after}
+        sales += [(k, p, c) for p, c in credit.items()]
+    return sales
+
+
 def test_bookkeeping():
-    r = run(PlanSettings(horizon=2, hit_margin=-10.0)).reset_index(drop=True)  # negative margin: hits are attractive
+    r = run(PlanSettings(horizon=2, hit_margin=-10.0), keep_states=True).reset_index(drop=True)  # hits are attractive
+    assert r.transfers.sum() > 0 and r.hits.sum() > 0
     assert r.free_transfers.iloc[0] == 0 and r.transfers.iloc[0] == 0
     for _, row in r.iterrows():
         assert row.hits == max(0, row.transfers - row.free_transfers)
     for prev, nxt in zip(r.itertuples(), r.iloc[1:].itertuples()):
         assert nxt.free_transfers == min(5, max(prev.free_transfers - prev.transfers, 0) + 1)
+    check_bank_flow(r)
+
+
+def test_sale_after_a_price_rise_credits_half_the_rise():
+    def club_one_early(snap):  # club 1 looks great before the rise, worthless from gameweek 5
+        pred = naive_predictor(snap)
+        club1 = (pred.player_code // 100) == 1
+        pred.loc[club1, "total"] = 20.0 if snap.gameweek < 5 else 0.0
+        return pred
+
+    r = replay_season(LOG, "2023-24", club_one_early, PlanSettings(horizon=1, hit_margin=-10.0), keep_states=True)
+    sales = check_bank_flow(r)
+    club1_sales = [(p, c) for k, p, c in sales if k == 4 and p // 100 == 1]  # week index 4 is gameweek 5
+    assert club1_sales
+    for p, credit in club1_sales:
+        bought = PRICES[1, p]    # all of club 1 was bought in gameweek 1 at the pre-rise price
+        assert PRICES[5, p] == pytest.approx(bought + 0.3, abs=1e-4)
+        assert credit == pytest.approx(bought + 0.1, abs=1e-4)   # half of a 0.3 rise, rounded down
 
 
 def test_predictor_never_sees_the_future():
@@ -75,11 +115,28 @@ def test_predictor_never_sees_the_future():
 
     def checked(snap):
         assert snap.history["kickoff"].max() < snap.cutoff
+        assert list(snap.players_now.columns) == ["player_code", "team_code", "position", "price", "chance"]
         calls.append(snap.gameweek)
         return naive_predictor(snap)
 
     replay_season(LOG, "2023-24", checked, FAST)
     assert calls == list(range(1, 8))
+
+
+def test_changing_the_future_cannot_change_the_past():
+    first_changed = 5
+    rng = np.random.default_rng(1)
+    future = (LOG.season == "2023-24") & (LOG.gameweek >= first_changed)
+    scrambled = LOG.copy()
+    n = int(future.sum())
+    scrambled.loc[future, "minutes"] = rng.choice([0, 45, 90], n)
+    scrambled.loc[future, "points"] = rng.integers(-2, 15, n)
+    scrambled.loc[future, "xg"] = rng.uniform(0, 1, n)
+    scrambled.loc[future, "xp"] = rng.uniform(0, 8, n)
+    a, b = run(), run(log=scrambled)
+    assert not a.equals(b)   # the scramble does matter from the changed gameweek on
+    pd.testing.assert_frame_equal(a[a.gameweek < first_changed].reset_index(drop=True),
+                                  b[b.gameweek < first_changed].reset_index(drop=True))
 
 
 def test_cache_is_filled_and_used():
@@ -93,14 +150,23 @@ def test_cache_is_filled_and_used():
     replay_season(LOG, "2023-24", boom, FAST, cache=cache)
 
 
-def test_player_who_left_the_league_scores_zero_and_does_not_crash():
+def test_player_who_left_the_league_scores_zero_and_does_not_crash(monkeypatch):
     states = run(HOLD, keep_states=True)["state"]
     gone = sorted(states.iloc[1]["current_squad"])[0]
     log = LOG[~((LOG.player_code == gone) & (LOG.season == "2023-24") & (LOG.gameweek > 3))]
+    seen = []
+    real = replay_module.score_gameweek
+    monkeypatch.setattr(replay_module, "score_gameweek", lambda st, bn, c, v, minutes, points, *a, **k: (
+        seen.append((set(st) | set(bn), minutes.get(gone, 0), points.get(gone, 0))), real(st, bn, c, v, minutes, points, *a, **k))[1])
     r = run(HOLD, log=log, keep_states=True)
     assert len(r) == 7
-    assert gone in r.iloc[5]["state"]["current_squad"]  # held with a last known price
-    assert gone in set(r.iloc[5]["state"]["players"]["id"])
+    for squad, minutes, points in seen[3:]:   # gameweeks 4 to 7
+        assert gone in squad and minutes == 0 and points == 0
+    state = r.iloc[5]["state"]
+    last_known = log[(log.player_code == gone) & (log.season == "2023-24") & (log.gameweek == 3)].iloc[0]
+    row = state["players"].set_index("id").loc[gone]
+    assert (row.price, row.team, row.position) == (last_known.price, last_known.team_code, last_known.position)
+    assert state["current_squad"][gone] == pytest.approx(selling_price(PRICES[1, gone], last_known.price), abs=1e-4)
 
 
 def test_keep_states_allows_a_resolve():
@@ -127,7 +193,7 @@ def test_score_table_only_existing_gameweeks_and_fills_zero():
     assert t.loc[1, 4] == 0 and t.loc[2, 3] == 0
 
 
-def test_settings_roundtrip(tmp_path):
+def test_settings_roundtrip():
     s = PlanSettings(horizon=3, discount=0.9, leftover_values=(1.0, 0.5), hold=True)
     assert PlanSettings.from_dict(s.to_dict()) == s
     assert isinstance(s.to_dict()["leftover_values"], list)
