@@ -70,14 +70,19 @@ def _team_fixture_counts(fixtures_ahead: pd.DataFrame) -> pd.DataFrame:
     return sides.groupby(["team_code", "gameweek"]).size().rename("n_fixtures").reset_index()
 
 
-def naive_predictor(snap: Snapshot) -> pd.DataFrame:
-    """Mean points over the player's last 5 matches, times fixtures in each gameweek."""
-    last5 = snap.history.sort_values("kickoff").groupby("player_code").tail(5)
-    per_match = last5.groupby("player_code")["points"].mean().rename("per_match")
+def _per_gameweek_totals(snap: Snapshot, per_match: pd.Series) -> pd.DataFrame:
+    """Scale a per-match points rate by fixtures in each gameweek ahead."""
     p = snap.players_now.join(per_match, on="player_code").fillna({"per_match": 0.0})
     rows = p.merge(_team_fixture_counts(snap.fixtures_ahead), on="team_code")
     rows["total"] = rows["per_match"] * rows["n_fixtures"]
     return rows[["player_code", "gameweek", "total"]]
+
+
+def naive_predictor(snap: Snapshot) -> pd.DataFrame:
+    """Mean points over the player's last 5 matches, times fixtures in each gameweek."""
+    last5 = snap.history.sort_values("kickoff").groupby("player_code").tail(5)
+    per_match = last5.groupby("player_code")["points"].mean().rename("per_match")
+    return _per_gameweek_totals(snap, per_match)
 
 
 def xp_predictor(snap: Snapshot) -> pd.DataFrame:
@@ -95,10 +100,7 @@ def form_predictor(snap: Snapshot) -> pd.DataFrame:
     (reproduces FPL's live `form` for 97% of players), times fixtures in each gameweek."""
     window = snap.history[snap.history["kickoff"] >= snap.cutoff - pd.Timedelta(days=FORM_DAYS)]
     per_match = window.groupby("player_code")["points"].mean().rename("per_match")
-    p = snap.players_now.join(per_match, on="player_code").fillna({"per_match": 0.0})
-    rows = p.merge(_team_fixture_counts(snap.fixtures_ahead), on="team_code")
-    rows["total"] = rows["per_match"] * rows["n_fixtures"]
-    return rows[["player_code", "gameweek", "total"]]
+    return _per_gameweek_totals(snap, per_match)
 
 
 def eligible_players(history: pd.DataFrame) -> set[int]:
@@ -187,6 +189,8 @@ def paired_bootstrap(per_gw: pd.DataFrame, model: str, benchmark: str, horizon: 
     a = per_gw[(per_gw["model"] == model) & (per_gw["horizon"] == horizon)].set_index(keys)
     b = per_gw[(per_gw["model"] == benchmark) & (per_gw["horizon"] == horizon)].set_index(keys)
     common = a.index.intersection(b.index)
+    if len(common) == 0:
+        raise ValueError(f"{model} and {benchmark} share no gameweeks at horizon {horizon}")
     a, b = a.loc[common], b.loc[common]
     draws = np.random.default_rng(seed).integers(0, len(common), size=(n_boot, len(common)))
     everything = np.arange(len(common))

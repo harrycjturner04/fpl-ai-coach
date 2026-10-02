@@ -122,3 +122,13 @@ def test_paired_bootstrap_detects_a_real_difference_and_not_noise():
     assert ci.loc["rho", "low"] > 0
     ci_noise = paired_bootstrap(pd.concat([bench, noisy]), "noisy", "form")
     assert ci_noise.loc["mae", "low"] < 0 < ci_noise.loc["mae", "high"]
+
+
+def test_paired_bootstrap_raises_when_no_shared_gameweeks():
+    from prediction.backtest import paired_bootstrap
+    a = pd.DataFrame([{"season": "2023-24", "gameweek": 1, "model": "component", "horizon": 0,
+                       "mae": 1.0, "rmse": 1.0, "rho": 0.5}])
+    b = pd.DataFrame([{"season": "2023-24", "gameweek": 2, "model": "form", "horizon": 0,
+                       "mae": 1.0, "rmse": 1.0, "rho": 0.5}])
+    with pytest.raises(ValueError, match="share no gameweeks"):
+        paired_bootstrap(pd.concat([a, b]), "component", "form")
