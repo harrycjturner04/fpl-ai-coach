@@ -1,6 +1,6 @@
 """Walk-forward backtest: replay past gameweeks using only what was known at each deadline.
 
-    python -m prediction.backtest --seasons 2022-23,2023-24,2024-25 --models naive,xp
+    python -m prediction.backtest --seasons 2022-23,2023-24,2024-25 --models naive,form
 """
 
 from __future__ import annotations
@@ -81,9 +81,24 @@ def naive_predictor(snap: Snapshot) -> pd.DataFrame:
 
 
 def xp_predictor(snap: Snapshot) -> pd.DataFrame:
-    """FPL's own expected points; exists for the next gameweek only."""
+    """FPL's xP from the archive. NOTE: captured after the gameweek was played (design doc section 10.1);
+    reference only, never a benchmark."""
     xp = snap.benchmark_xp.rename("total").reset_index()
     return xp.assign(gameweek=snap.gameweek)[["player_code", "gameweek", "total"]]
+
+
+FORM_DAYS = 30
+
+
+def form_predictor(snap: Snapshot) -> pd.DataFrame:
+    """FPL's own pre-deadline method, rebuilt: points in the last 30 days per team match in that window
+    (reproduces FPL's live `form` for 97% of players), times fixtures in each gameweek."""
+    window = snap.history[snap.history["kickoff"] >= snap.cutoff - pd.Timedelta(days=FORM_DAYS)]
+    per_match = window.groupby("player_code")["points"].mean().rename("per_match")
+    p = snap.players_now.join(per_match, on="player_code").fillna({"per_match": 0.0})
+    rows = p.merge(_team_fixture_counts(snap.fixtures_ahead), on="team_code")
+    rows["total"] = rows["per_match"] * rows["n_fixtures"]
+    return rows[["player_code", "gameweek", "total"]]
 
 
 def eligible_players(history: pd.DataFrame) -> set[int]:
@@ -164,6 +179,33 @@ def calibration(per_player: pd.DataFrame, model: str, horizon: int = 0) -> pd.Da
                                     players=("actual", "size")).round(2)
 
 
+def paired_bootstrap(per_gw: pd.DataFrame, model: str, benchmark: str, horizon: int = 0,
+                     n_boot: int = 2000, seed: int = 0) -> pd.DataFrame:
+    """95% intervals for (model - benchmark), resampling whole gameweeks (a block bootstrap, so a freak week
+    moves both models together). Negative mae/rmse and positive rho differences favour the model."""
+    keys = ["season", "gameweek"]
+    a = per_gw[(per_gw["model"] == model) & (per_gw["horizon"] == horizon)].set_index(keys)
+    b = per_gw[(per_gw["model"] == benchmark) & (per_gw["horizon"] == horizon)].set_index(keys)
+    common = a.index.intersection(b.index)
+    a, b = a.loc[common], b.loc[common]
+    draws = np.random.default_rng(seed).integers(0, len(common), size=(n_boot, len(common)))
+    everything = np.arange(len(common))
+
+    def stat(frame, col, rows):
+        values = frame[col].to_numpy(dtype=float)
+        if col == "rmse":
+            return np.sqrt(np.nanmean(values[rows] ** 2, axis=-1))
+        return np.nanmean(values[rows], axis=-1)
+
+    out = []
+    for col in ("mae", "rmse", "rho"):
+        boots = stat(a, col, draws) - stat(b, col, draws)
+        low, high = np.percentile(boots, [2.5, 97.5])
+        out.append({"metric": col, "difference": float(stat(a, col, everything) - stat(b, col, everything)),
+                    "low": float(low), "high": float(high)})
+    return pd.DataFrame(out).set_index("metric").round(4)
+
+
 def make_component_predictor(params: ModelParams, components=COMPONENTS) -> Predictor:
     def predictor(snap: Snapshot) -> pd.DataFrame:
         pred = predict(snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, snap.season,
@@ -182,7 +224,7 @@ def load_params(path: str | None) -> ModelParams:
 def build_predictors(names: list[str], params_path: str | None = None,
                      ablation: bool = False) -> dict[str, Predictor]:
     params = load_params(params_path)
-    predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor,
+    predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor, "form": form_predictor,
                                         "component": make_component_predictor(params)}
     chosen = {n: predictors[n] for n in names}
     if ablation:  # the component model with one component switched off at a time
@@ -195,7 +237,7 @@ def build_predictors(names: list[str], params_path: str | None = None,
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Walk-forward backtest of prediction models.")
     parser.add_argument("--seasons", default="2022-23,2023-24,2024-25")
-    parser.add_argument("--models", default="naive,xp")
+    parser.add_argument("--models", default="naive,form")
     parser.add_argument("--params", help="model_params.json for the component model")
     parser.add_argument("--every", type=int, default=1, help="use every Nth gameweek (faster)")
     parser.add_argument("--no-decision", action="store_true")
@@ -208,6 +250,10 @@ def main(argv: list[str] | None = None) -> None:
     print(summary(per_gw).to_string())
     for model in args.models.split(","):
         print(f"\nCalibration ({model}, next gameweek):\n{calibration(per_player, model).to_string()}")
+    if "form" in per_gw["model"].unique():
+        for model in [m for m in per_gw["model"].unique() if m != "form"]:
+            print(f"\n{model} minus rebuilt FPL form, next gameweek (95% bootstrap interval):")
+            print(paired_bootstrap(per_gw, model, "form").to_string())
 
 
 if __name__ == "__main__":

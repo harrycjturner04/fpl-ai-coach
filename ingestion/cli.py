@@ -59,6 +59,7 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
         gameweeks=tables["gameweeks"],
     )
     storage.save_json(metadata, "metadata", data_dir)
+    _record_ep_next(tables, data_dir, pd.Timestamp(metadata["pulled_at"]))
 
     current_rows = _update_current_season(client, tables, data_dir)
     storage.save_table(current_rows, "current_season_rows", data_dir)
@@ -88,6 +89,27 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
 
     storage.prune_snapshots(keep_raw, data_dir)
     return {"snapshot": snapshot, "tables": tables, "current_gw": current_gw, "manager_state": state}
+
+
+def _record_ep_next(tables: dict, data_dir: Path, now: pd.Timestamp) -> pd.DataFrame | None:
+    """Save FPL's own forecast (ep_next) for the next gameweek, keeping the latest record before its deadline.
+    This builds a genuine pre-deadline benchmark as the season goes on."""
+    gws = tables["gameweeks"]
+    upcoming = gws[gws["is_next"]]
+    if upcoming.empty or "ep_next" not in tables["players"].columns:
+        return None
+    gameweek, deadline = int(upcoming["id"].iloc[0]), upcoming["deadline_time"].iloc[0]
+    if now >= deadline:
+        return None
+    players = tables["players"]
+    new = pd.DataFrame({"season": transform.season_label(gws), "gameweek": gameweek,
+                        "player_code": players["code"].to_numpy(), "ep_next": players["ep_next"].to_numpy(),
+                        "recorded_at": now})
+    old = storage.load_table_or_none("ep_next_log", data_dir)
+    log = new if old is None else pd.concat([old, new], ignore_index=True)
+    log = log.sort_values("recorded_at").drop_duplicates(["season", "gameweek", "player_code"], keep="last")
+    storage.save_table(log.reset_index(drop=True), "ep_next_log", data_dir)
+    return log
 
 
 def _update_current_season(client: FPLClient, tables: dict, data_dir: Path) -> pd.DataFrame:

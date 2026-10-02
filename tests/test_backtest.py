@@ -97,3 +97,28 @@ def test_component_predictor_runs_in_backtest():
     per_gw, _ = run_backtest(synthetic_log(), ["2023-24"], {"component": make_component_predictor(ModelParams())},
                              horizons=2, decision=False)
     assert set(per_gw.horizon) == {0, 1} and per_gw.mae.notna().all()
+
+
+def test_form_predictor_is_mean_points_over_last_30_days():
+    from prediction.backtest import FORM_DAYS, form_predictor
+    log = synthetic_log()
+    snap = snapshot(log, "2023-24", 4)
+    window = snap.history[snap.history.kickoff >= snap.cutoff - pd.Timedelta(days=FORM_DAYS)]
+    code = 100
+    expected = window[window.player_code == code].points.mean()
+    pred = form_predictor(snap)
+    assert pred[(pred.player_code == code) & (pred.gameweek == 4)].total.iloc[0] == pytest.approx(expected)
+
+
+def test_paired_bootstrap_detects_a_real_difference_and_not_noise():
+    from prediction.backtest import paired_bootstrap
+    rng = np.random.default_rng(0)
+    gws = [{"season": "2023-24", "gameweek": g} for g in range(1, 31)]
+    bench = pd.DataFrame([dict(g, model="form", horizon=0, mae=2.0, rmse=3.0, rho=0.4) for g in gws])
+    better = bench.assign(model="component", mae=1.5, rmse=2.5, rho=0.5)
+    noisy = bench.assign(model="noisy", mae=2.0 + rng.normal(0, 0.3, 30), rmse=3.0, rho=0.4)
+    ci = paired_bootstrap(pd.concat([bench, better]), "component", "form")
+    assert ci.loc["mae", "difference"] == pytest.approx(-0.5) and ci.loc["mae", "high"] < 0
+    assert ci.loc["rho", "low"] > 0
+    ci_noise = paired_bootstrap(pd.concat([bench, noisy]), "noisy", "form")
+    assert ci_noise.loc["mae", "low"] < 0 < ci_noise.loc["mae", "high"]
