@@ -15,6 +15,7 @@ the matches where they were earned, so they transfer between teams.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -26,7 +27,7 @@ from .team_ratings import TeamRatings
 
 PRICE_BANDS = (5.5, 7.5, 10.0)
 DC_THRESHOLD = rules_for_season(DC_FIRST_SEASON).dc_threshold  # GKP maps to inf: never counts
-RATE_COLUMNS = ["p60", "psub", "m60", "msub", "xg_rel", "xa_rel", "bonus90", "saves_rel", "p_dc",
+RATE_COLUMNS = ["p60", "psub", "p60_long", "psub_long", "m60", "msub", "xg_rel", "xa_rel", "bonus90", "saves_rel", "p_dc",
                 "yellow90", "red90"]
 TYPICAL_MINUTES = {"m60": 87.0, "msub": 25.0}
 
@@ -35,6 +36,8 @@ TYPICAL_MINUTES = {"m60": 87.0, "msub": 25.0}
 class PlayerParams:
     half_life_days: float = 120.0
     minutes_half_life_days: float = 120.0
+    minutes_long_half_life_days: float = 60.0
+    minutes_fade_days: float = math.inf  # inf: short minutes memory only
     prev_season_fade: float = 0.5
     kappa_minutes: float = 3.0
     kappa_typical_minutes: float = 3.0
@@ -54,6 +57,8 @@ def price_band(prices) -> np.ndarray:
 _RATES = {
     "p60": ("W60", "W", "kappa_minutes"),
     "psub": ("Wsub", "W", "kappa_minutes"),
+    "p60_long": ("W60L", "WL", "kappa_minutes"),
+    "psub_long": ("WsubL", "WL", "kappa_minutes"),
     "m60": ("M60", "W60", "kappa_typical_minutes"),
     "msub": ("MS", "Wsub", "kappa_typical_minutes"),
     "xg_rel": ("XG", "LT", "kappa_xg"),
@@ -69,6 +74,7 @@ _RATES = {
 def _weighted_sums(h: pd.DataFrame, ratings: TeamRatings) -> pd.DataFrame:
     w = h["w"]
     wm = h["wm"]
+    wl = h["wl"]
     s60 = (h["minutes"] >= 60).astype(float)
     ssub = ((h["minutes"] > 0) & (h["minutes"] < 60)).astype(float)
     e90 = h["minutes"] / 90
@@ -77,7 +83,8 @@ def _weighted_sums(h: pd.DataFrame, ratings: TeamRatings) -> pd.DataFrame:
     dc_valid = (h["season"] >= DC_FIRST_SEASON) & (h["position"] != "GKP")
     dc_hit = (h["defensive_contribution"] >= h["position"].map(DC_THRESHOLD).fillna(np.inf)).astype(float)
     return pd.DataFrame({
-        "W": wm, "W60": wm * s60, "Wsub": wm * ssub, "E": w * e90,
+        "W": wm, "W60": wm * s60, "Wsub": wm * ssub,
+        "WL": wl, "W60L": wl * s60, "WsubL": wl * ssub, "E": w * e90,
         "M60": wm * s60 * h["minutes"], "MS": wm * ssub * h["minutes"],
         "XG": w * h["xg"], "XA": w * h["xa"], "LT": w * e90 * lam_team,
         "B": w * h["bonus"], "S": w * h["saves"], "LO": w * e90 * lam_opp,
@@ -94,6 +101,7 @@ def player_features(history: pd.DataFrame, cutoff: pd.Timestamp, season: str, ra
     age = (cutoff - h["kickoff"]).dt.total_seconds() / 86400
     h["w"] = 0.5 ** (age / params.half_life_days) * params.prev_season_fade ** back
     h["wm"] = 0.5 ** (age / params.minutes_half_life_days) * params.prev_season_fade ** back
+    h["wl"] = 0.5 ** (age / params.minutes_long_half_life_days) * params.prev_season_fade ** back
     h["band"] = price_band(h["price"])
     sums = _weighted_sums(h, ratings)
 
