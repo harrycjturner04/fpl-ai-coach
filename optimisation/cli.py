@@ -111,7 +111,8 @@ def format_solution(sol: Solution, context: dict) -> str:
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Optimise an FPL squad from the latest ingested data.")
     parser.add_argument("--entry", type=int, help="optimise transfers for this FPL team ID")
-    parser.add_argument("--ep-weight", type=float, default=0.7, help="weight on ep_next vs form (default 0.7)")
+    parser.add_argument("--ep-weight", type=float, default=0.7,
+                        help="weight on ep_next vs form (default 0.7; placeholder scorer only)")
     parser.add_argument("--bench-weight", type=float, default=0.1, help="value of bench points (default 0.1)")
     parser.add_argument("--max-transfers", type=int, help="cap on transfers (default: free transfers + 2)")
     parser.add_argument("--budget", type=float, help="budget in £m for from-scratch mode (default 100)")

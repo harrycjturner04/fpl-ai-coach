@@ -72,7 +72,10 @@ def load_archive(seasons=ARCHIVE_SEASONS, fetch=fetch_season) -> pd.DataFrame:
 
 
 def main() -> None:
-    log = load_archive()
+    try:
+        log = load_archive()
+    except requests.RequestException as err:
+        raise SystemExit(f"Could not download the archive ({err}); live FPL data is unaffected.") from err
     path = storage.save_table(log, "archive_match_log")
     print(f"Saved {len(log):,} archive rows ({', '.join(ARCHIVE_SEASONS)}) to {path}")
 

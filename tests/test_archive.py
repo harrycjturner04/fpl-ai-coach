@@ -1,6 +1,8 @@
 import pandas as pd
 import pytest
+import requests
 
+from ingestion import archive
 from ingestion.archive import load_archive, season_match_rows
 from ingestion.transform import MATCH_COLUMNS
 
@@ -57,3 +59,12 @@ def test_load_archive_concatenates_seasons():
     frames = dict(zip(["merged", "players_raw", "teams"], _season_frames()))
     log = load_archive(["2022-23", "2023-24"], fetch=lambda s: frames)
     assert sorted(log.season.unique()) == ["2022-23", "2023-24"] and len(log) == 4
+
+
+def test_main_gives_a_clear_message_when_the_download_fails(monkeypatch):
+    def _raise_connection_error(*args, **kwargs):
+        raise requests.ConnectionError("boom")
+
+    monkeypatch.setattr(archive, "load_archive", _raise_connection_error)
+    with pytest.raises(SystemExit, match="Could not download the archive"):
+        archive.main()

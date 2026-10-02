@@ -66,9 +66,8 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     archive = storage.load_table_or_none("archive_match_log", data_dir)
     if archive is None:
         print("  no archive yet: run `python -m ingestion.archive` for past seasons")
-    parts = [x for x in (archive, current_rows) if x is not None and not x.empty]
-    if parts:
-        match_log = pd.concat(parts, ignore_index=True).sort_values(["kickoff", "fixture_id", "player_code"])
+    match_log = _combine_match_log(archive, current_rows)
+    if match_log is not None:
         storage.save_table(match_log, "match_log", data_dir)
 
     state = None
@@ -112,22 +111,51 @@ def _record_ep_next(tables: dict, data_dir: Path, now: pd.Timestamp) -> pd.DataF
     return log
 
 
+def _gameweek_is_covered(cached: pd.DataFrame | None, fixtures: pd.DataFrame, gameweek: int) -> bool:
+    """True if every fixture of this gameweek (fixtures with no event yet are ignored) has a
+    cached row. A gameweek fetched while some fixtures hadn't finished yet is covered once its
+    cached rows span all of them, not just because it's since become `finished`/`data_checked`."""
+    with_event = fixtures.dropna(subset=["event"])
+    full = set(with_event.loc[with_event["event"] == gameweek, "id"])
+    if not full:
+        return True
+    if cached is None:
+        return False
+    got = set(cached.loc[cached["gameweek"] == gameweek, "fixture_id"])
+    return full <= got
+
+
 def _update_current_season(client: FPLClient, tables: dict, data_dir: Path) -> pd.DataFrame:
-    """This season's match-log rows. Finished, confirmed gameweeks are fetched once and
-    cached; unconfirmed and in-progress gameweeks are re-fetched every run."""
+    """This season's match-log rows. Finished, confirmed gameweeks whose cached rows cover every
+    one of their fixtures are fetched once and cached; unconfirmed, in-progress, and
+    partially-covered gameweeks are re-fetched every run."""
     gws = tables["gameweeks"]
     season = transform.season_label(gws)
     cached = storage.load_table_or_none("current_season_rows", data_dir)
     if cached is not None:
         cached = cached[cached["season"] == season]
-    have = set() if cached is None else set(cached["gameweek"])
     todo = [int(g.id) for g in gws[gws["finished"] | gws["is_current"]].itertuples()
-            if g.id not in have or not g.data_checked or g.is_current]
+            if not _gameweek_is_covered(cached, tables["fixtures"], g.id) or not g.data_checked or g.is_current]
+    skipped: list[int] = []
     fresh = [transform.live_match_rows(client.event_live(g), g, tables["fixtures"], tables["players"],
-                                       tables["teams"], season) for g in todo]
+                                       tables["teams"], season, skipped=skipped) for g in todo]
+    if skipped:
+        print(f"  skipped {len(skipped)} player-gameweek row(s): player(s) moved club since that gameweek")
     keep = None if cached is None else cached[~cached["gameweek"].isin(todo)]
     parts = [x for x in (keep, *fresh) if x is not None and not x.empty]
     return pd.concat(parts, ignore_index=True) if parts else pd.DataFrame(columns=transform.MATCH_COLUMNS)
+
+
+def _combine_match_log(archive: pd.DataFrame | None, current_rows: pd.DataFrame) -> pd.DataFrame | None:
+    """Archive rows plus this season's current rows. If a season in `current_rows` is already in
+    the archive (it was added to ARCHIVE_SEASONS once finished), its current rows are dropped so
+    the season isn't counted twice."""
+    if archive is not None and not archive.empty:
+        current_rows = current_rows[~current_rows["season"].isin(set(archive["season"]))]
+    parts = [x for x in (archive, current_rows) if x is not None and not x.empty]
+    if not parts:
+        return None
+    return pd.concat(parts, ignore_index=True).sort_values(["kickoff", "fixture_id", "player_code"])
 
 
 def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,

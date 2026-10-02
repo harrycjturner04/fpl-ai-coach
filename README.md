@@ -8,7 +8,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 
 1. **Ingestion**: official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks), later squad-screenshot parsing and injury/news sources.
 2. **Feature engineering**: rolling form, per-90 rates, fixture difficulty, minutes reliability, set-piece duty, team strength.
-3. **Prediction**: expected points per player for the next 1–5 gameweeks, starting with a form × fixture-difficulty baseline, then gradient-boosted trees validated walk-forward by gameweek. Minutes/start probability is modelled separately.
+3. **Prediction**: expected points per player for the next 1–5 gameweeks, built component-by-component from team attack/defence ratings, player minutes/start probability and per-90 rates, combined through FPL's own scoring rules; next, gradient-boosted trees validated walk-forward by gameweek. Minutes/start probability is modelled separately.
 4. **Optimisation**: a PuLP integer linear program covering budget, 2/5/5/3 squad, max 3 per club, valid formation, captaincy, and the −4 transfer hit.
 5. **Reasoning**: an LLM that turns news into structured risk flags, reviews the optimiser's output, plans chip timing, and writes the recommendation, calling the optimiser as a tool to test scenarios.
 
@@ -108,6 +108,14 @@ Known limitation: the archive holds the final fixture schedule, so predictions m
 gameweeks slightly earlier than they were announced. Defensive contribution scoring exists only from 2025/26, so
 this holdout is also its first evaluation.
 
+The RMSE in the table is the mean of each gameweek's RMSE; the quoted 0.345 difference above (and its confidence
+interval) instead uses the pooled root-mean-square of the per-gameweek RMSEs, a different (quadratic, not
+arithmetic) average that weights worse gameweeks more heavily, so the two numbers are not directly comparable.
+
+Reproduce the holdout: `python -m prediction.backtest --seasons 2025-26 --models naive,form,component --params
+data/processed/model_params.json` (`--models` defaults to `naive,form`; add `component` explicitly, with `--params`
+pointing at a tuned parameters file, to include it).
+
 ## How this project is built
 
 I use [Claude Code](https://claude.com/claude-code) as a development tool, in the same way I'd use any tool that makes me faster: it writes much of the implementation and tests, and runs an automated review pass. The thinking behind the project is mine. I set the vision and architecture, decide the approach for each problem, and choose between alternatives after weighing them up. The reasoning behind the key decisions, such as why the optimiser is an integer linear program and how free transfers are valued, is documented in the sections above.
@@ -120,9 +128,22 @@ The most important parts of the system, the theory and maths behind the decision
 data/raw/<YYYY-MM-DD_HHMMSS>/*.json   raw API responses from the latest pull only (older pulls pruned)
 data/processed/*.parquet              tidy tables: players, teams, positions, gameweeks,
                                       fixtures, chips, player_history, entry_*
+data/processed/archive_match_log.parquet    past-season match-log rows (ingestion/archive.py)
+data/processed/current_season_rows.parquet  this season's match-log rows, refreshed each pull
+data/processed/match_log.parquet      archive + current-season rows combined (deduplicated by season):
+                                      the prediction model's input
+data/processed/ep_next_log.parquet    FPL's own ep_next forecast, snapshotted before each deadline
+data/processed/predictions.parquet    the component model's latest live output (prediction/cli.py)
+data/processed/model_params.json      tuned parameters from a local re-tune (prediction/tune.py); takes
+                                      priority over the copy shipped at prediction/model_params.json
+data/processed/tuning_log.parquet     one row per coordinate-descent step (prediction/tune.py)
 data/processed/game_rules.json        budget, squad composition, club cap, FT cap, sell-on fee
 data/processed/metadata.json          when data and each team were last pulled (drives auto-refresh)
 data/processed/manager_state_<id>.json
+prediction/model_params.json          tuned parameters shipped in the repo, so a fresh clone uses them
+                                      without a local re-tune
 ```
 
-`data/` is not committed; run the CLI to regenerate it.
+`data/` is not committed; run the CLI to regenerate it. Current-season player prices (`players.price`, and
+`current_season_rows`/`match_log` rows pulled this season) are the price at pull time, not a point-in-time
+historical record.

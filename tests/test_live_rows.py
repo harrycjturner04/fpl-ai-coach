@@ -53,6 +53,30 @@ def test_player_without_live_entry_gets_zero_minute_rows():
     assert len(defender) == 2 and defender.minutes.eq(0).all() and defender.xp.isna().all()
 
 
+def test_player_transferred_to_a_new_club_is_skipped_for_that_gameweek():
+    # Player 10's current team is 1 (per PLAYERS). Fixture 4 (team 2 v team 3) doesn't involve
+    # team 1 at all, so his explain listing only it means he played for a different club this
+    # gameweek (e.g. transferred away from team 1 since): no rows for him.
+    fixtures = pd.concat([FIXTURES, pd.DataFrame({
+        "id": [4], "event": [6], "team_h": [2], "team_a": [3],
+        "kickoff_time": pd.to_datetime(["2026-10-11T14:00Z"], utc=True), "finished_provisional": [True],
+    })], ignore_index=True)
+    live = {"elements": [
+        {"id": 10, "stats": _stat(minutes=90, total_points=6),
+         "explain": [{"fixture": 4, "stats": [{"identifier": "minutes", "value": 90, "points": 2}]}]},
+    ]}
+    skipped: list = []
+    rows = live_match_rows(live, 6, fixtures, PLAYERS, TEAMS, "2026-27", skipped=skipped)
+    assert rows[rows.player_code == 100].empty
+    assert skipped == [100]
+
+
+def test_normal_player_is_unaffected_by_the_transfer_check():
+    rows = live_match_rows(LIVE, 6, FIXTURES, PLAYERS, TEAMS, "2026-27", skipped=[])
+    mid = rows[rows.player_code == 100]
+    assert len(mid) == 2  # unchanged from test_double_gameweek_splits_stats_by_minutes_and_skips_unfinished
+
+
 def test_stat_not_fully_covered_by_explain_falls_back_to_minutes_split():
     live = {"elements": [
         {"id": 10, "stats": _stat(minutes=150, saves=4, total_points=9),

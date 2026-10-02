@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import warnings
+from dataclasses import asdict, dataclass, field, fields
 
 import numpy as np
 import pandas as pd
@@ -28,7 +29,23 @@ class ModelParams:
 
     @classmethod
     def from_dict(cls, d: dict) -> "ModelParams":
-        return cls(team=TeamParams(**d["team"]), player=PlayerParams(**d["player"]), flag_fade=d["flag_fade"])
+        return cls(team=_dataclass_from_dict(TeamParams, d["team"], "TeamParams"),
+                   player=_dataclass_from_dict(PlayerParams, d["player"], "PlayerParams"),
+                   flag_fade=d["flag_fade"])
+
+
+def _dataclass_from_dict(dc_cls: type, values: dict, label: str):
+    """Build `dc_cls` from a loaded dict, warning about any of its fields the dict is missing
+    (defaults used; an older params file) and raising on any key the dict has that it doesn't
+    (a stale or mismatched params file)."""
+    valid = {f.name for f in fields(dc_cls)}
+    unknown = sorted(set(values) - valid)
+    if unknown:
+        raise ValueError(f"Unknown {label} parameter(s): {unknown}")
+    missing = sorted(valid - set(values))
+    if missing:
+        warnings.warn(f"{label} parameter(s) missing from file, using defaults: {missing}")
+    return dc_cls(**values)
 
 
 def fixture_components(rows: pd.DataFrame, rules: ScoringRules, components=COMPONENTS) -> pd.DataFrame:

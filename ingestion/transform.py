@@ -261,7 +261,7 @@ def _split_stat(key: str, total: float, explain: dict, fixture_ids: list, share_
 
 
 def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: pd.DataFrame,
-                    teams: pd.DataFrame, season: str) -> pd.DataFrame:
+                    teams: pd.DataFrame, season: str, skipped: list | None = None) -> pd.DataFrame:
     """Match-log rows for one gameweek from `event/{gw}/live`.
 
     Only finished fixtures are included. In a double gameweek FPL reports one
@@ -270,9 +270,16 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
     back to a split by minutes played in each fixture; points always come from
     `explain` per fixture. Players with no live entry get zero-minute rows
     (they didn't play).
+
+    A player's team comes from today's bootstrap, so a player who transferred
+    clubs mid-gameweek would otherwise have his old club's minutes/stats
+    credited to his new club's fixtures. If his `explain` lists fixtures and
+    none of them belongs to his current team's fixtures this gameweek, he's
+    skipped for this gameweek (his player_code is appended to `skipped` if given).
     """
     code_of = teams.set_index("id")["code"]
-    done = fixtures[(fixtures["event"] == gameweek) & fixtures["finished_provisional"].astype(bool)]
+    gw_fixtures = fixtures[fixtures["event"] == gameweek]
+    done = gw_fixtures[gw_fixtures["finished_provisional"].astype(bool)]
     by_id = {e["id"]: e for e in live.get("elements", [])}
     rows = []
     for p in players.itertuples():
@@ -281,7 +288,16 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
             continue
         entry = by_id.get(p.id, {"stats": {}, "explain": []})
         stats = entry.get("stats", {})
-        explain = {x["fixture"]: {s["identifier"]: s for s in x["stats"]} for x in entry.get("explain", [])}
+        explain_list = entry.get("explain", [])
+        explain_fixture_ids = {x["fixture"] for x in explain_list}
+        if explain_fixture_ids:
+            current_team_fx_ids = set(gw_fixtures.loc[(gw_fixtures["team_h"] == p.team)
+                                                       | (gw_fixtures["team_a"] == p.team), "id"])
+            if not explain_fixture_ids & current_team_fx_ids:
+                if skipped is not None:
+                    skipped.append(int(p.code))
+                continue
+        explain = {x["fixture"]: {s["identifier"]: s for s in x["stats"]} for x in explain_list}
         fixture_ids = list(team_fx["id"])
         mins = {f: explain.get(f, {}).get("minutes", {}).get("value", 0) for f in fixture_ids}
         total_mins = sum(mins.values())

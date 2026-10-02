@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -15,14 +16,19 @@ from ingestion import storage, transform
 from .component_model import ModelParams, predict
 
 PARAMS_FILE = "model_params"
+SHIPPED_PARAMS_PATH = Path(__file__).parent / "model_params.json"
 
 
 def load_live_params(data_dir: Path) -> ModelParams:
+    """Re-tuned parameters (`data/processed/model_params.json`) if present, else the tuned
+    values shipped in the repo (`prediction/model_params.json`), else defaults with a warning."""
     stored = storage.load_json_or_none(PARAMS_FILE, data_dir)
-    if stored is None:
-        print("  model_params.json not found: using default parameters (run `python -m prediction.tune`)")
-        return ModelParams()
-    return ModelParams.from_dict(stored)
+    if stored is not None:
+        return ModelParams.from_dict(stored)
+    if SHIPPED_PARAMS_PATH.exists():
+        return ModelParams.from_dict(json.loads(SHIPPED_PARAMS_PATH.read_text()))
+    print("  model_params.json not found: using default parameters (run `python -m prediction.tune`)")
+    return ModelParams()
 
 
 def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = None) -> dict:
@@ -31,12 +37,18 @@ def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = Non
     teams = storage.load_table("teams", data_dir)
     fixtures = storage.load_table("fixtures", data_dir)
     gameweeks = storage.load_table("gameweeks", data_dir)
+    history = storage.load_table_or_none("match_log", data_dir)
+    if history is None:
+        raise SystemExit("No match log yet: run python -m ingestion.archive, then python -m ingestion.cli.")
     code_of = teams.set_index("id")["code"]
-    next_gw = int(gameweeks.loc[gameweeks["is_next"], "id"].iloc[0])
+    next_gw_rows = gameweeks.loc[gameweeks["is_next"], "id"]
+    if next_gw_rows.empty:
+        raise SystemExit("No upcoming gameweek: the season has finished.")
+    next_gw = int(next_gw_rows.iloc[0])
     ahead = fixtures[(fixtures["event"] >= next_gw) & (fixtures["event"] < next_gw + horizon)]
     selectable = players[players["can_select"].fillna(True).astype(bool)]
     return {
-        "history": storage.load_table("match_log", data_dir),
+        "history": history,
         "players_now": pd.DataFrame({
             "player_code": selectable["code"], "team_code": selectable["team"].map(code_of),
             "position": selectable["position"], "price": selectable["price"],
@@ -60,6 +72,19 @@ def run(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp |
     return pred
 
 
+def prediction_table(pred: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+    """Per-player summary: points per gameweek (fixtures summed within a gameweek), the 5 GW
+    total, and p60/no_history for the player's nearest upcoming gameweek. Nearest, not merge
+    order (`pred`'s row order follows the fixture merge, not the gameweek), since a later,
+    less-faded horizon would otherwise understate a flagged player's injury risk."""
+    table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack("gameweek").round(2)
+    table["5 GW total"] = table.sum(axis=1)
+    info = players.loc[table.index, ["web_name", "team_short", "position", "price"]]
+    sort_cols = ["gameweek", "kickoff"] if "kickoff" in pred.columns else ["gameweek"]
+    nearest = pred.sort_values(sort_cols).groupby("player_id").first()
+    return info.join(table).join(nearest[["p60", "no_history"]])
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description="Expected points for the next five gameweeks.")
     parser.add_argument("--position", choices=["GKP", "DEF", "MID", "FWD"])
@@ -67,11 +92,7 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     pred = run()
     players = storage.load_table("players").set_index("id")
-    table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack("gameweek").round(2)
-    table["5 GW total"] = table.sum(axis=1)
-    info = players.loc[table.index, ["web_name", "team_short", "position", "price"]]
-    first = pred.groupby("player_id").first()
-    table = info.join(table).join(first[["p60", "no_history"]])
+    table = prediction_table(pred, players)
     if args.position:
         table = table[table["position"] == args.position]
     print(table.sort_values("5 GW total", ascending=False).head(args.top).to_string())

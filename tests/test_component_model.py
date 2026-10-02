@@ -106,5 +106,13 @@ def test_params_round_trip():
 def test_params_from_dict_tolerates_an_old_dict_missing_minutes_half_life():
     d = ModelParams().to_dict()
     del d["player"]["minutes_half_life_days"]
-    loaded = ModelParams.from_dict(d)
+    with pytest.warns(UserWarning, match="minutes_half_life_days"):
+        loaded = ModelParams.from_dict(d)
     assert loaded.player.minutes_half_life_days == ModelParams().player.minutes_half_life_days
+
+
+def test_params_from_dict_raises_on_an_unknown_key():
+    d = ModelParams().to_dict()
+    d["player"]["bogus_field"] = 1.0
+    with pytest.raises(ValueError, match="bogus_field"):
+        ModelParams.from_dict(d)

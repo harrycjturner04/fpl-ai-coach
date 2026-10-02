@@ -263,3 +263,9 @@ Team ratings are unbiased (mean predicted team goals 1.48 vs actual xG 1.47). Pl
 better than a raw recent xG/90 average. The minutes model is close to calibrated and slightly under-confident; less
 shrinkage and a shorter memory improve it, which tuning searches. All components are kept; the ablation is re-run on
 RMSE after tuning.
+
+### 10.4 Early-season reporting (deferred)
+
+Section 5.1 asked for gameweeks 1 to 5 of each season to be reported separately. The tuning and holdout results pool
+them with the rest of the season. The split is deferred to Stage 3b, where it can be reported without re-running the
+locked 2025/26 evaluation for a new breakdown.

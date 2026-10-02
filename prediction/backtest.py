@@ -38,7 +38,8 @@ class Snapshot:
     players_now: pd.DataFrame    # player_code, team_code, position, price, chance
     fixtures_ahead: pd.DataFrame  # gameweek, fixture_id, kickoff, home_code, away_code
     teams_in_season: list[int]
-    benchmark_xp: pd.Series      # FPL's xP for this gameweek (published before the deadline)
+    benchmark_xp: pd.Series      # FPL's xP for this gameweek; captured after it was played (design doc
+                                 # section 10.1), so it's reference only, never a genuine benchmark
 
 
 Predictor = Callable[[Snapshot], pd.DataFrame]

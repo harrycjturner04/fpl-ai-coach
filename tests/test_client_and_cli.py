@@ -1,3 +1,4 @@
+import pandas as pd
 import pytest
 import requests
 
@@ -114,3 +115,23 @@ def test_cli_run_end_to_end_offline(tmp_path, bootstrap, raw_fixtures, element_s
 
     summary = cli.summarise(result)
     assert "Current GW: 2" in summary and "Free transfers for GW3: 1" in summary
+
+
+def test_combine_match_log_drops_current_rows_for_an_archived_season():
+    archive = pd.DataFrame({"season": ["2025-26"], "gameweek": [1], "fixture_id": [1], "player_code": [100],
+                            "kickoff": pd.to_datetime(["2025-08-10T14:00Z"], utc=True)})
+    current = pd.DataFrame({
+        "season": ["2025-26", "2026-27"], "gameweek": [1, 1], "fixture_id": [1, 10],
+        "player_code": [100, 200],
+        "kickoff": pd.to_datetime(["2025-08-10T14:00Z", "2026-08-22T14:00Z"], utc=True),
+    })
+    combined = cli._combine_match_log(archive, current)
+    assert len(combined) == 2  # the 2025-26 row from the archive only, plus the new 2026-27 row
+    assert sorted(combined["season"]) == ["2025-26", "2026-27"]
+
+
+def test_combine_match_log_with_no_archive_keeps_all_current_rows():
+    current = pd.DataFrame({"season": ["2026-27"], "gameweek": [1], "fixture_id": [1], "player_code": [100],
+                            "kickoff": pd.to_datetime(["2026-08-22T14:00Z"], utc=True)})
+    combined = cli._combine_match_log(None, current)
+    assert len(combined) == 1
