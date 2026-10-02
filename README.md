@@ -16,7 +16,8 @@ Five layers, each with a single responsibility; only clean, structured output cr
 
 - [x] Stage 1: Ingestion skeleton (FPL API → raw JSON snapshots + Parquet tables)
 - [x] Stage 2: ILP optimiser on current stats (from-scratch squads and transfer plans)
-- [ ] Stage 3: Baseline prediction
+- [x] Stage 3a: Component prediction model (appearance, goals, assists, clean sheets, bonus, etc.), live and feeding the optimiser by default
+- [ ] Stage 3b: Multi-week optimiser horizon
 - [ ] Stage 4: Screenshot parsing
 - [ ] Stage 5: ML prediction model
 - [ ] Stage 6: LLM reasoning layer
@@ -30,9 +31,14 @@ pip install -e ".[dev]"
 python -m ingestion.cli                  # players, teams, gameweeks, fixtures
 python -m ingestion.cli --history        # + per-player gameweek history (~670 requests, a few minutes)
 python -m ingestion.cli --entry 1234567  # + your team: history, chips, transfers, squad prices
+python -m ingestion.archive              # past-season archive for training/backtesting (once per season)
+
+python -m prediction.cli                     # expected points for the next 5 gameweeks
+python -m prediction.backtest                # walk-forward backtest of the component model vs. benchmarks
+python -m prediction.tune                    # coordinate-descent tuning on the tuning seasons
 
 # The optimiser re-pulls data automatically if it's over 24h old or a deadline has passed.
-python -m optimisation.cli                   # best squad from scratch (£100m)
+python -m optimisation.cli                   # best squad from scratch (£100m), scored by the component model
 python -m optimisation.cli --entry 1234567   # best transfers for your team (after ingesting it)
 
 pytest                                      # offline tests
@@ -41,6 +47,8 @@ python scripts/validate_free_transfers.py   # re-check the free-transfer model a
 ```
 
 Your FPL team (entry) ID is the number in the URL of your team's "Points" page.
+
+At the end of a season, add it to `ARCHIVE_SEASONS` in `ingestion/archive.py` and re-run `python -m ingestion.archive`: the current-season rows reset once the season label changes, so last season's data only survives in the archive.
 
 ## Manager state (`--entry`)
 
@@ -75,7 +83,8 @@ Why an ILP: expected squad points are a sum of player expected points, so the pr
 proven optimum in under a second. Greedy, knapsack DP, genetic algorithms and RL were considered and rejected (not
 exact, don't scale to these constraints, or need a season simulator).
 
-Stage 3a replaces that placeholder with a component model of expected points (see docs/stage-3a-prediction-design.md); the optimiser switches to it in the next step.
+The optimiser now scores players with the Stage 3a component model of expected points by default (see
+docs/stage-3a-prediction-design.md); pass `--scorer placeholder` to fall back to the Stage 2 ep_next/form blend.
 
 ## Prediction results
 

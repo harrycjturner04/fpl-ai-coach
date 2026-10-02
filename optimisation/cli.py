@@ -37,11 +37,18 @@ def ensure_fresh_data(entry_id: int | None, data_dir: Path = storage.DATA_DIR,
 
 def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float = 0.1,
         max_transfers: int | None = None, budget: float | None = None,
-        ft_value: float = 1.5, data_dir: Path = storage.DATA_DIR) -> tuple[Solution, dict]:
+        ft_value: float = 1.5, data_dir: Path = storage.DATA_DIR,
+        scorer: str = "component") -> tuple[Solution, dict]:
     players = storage.load_table("players", data_dir)
     game_rules = storage.load_json("game_rules", data_dir)
     rules = SquadRules.from_data(game_rules, storage.load_table("positions", data_dir))
-    scores = score_players(players, ep_weight)
+    if scorer == "component":
+        from prediction import cli as prediction_cli
+        pred = prediction_cli.run(data_dir=data_dir)
+        next_gw = pred["gameweek"].min()
+        scores = pred[pred["gameweek"] == next_gw].groupby("player_id")["total"].sum()
+    else:
+        scores = score_players(players, ep_weight)
 
     kwargs: dict = {"bench_weight": bench_weight}
     context: dict = {"players": players, "scores": scores, "rules": rules, "mode": "from scratch"}
@@ -110,10 +117,12 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--budget", type=float, help="budget in £m for from-scratch mode (default 100)")
     parser.add_argument("--ft-value", type=float, default=1.5,
                         help="points each banked free transfer is worth (default 1.5; must be below 4)")
+    parser.add_argument("--scorer", choices=["component", "placeholder"], default="component",
+                        help="component model (default) or the Stage 2 ep_next/form placeholder")
     args = parser.parse_args(argv)
     print(ensure_fresh_data(args.entry))
     sol, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget,
-                       args.ft_value)
+                       args.ft_value, scorer=args.scorer)
     print(format_solution(sol, context))
 
 

@@ -30,7 +30,7 @@ def _fresh_metadata(tmp_path, entries=None):
 
 def test_from_scratch_run_uses_data_dir(tmp_path):
     _write_data(tmp_path)
-    sol, context = cli.run(data_dir=tmp_path)
+    sol, context = cli.run(data_dir=tmp_path, scorer="placeholder")
     assert len(sol.squad) == 15 and context["mode"] == "from scratch"
     assert "Starting XI" in cli.format_solution(sol, context)
 
@@ -42,9 +42,17 @@ def test_transfer_run_reads_manager_state(tmp_path):
     storage.save_json({"team_name": "Test FC", "bank": 0.0, "free_transfers": 1,
                        "squad": [{"player_id": int(i), "selling_price": 4.5} for i in owned]},
                       "manager_state_42", tmp_path)
-    sol, context = cli.run(entry_id=42, data_dir=tmp_path)
+    sol, context = cli.run(entry_id=42, data_dir=tmp_path, scorer="placeholder")
     assert context["mode"] == "transfers for Test FC"
     assert sol.free_transfers_next is not None
+
+
+def test_component_scorer_uses_saved_predictions(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    fake = pd.DataFrame({"player_id": players["id"], "gameweek": 9, "total": 2.0})
+    monkeypatch.setattr("prediction.cli.run", lambda data_dir, **kw: fake)
+    sol, context = cli.run(data_dir=tmp_path, scorer="component")
+    assert len(sol.squad) == 15 and context["scores"].eq(2.0).all()
 
 
 def test_stale_data_triggers_refresh(tmp_path):
