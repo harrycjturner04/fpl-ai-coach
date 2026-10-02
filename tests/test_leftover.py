@@ -19,7 +19,8 @@ def upgrade_state(scores_of_upgrades):
     rows, owned = owned_full_squad(2.0)
     extra = [(i + 1, "MID", 30 + i, 4.5, s) for i, s in enumerate(scores_of_upgrades)]
     players, base = pool(rows + extra)
-    return dict(players=players, scores=table({7: base}), current_squad=owned, bank=0.0, free_transfers=1)
+    return dict(players=players, scores=table({7: base}), current_squad=owned, bank=0.0, free_transfers=1,
+                leftover_values=(1.5,) * 4)   # the settings' values must win over the state's
 
 
 def test_extra_transfers_are_valued_by_their_marginal_gain():
@@ -109,3 +110,9 @@ def test_fixed_point_stops_at_the_pass_limit(monkeypatch):
     runs = []
     final = fixed_point(lambda s: runs.append(1) or [], PlanSettings(horizon=1), passes=3, log=lambda *_: None)
     assert len(runs) == 3 and final.leftover_values == (3.0,) * 4
+
+
+def test_fixed_point_with_real_measurement_returns_the_measured_table():
+    final = fixed_point(lambda s: [upgrade_state([7, 5, 3])], ZERO, passes=1, log=lambda *_: None)
+    assert final.leftover_values == pytest.approx((3.0, 1.0, 0.0, 0.0), abs=1e-2)
+    assert final.horizon == 1
