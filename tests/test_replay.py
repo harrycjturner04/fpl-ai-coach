@@ -110,6 +110,25 @@ def test_sale_after_a_price_rise_credits_half_the_rise():
         assert credit == pytest.approx(bought + 0.1, abs=1e-4)   # half of a 0.3 rise, rounded down
 
 
+def test_player_bought_in_a_price_change_week_is_sold_at_that_purchase_price():
+    def club_one_only_in_gw5(snap):  # club 1 is wanted exactly in gameweek 5, the week its prices rise
+        pred = naive_predictor(snap)
+        club1 = (pred.player_code // 100) == 1
+        pred.loc[club1, "total"] = 20.0 if snap.gameweek == 5 else -5.0
+        return pred
+
+    r = replay_season(LOG, "2023-24", club_one_only_in_gw5, PlanSettings(horizon=1, hit_margin=-10.0), keep_states=True)
+    sales = check_bank_flow(r)
+    squads = [set(s["current_squad"]) for s in r["state"].iloc[1:]]   # squads[k] is held after gameweek k + 1
+    bought_in_gw5 = {p for p in squads[4] - squads[3] if p // 100 == 1}
+    later_sales = [(p, c) for k, p, c in sales if k >= 5 and p in bought_in_gw5]
+    assert later_sales
+    for p, credit in later_sales:
+        assert PRICES[5, p] == pytest.approx(PRICES[4, p] + 0.3, abs=1e-4)      # the price changed in the week of purchase
+        assert credit == pytest.approx(PRICES[5, p], abs=1e-4)                   # no rise since purchase: full price back
+        assert credit != pytest.approx(selling_price(PRICES[4, p], PRICES[5, p]), abs=1e-4)  # last week's price would differ
+
+
 def test_predictor_never_sees_the_future():
     calls = []
 
@@ -129,14 +148,21 @@ def test_changing_the_future_cannot_change_the_past():
     future = (LOG.season == "2023-24") & (LOG.gameweek >= first_changed)
     scrambled = LOG.copy()
     n = int(future.sum())
+    outcomes = ["minutes", "starts", "goals", "assists", "xg", "xa", "xgc", "clean_sheets", "goals_conceded",
+                "own_goals", "penalties_saved", "penalties_missed", "saves", "bonus", "defensive_contribution",
+                "yellow_cards", "red_cards", "points", "xp"]   # everything about a match except who, where and price
+    for col in outcomes:   # most are all zero in the synthetic league: give them values so a leak would show
+        scrambled[col] = scrambled[col].astype(float)
+        scrambled.loc[future, col] = rng.uniform(0, 8, n)
     scrambled.loc[future, "minutes"] = rng.choice([0, 45, 90], n)
     scrambled.loc[future, "points"] = rng.integers(-2, 15, n)
-    scrambled.loc[future, "xg"] = rng.uniform(0, 1, n)
-    scrambled.loc[future, "xp"] = rng.uniform(0, 8, n)
     a, b = run(), run(log=scrambled)
     assert not a.equals(b)   # the scramble does matter from the changed gameweek on
     pd.testing.assert_frame_equal(a[a.gameweek < first_changed].reset_index(drop=True),
                                   b[b.gameweek < first_changed].reset_index(drop=True))
+    # the decision in the changed gameweek itself cannot depend on that gameweek's outcomes either
+    own = lambda df: df[df.gameweek == first_changed].drop(columns="points").reset_index(drop=True)
+    pd.testing.assert_frame_equal(own(a), own(b))
 
 
 def test_cache_is_filled_and_used():
