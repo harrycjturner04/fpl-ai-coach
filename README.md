@@ -112,6 +112,13 @@ The RMSE in the table is the mean of each gameweek's RMSE; the quoted 0.345 diff
 interval) instead uses the pooled root-mean-square of the per-gameweek RMSEs, a different (quadratic, not
 arithmetic) average that weights worse gameweeks more heavily, so the two numbers are not directly comparable.
 
+Change after the holdout: these results used a 5-day memory for the minutes model, which tuning chose on
+next-gameweek accuracy alone. A sensitivity check on the tuning seasons (never the holdout) showed that 5 days
+hurts predictions two or more weeks ahead, because a player rested once is usually back soon after: a 10-day memory
+matches 5 days on next-gameweek RMSE and beats it at every later horizon. The shipped model therefore uses 10 days.
+The holdout was not re-run, to keep it a single, untouched evaluation; a horizon-dependent minutes model is planned
+for Stage 3b.
+
 Reproduce the holdout: `python -m prediction.backtest --seasons 2025-26 --models naive,form,component --params
 data/processed/model_params.json` (`--models` defaults to `naive,form`; add `component` explicitly, with `--params`
 pointing at a tuned parameters file, to include it).

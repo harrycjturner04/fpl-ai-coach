@@ -55,7 +55,7 @@ def test_live_inputs_raises_clear_error_when_match_log_is_missing(tmp_path):
 
 def test_load_live_params_falls_back_to_shipped_params_when_no_processed_file(tmp_path):
     params = cli.load_live_params(tmp_path)
-    assert params.player.minutes_half_life_days == 5  # from prediction/model_params.json
+    assert params.player.minutes_half_life_days == 10  # from prediction/model_params.json
 
 
 def test_prediction_table_uses_the_nearest_gameweeks_p60_not_merge_order():

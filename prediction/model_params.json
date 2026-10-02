@@ -9,7 +9,7 @@
   },
   "player": {
     "half_life_days": 30,
-    "minutes_half_life_days": 5,
+    "minutes_half_life_days": 10,
     "prev_season_fade": 0.75,
     "kappa_minutes": 0.1,
     "kappa_typical_minutes": 3.0,
