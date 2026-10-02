@@ -24,12 +24,11 @@ from prediction.backtest import WARM_UP_GAMEWEEKS, _clean_gameweeks, load_params
 from prediction.cli import SHIPPED_PARAMS_PATH
 
 from .leftover import fixed_point
-from .replay import HOLD, SINGLE_WEEK, replay_season
+from .replay import HOLD, SINGLE_WEEK, SUMMED, replay_season
 
 SEASONS = ["2022-23", "2023-24", "2024-25", "2025-26"]
 GRID = {"discount": [0.7, 0.8, 0.9, 1.0], "horizon": [3, 4, 5], "bench_weight": [0.05, 0.1, 0.2, 0.3],
         "leftover_scale": [0.0, 0.5, 1.0]}
-SUMMED = PlanSettings(horizon=1, summed=True, discount=0.85)
 
 _LOG: pd.DataFrame | None = None
 _CACHE: dict | None = None
@@ -260,7 +259,7 @@ def main(argv=None) -> None:
         return {x: int(results[config_key(s)][x]["points"].sum()) for x in seasons}
 
     lines = ["Season totals"]
-    for label, s in [("single week", SINGLE_WEEK), ("hold", HOLD), ("summed, horizon 1, discount 0.85", SUMMED),
+    for label, s in [("single week", SINGLE_WEEK), ("hold", HOLD), ("summed, horizon 5, discount 0.85", SUMMED),
                      ("best", best), *[(f"best at horizon {h.horizon}", h) for h in horizons]]:
         lines.append(f"  {label}: {per_season(s)} total {total(s):.0f}")
 

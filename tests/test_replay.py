@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 import evaluation.replay as replay_module
-from evaluation.replay import HOLD, SINGLE_WEEK, replay_season, score_table
+from evaluation.replay import HOLD, SINGLE_WEEK, SUMMED, replay_season, score_table
 from optimisation import settings as settings_module
 from optimisation.settings import PlanSettings, load_settings
 from ingestion.manager_state import selling_price
@@ -210,6 +210,13 @@ def test_score_table_summed_discounts():
     assert list(t.columns) == [3]
     assert t.loc[1, 3] == pytest.approx(2.0 + 0.5 * 4.0, abs=1e-4)
     assert t.loc[2, 3] == pytest.approx(1.0 + 0.5 * 3.0, abs=1e-4)
+
+
+def test_summed_benchmark_is_one_column_of_the_discounted_five_week_sum():
+    pred = pd.DataFrame([dict(player_code=1, gameweek=g, total=float(10 ** (g - 3))) for g in range(3, 8)])
+    t = score_table(pred, 3, SUMMED)
+    assert SUMMED.horizon == 5 and t.shape == (1, 1)
+    assert t.iloc[0, 0] == pytest.approx(sum(0.85 ** h * 10.0 ** h for h in range(5)), abs=1e-4)
 
 
 def test_score_table_only_existing_gameweeks_and_fills_zero():

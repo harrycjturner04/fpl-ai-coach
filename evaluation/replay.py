@@ -14,6 +14,7 @@ from .scoring import score_gameweek
 
 SINGLE_WEEK = PlanSettings(horizon=1)              # today's optimiser
 HOLD = PlanSettings(horizon=1, hold=True)          # never transfers after the first gameweek
+SUMMED = PlanSettings(horizon=5, summed=True, discount=0.85)   # one-week solve on discounted five-week totals
 
 
 def score_table(pred: pd.DataFrame, gameweek: int, settings: PlanSettings) -> pd.DataFrame:
