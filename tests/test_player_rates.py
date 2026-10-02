@@ -4,10 +4,24 @@ import pytest
 
 from features.player_rates import PlayerParams, player_features, price_band
 from features.team_ratings import TeamRatings
+from ingestion.transform import MATCH_COLUMNS
 from tests.test_backtest import synthetic_log
 
 FLAT = TeamRatings({}, {}, mu=0.0, home=0.0, unknown_attack=0.0, unknown_defence=0.0)  # every lambda = 1
 CUTOFF = pd.Timestamp("2023-09-01", tz="UTC")
+
+
+def _toy_log(minutes_pattern, xg_pattern):
+    """One player, one weekly fixture per row, minutes and xg fully controlled by the caller."""
+    base = pd.Timestamp("2023-01-02", tz="UTC")
+    rows = []
+    for i, (minutes, xg) in enumerate(zip(minutes_pattern, xg_pattern)):
+        rows.append({c: 0 for c in MATCH_COLUMNS} | {
+            "season": "2023-24", "gameweek": i + 1, "fixture_id": i, "kickoff": base + pd.Timedelta(days=7 * i),
+            "player_code": 1, "team_code": 1, "opponent_code": 2, "was_home": True, "position": "MID",
+            "minutes": minutes, "xg": xg, "price": 7.0,
+        })
+    return pd.DataFrame(rows)
 
 
 def test_price_bands():
@@ -44,6 +58,28 @@ def test_transferred_player_uses_latest_team_and_context():
     log.loc[late, "team_code"] = 2
     feats, _ = player_features(log, CUTOFF, "2023-24", FLAT, PlayerParams())
     assert feats.loc[103].team_code == 2
+
+
+def test_minutes_half_life_is_independent_of_rates_half_life():
+    # Played every match, then benched in the two most recent ones.
+    log = _toy_log([90, 90, 90, 90, 0, 0], [0.3, 0.3, 0.3, 0.3, 0.0, 0.0])
+    cutoff = pd.Timestamp("2023-01-02", tz="UTC") + pd.Timedelta(days=7 * 6)
+
+    short, _ = player_features(log, cutoff, "2023-24", FLAT,
+                               PlayerParams(minutes_half_life_days=5, kappa_minutes=1e-9))
+    long_, _ = player_features(log, cutoff, "2023-24", FLAT,
+                               PlayerParams(minutes_half_life_days=1000, kappa_minutes=1e-9))
+    # A short minutes half-life weights the recent benching heavily; a long one barely notices it.
+    assert short.loc[1].p60 < long_.loc[1].p60 - 0.1
+    # The rates (here xg_rel) don't use the minutes half-life at all.
+    assert short.loc[1].xg_rel == pytest.approx(long_.loc[1].xg_rel)
+
+    same_rates, _ = player_features(log, cutoff, "2023-24", FLAT,
+                                     PlayerParams(minutes_half_life_days=5, half_life_days=30, kappa_minutes=1e-9))
+    diff_rates, _ = player_features(log, cutoff, "2023-24", FLAT,
+                                     PlayerParams(minutes_half_life_days=5, half_life_days=365, kappa_minutes=1e-9))
+    # Changing the rates half-life doesn't move p60 at all.
+    assert same_rates.loc[1].p60 == pytest.approx(diff_rates.loc[1].p60)
 
 
 def test_dc_thresholds_from_scoring_rules():

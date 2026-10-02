@@ -4,6 +4,11 @@ Every rate is a weighted sum over the player's matches before the cutoff:
     weight = 0.5^(age_days / half_life) * prev_season_fade^(seasons back)
 shrunk towards the average for his position and price band:
     shrunk = (sum_w_x + kappa * prior) / (sum_w_exposure + kappa)
+Minutes probabilities (p60, psub, m60, msub) and the per-90 rates (xG, xA, bonus,
+saves, defensive contribution, cards) have separate recency half-lives: minutes
+want a short memory (the last match is the best injury/rotation signal), rates
+want a long one, so each uses its own weight (`half_life_days` for rates,
+`minutes_half_life_days` for minutes; both share `prev_season_fade`).
 Attacking rates are stored relative to the team's expected goals (lambda) in
 the matches where they were earned, so they transfer between teams.
 """
@@ -29,6 +34,7 @@ TYPICAL_MINUTES = {"m60": 87.0, "msub": 25.0}
 @dataclass(frozen=True)
 class PlayerParams:
     half_life_days: float = 120.0
+    minutes_half_life_days: float = 120.0
     prev_season_fade: float = 0.5
     kappa_minutes: float = 3.0
     kappa_typical_minutes: float = 3.0
@@ -62,6 +68,7 @@ _RATES = {
 
 def _weighted_sums(h: pd.DataFrame, ratings: TeamRatings) -> pd.DataFrame:
     w = h["w"]
+    wm = h["wm"]
     s60 = (h["minutes"] >= 60).astype(float)
     ssub = ((h["minutes"] > 0) & (h["minutes"] < 60)).astype(float)
     e90 = h["minutes"] / 90
@@ -70,8 +77,8 @@ def _weighted_sums(h: pd.DataFrame, ratings: TeamRatings) -> pd.DataFrame:
     dc_valid = (h["season"] >= DC_FIRST_SEASON) & (h["position"] != "GKP")
     dc_hit = (h["defensive_contribution"] >= h["position"].map(DC_THRESHOLD).fillna(np.inf)).astype(float)
     return pd.DataFrame({
-        "W": w, "W60": w * s60, "Wsub": w * ssub, "E": w * e90,
-        "M60": w * s60 * h["minutes"], "MS": w * ssub * h["minutes"],
+        "W": wm, "W60": wm * s60, "Wsub": wm * ssub, "E": w * e90,
+        "M60": wm * s60 * h["minutes"], "MS": wm * ssub * h["minutes"],
         "XG": w * h["xg"], "XA": w * h["xa"], "LT": w * e90 * lam_team,
         "B": w * h["bonus"], "S": w * h["saves"], "LO": w * e90 * lam_opp,
         "DC": w * s60 * dc_hit * dc_valid, "DCW": w * s60 * dc_valid,
@@ -86,6 +93,7 @@ def player_features(history: pd.DataFrame, cutoff: pd.Timestamp, season: str, ra
     back = order[season] - h["season"].map(order)
     age = (cutoff - h["kickoff"]).dt.total_seconds() / 86400
     h["w"] = 0.5 ** (age / params.half_life_days) * params.prev_season_fade ** back
+    h["wm"] = 0.5 ** (age / params.minutes_half_life_days) * params.prev_season_fade ** back
     h["band"] = price_band(h["price"])
     sums = _weighted_sums(h, ratings)
 

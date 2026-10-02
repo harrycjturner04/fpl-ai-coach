@@ -101,3 +101,10 @@ def test_injury_flag_scales_next_week_and_fades():
 def test_params_round_trip():
     params = ModelParams()
     assert ModelParams.from_dict(params.to_dict()) == params
+
+
+def test_params_from_dict_tolerates_an_old_dict_missing_minutes_half_life():
+    d = ModelParams().to_dict()
+    del d["player"]["minutes_half_life_days"]
+    loaded = ModelParams.from_dict(d)
+    assert loaded.player.minutes_half_life_days == ModelParams().player.minutes_half_life_days
