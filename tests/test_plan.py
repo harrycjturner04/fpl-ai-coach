@@ -4,7 +4,7 @@ import pandas as pd
 import pulp
 import pytest
 
-from optimisation.model import InfeasibleError, solve, solve_plan
+from optimisation.model import solve, solve_plan
 from optimisation.validate import check_plan
 from tests.optimiser_helpers import FULL_RULES, MINI_RULES, brute_force_plan, full_pool, pool
 
@@ -16,7 +16,7 @@ def table(scores_by_week: dict[int, dict[int, float]]) -> pd.DataFrame:
     return pd.DataFrame(scores_by_week).fillna(0.0)
 
 
-CHECK_KEYS = ("budget", "current_squad", "bank", "free_transfers", "max_hits")
+CHECK_KEYS = ("budget", "current_squad", "bank", "free_transfers", "max_hits", "chips")
 
 
 def checked(plan, players, rules, **kw):
@@ -117,10 +117,12 @@ def test_leftover_values_must_decrease_and_stay_below_the_hit_cost(bad):
 
 def random_mini_case(rng, n_weeks, rules):
     counts = {"GKP": 2, "DEF": 3, "MID": 3, "FWD": 2}
+    clubs = [1, 1, 2, 2, 3, 3, 4, 4, 5, 5]    # never more than two per club, so a legal squad always exists
+    rng.shuffle(clubs)
     rows, pid = [], 1
     for pos, n in counts.items():
         for _ in range(n):
-            rows.append((pid, pos, rng.randint(1, 4), rng.choice([4.0, 4.5, 5.0, 5.5, 6.0]), 0.0))
+            rows.append((pid, pos, clubs[pid - 1], rng.choice([4.0, 4.5, 5.0, 5.5, 6.0]), 0.0))
             pid += 1
     players, _ = pool(rows)
     scores = pd.DataFrame({gw: {r[0]: round(rng.uniform(0, 8), 1) for r in rows} for gw in range(1, n_weeks + 1)})
@@ -132,16 +134,13 @@ def test_plan_matches_brute_force_with_transfers(seed):
     rng = random.Random(seed)
     rules = rng.choice([MINI_RULES, MINI3])
     players, scores = random_mini_case(rng, rng.choice([2, 3]), rules)
-    try:
-        start = solve_plan(players, scores.iloc[:, :1] * 0 + 1, rules, budget=40.0).weeks[0].squad  # any legal squad
-    except InfeasibleError:     # the random pool admits no legal squad (club cap)
-        pytest.skip("infeasible draw")
+    start = solve_plan(players, scores.iloc[:, :1] * 0 + 1, rules, budget=40.0).weeks[0].squad  # any legal squad
     price = players.set_index("id")["price"]
     owned = {i: round(price[i] - rng.choice([0.0, 0.1, 0.2]), 1) for i in start}
     deltas = sorted((round(rng.uniform(0, 3.5), 1) for _ in range(rules.max_free_transfers - 1)), reverse=True)
     kw = dict(current_squad=owned, bank=rng.choice([0.0, 0.5, 1.0]), free_transfers=rng.randint(0, 2),
               max_hits=rng.choice([1, 2]), discount=rng.choice([0.7, 1.0]), leftover_values=deltas,
-              hit_margin=rng.choice([0.0, 1.0]))
+              hit_margin=rng.choice([0.0, 1.0]), chips=rng.choice([None, {1: "wildcard"}, {2: "bboost"}, {1: "3xc"}]))
     plan = solve_plan(players, scores, rules, **kw)
     checked(plan, players, rules, **kw)
     assert plan.objective == pytest.approx(brute_force_plan(players, scores, rules, **kw), abs=1e-4)
@@ -169,3 +168,80 @@ def test_highs_and_cbc_agree():
     b = solve_plan(players, scores, MINI3, budget=33.0, solver=pulp.PULP_CBC_CMD(msg=False))
     checked(b, players, MINI3, budget=33.0)
     assert a.objective == pytest.approx(b.objective, abs=1e-4)
+
+
+def chip_case(extra=()):
+    rows, owned = owned_full_squad()
+    return owned, *pool(rows + list(extra))
+
+
+def test_bench_boost_counts_the_bench_in_full():
+    owned, players, base = chip_case()
+    kw = dict(current_squad=owned, free_transfers=1)
+    plain = solve_plan(players, base.to_frame(7), FULL_RULES, **kw)
+    boosted = checked(solve_plan(players, base.to_frame(7), FULL_RULES, chips={7: "bboost"}, **kw),
+                      players, FULL_RULES, chips={7: "bboost"}, **kw)
+    bench_points = sum(base[i] for i in boosted.weeks[0].bench)
+    assert bench_points == 8.0 and boosted.weeks[0].chip == "bboost"
+    assert boosted.objective - plain.objective == pytest.approx(0.9 * bench_points, abs=1e-4)
+
+
+def test_triple_captain_adds_the_captain_again():
+    owned, players, base = chip_case([(1, "MID", 30, 4.5, 9.0)])
+    kw = dict(current_squad=owned, free_transfers=1)
+    plain = solve_plan(players, base.to_frame(7), FULL_RULES, **kw)
+    triple = checked(solve_plan(players, base.to_frame(7), FULL_RULES, chips={7: "3xc"}, **kw),
+                     players, FULL_RULES, chips={7: "3xc"}, **kw)
+    assert triple.weeks[0].captain == 1
+    assert triple.objective - plain.objective == pytest.approx(9.0, abs=1e-4)
+
+
+FIVE = [(1, "DEF", 30, 4.5, 6.0), (2, "DEF", 31, 4.5, 6.0), (3, "MID", 32, 4.5, 6.0),
+        (4, "MID", 33, 4.5, 6.0), (5, "FWD", 34, 4.5, 6.0)]
+
+
+def test_wildcard_makes_unlimited_free_transfers_and_keeps_the_bank():
+    owned, players, base = chip_case(FIVE)
+    kw = dict(current_squad=owned, free_transfers=1, max_hits=0)
+    plan = solve_plan(players, base.to_frame(7), FULL_RULES, chips={7: "wildcard"}, **kw)
+    checked(plan, players, FULL_RULES, chips={7: "wildcard"}, **kw)
+    week = plan.weeks[0]
+    assert sorted(week.transfers_in) == [1, 2, 3, 4, 5] and week.hits == 0
+    assert week.free_transfers_next == 1 and week.chip == "wildcard"
+
+
+def test_free_hit_plays_one_week_then_returns_to_the_regular_squad():
+    owned, players, base = chip_case(FIVE)
+    wk1, wk2 = base.copy(), base.copy()
+    wk2[[1, 2, 3, 4, 5]] = 0.0
+    chips = {7: "freehit"}
+    kw = dict(current_squad=owned, free_transfers=1)
+    plan = solve_plan(players, table({7: wk1, 8: wk2}), FULL_RULES, chips=chips, **kw)
+    checked(plan, players, FULL_RULES, chips=chips, **kw)
+    first, second = plan.weeks
+    assert {1, 2, 3, 4, 5} <= set(first.squad) and {1, 2, 3, 4, 5} <= set(first.transfers_in)
+    assert first.chip == "freehit" and first.hits == 0 and first.free_transfers_next == 1
+    assert len(set(second.squad) - set(owned)) <= 2 and second.chip is None
+
+
+def test_free_hit_values_kept_players_at_their_selling_price():
+    rows, owned = owned_full_squad()
+    owned = {i: 4.0 for i in owned}                 # sells for 4.0, costs 4.5 to buy: 60.0 in total
+    players, base = pool(rows)
+    kw = dict(current_squad=owned, bank=0.0, free_transfers=1)
+    plan = solve_plan(players, base.to_frame(7), FULL_RULES, chips={7: "freehit"}, **kw)
+    checked(plan, players, FULL_RULES, chips={7: "freehit"}, **kw)
+    assert sorted(plan.weeks[0].squad) == sorted(owned)
+
+
+@pytest.mark.parametrize("chips", [{99: "bboost"}, {7: "superboost"}])
+def test_unusable_chips_are_rejected(chips):
+    owned, players, base = chip_case()
+    with pytest.raises(ValueError):
+        solve_plan(players, base.to_frame(7), FULL_RULES, current_squad=owned, chips=chips)
+
+
+def test_chip_in_the_first_week_of_a_from_scratch_plan_is_rejected():
+    players, base = pool(full_pool())
+    with pytest.raises(ValueError):
+        solve_plan(players, table({1: base, 2: base}), FULL_RULES, budget=100.0, chips={1: "wildcard"})

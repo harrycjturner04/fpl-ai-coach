@@ -158,7 +158,7 @@ def check_plan(
             bad(f"hits {sol.hits} != {hits} ({len(bought)} transfers, {free} free" + (", wildcard)" if chip else ")"))
         if max_hits is not None and sol.hits > max_hits:
             bad(f"hits {sol.hits} > max_hits {max_hits}")
-        if sol.free_transfers_next not in ((None, free_next) if first else (free_next,)):  # solve_plan leaves week 1 from scratch as None
+        if sol.free_transfers_next != free_next:
             bad(f"free transfers next week {sol.free_transfers_next} != {free_next}")
         values = {i: values.get(i, price[i]) if i not in bought else price[i] for i in squad}
         free = free_next

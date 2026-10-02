@@ -89,6 +89,7 @@ def test_wildcard_keeps_banked_free_transfers(case):
     kw = dict(current_squad=case[2]["current_squad"], bank=0.0, free_transfers=2)
     plan = solve_plan(players, table({7: {i: 1.0 for i in players["id"]}, 8: {i: 1.0 for i in players["id"]}}),
                       FULL_RULES, **kw)
+    assert plan.weeks[0].free_transfers_next != 1       # so a wrong "reset to 1" would be caught
     wc = mutated(plan, 1, chip="wildcard", hits=0, free_transfers_next=plan.weeks[0].free_transfers_next)
     assert check(wc, players, kw, chips={8: "wildcard"}) == []
     assert any("free transfers" in m for m in check(mutated(wc, 1, free_transfers_next=1), players, kw,
@@ -100,8 +101,10 @@ def test_from_scratch_week_one_free_transfers():
     kw = dict(budget=100.0)
     plan = solve_plan(players, table({1: base, 2: base}), FULL_RULES, **kw)
     assert check_plan(plan, players, FULL_RULES, **kw) == []
-    bad = mutated(plan, 0, free_transfers_next=2)
-    assert any("free transfers" in m for m in check_plan(bad, players, FULL_RULES, **kw))
+    assert plan.weeks[0].free_transfers_next == 1
+    for wrong in (2, None):
+        bad = mutated(plan, 0, free_transfers_next=wrong)
+        assert any("free transfers" in m for m in check_plan(bad, players, FULL_RULES, **kw))
 
 
 def test_sell_rebuy_sell_again_is_legal_and_priced_at_price_paid():
