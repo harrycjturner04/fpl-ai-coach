@@ -5,6 +5,7 @@ import pulp
 import pytest
 
 from optimisation.model import InfeasibleError, solve, solve_plan
+from optimisation.validate import check_plan
 from tests.optimiser_helpers import FULL_RULES, MINI_RULES, brute_force_plan, full_pool, pool
 
 MINI3 = MINI_RULES.__class__(**{**MINI_RULES.__dict__, "max_free_transfers": 3})
@@ -13,6 +14,16 @@ MINI3 = MINI_RULES.__class__(**{**MINI_RULES.__dict__, "max_free_transfers": 3})
 def table(scores_by_week: dict[int, dict[int, float]]) -> pd.DataFrame:
     """{gameweek: {player id: score}} -> player x gameweek table."""
     return pd.DataFrame(scores_by_week).fillna(0.0)
+
+
+CHECK_KEYS = ("budget", "current_squad", "bank", "free_transfers", "max_hits")
+
+
+def checked(plan, players, rules, **kw):
+    """Assert the independent validator accepts `plan`; returns it."""
+    problems = check_plan(plan, players, rules, **{k: v for k, v in kw.items() if k in CHECK_KEYS})
+    assert problems == []
+    return plan
 
 
 def owned_full_squad(score=2.0):
@@ -34,6 +45,7 @@ def test_transfers_are_held_for_the_week_they_gain_most():
     wk2[[1, 2]] = 5.0          # better next week
     plan = solve_plan(players, table({7: wk1, 8: wk2}), FULL_RULES, current_squad=owned, bank=0.0,
                       free_transfers=1)
+    checked(plan, players, FULL_RULES, current_squad=owned, bank=0.0, free_transfers=1)
     first, second = plan.weeks
     assert first.transfers_in == [] and first.free_transfers_next == 2
     assert sorted(second.transfers_in) == [1, 2] and second.hits == 0
@@ -44,6 +56,7 @@ def test_waits_for_a_free_transfer_when_a_hit_would_not_pay_over_the_horizon():
     players, base = pool(rows + [(1, "MID", 30, 4.5, 3.5)])   # +1.5 a week over a 2.0 incumbent
     scores = table({7: base, 8: base, 9: base})
     plan = solve_plan(players, scores, FULL_RULES, current_squad=owned, free_transfers=0)
+    checked(plan, players, FULL_RULES, current_squad=owned, free_transfers=0)
     assert plan.weeks[0].transfers_in == [] and plan.weeks[1].transfers_in == [1]
     assert sum(w.hits for w in plan.weeks) == 0
 
@@ -54,6 +67,7 @@ def test_takes_a_hit_when_one_week_gains_more_than_it_costs():
     wk1 = base.copy()
     wk1[1] = 8.0                # +6 this week only: 6 - 4 > 0
     plan = solve_plan(players, table({7: wk1, 8: base}), FULL_RULES, current_squad=owned, free_transfers=0)
+    checked(plan, players, FULL_RULES, current_squad=owned, free_transfers=0)
     assert plan.weeks[0].transfers_in == [1] and plan.weeks[0].hits == 1
 
 
@@ -63,6 +77,7 @@ def test_selling_price_limits_a_later_week():
     players, base = pool(rows + [(1, "MID", 30, 4.5, 9.0)])
     plan = solve_plan(players, table({7: base, 8: base}), FULL_RULES, current_squad=owned, bank=0.4,
                       free_transfers=2)
+    checked(plan, players, FULL_RULES, current_squad=owned, bank=0.4, free_transfers=2)
     assert all(1 not in w.squad for w in plan.weeks)    # 4.0 + 0.4 < 4.5 in every week
 
 
@@ -71,12 +86,14 @@ def test_player_without_a_score_in_a_week_counts_zero():
     players, base = pool(rows)
     wk2 = base.drop(index=list(owned)[:3])              # three owned players have no row in week 2
     plan = solve_plan(players, pd.DataFrame({7: base, 8: wk2}), FULL_RULES, current_squad=owned)
+    checked(plan, players, FULL_RULES, current_squad=owned)
     assert len(plan.weeks) == 2 and len(plan.weeks[1].squad) == 15
 
 
 def test_from_scratch_plan_then_one_free_transfer():
     players, base = pool(full_pool())
     plan = solve_plan(players, table({1: base, 2: base}), FULL_RULES, budget=100.0)
+    checked(plan, players, FULL_RULES, budget=100.0)
     assert plan.weeks[0].hits == 0 and plan.weeks[1].hits == 0 and len(plan.weeks[1].transfers_in) <= 1
 
 
@@ -86,6 +103,7 @@ def test_one_week_plan_equals_single_week_solve():
     single = solve(players, scores, FULL_RULES, current_squad=owned, free_transfers=1, ft_value=1.5)
     plan = solve_plan(players, scores.to_frame(7), FULL_RULES, current_squad=owned, free_transfers=1,
                       leftover_values=[1.5] * 4)
+    checked(plan, players, FULL_RULES, current_squad=owned, free_transfers=1)
     assert plan.objective == pytest.approx(single.objective, abs=1e-4)
     assert sorted(plan.weeks[0].squad) == sorted(single.squad)
 
@@ -125,6 +143,7 @@ def test_plan_matches_brute_force_with_transfers(seed):
               max_hits=rng.choice([1, 2]), discount=rng.choice([0.7, 1.0]), leftover_values=deltas,
               hit_margin=rng.choice([0.0, 1.0]))
     plan = solve_plan(players, scores, rules, **kw)
+    checked(plan, players, rules, **kw)
     assert plan.objective == pytest.approx(brute_force_plan(players, scores, rules, **kw), abs=1e-4)
 
 
@@ -137,12 +156,16 @@ def test_plan_matches_brute_force_from_scratch(seed):
         expected = brute_force_plan(players, scores, MINI_RULES, **kw)
     except ValueError:      # max() of an empty sequence: no legal squad at this budget
         pytest.skip("infeasible draw")
-    assert solve_plan(players, scores, MINI_RULES, **kw).objective == pytest.approx(expected, abs=1e-4)
+    plan = solve_plan(players, scores, MINI_RULES, **kw)
+    checked(plan, players, MINI_RULES, **kw)
+    assert plan.objective == pytest.approx(expected, abs=1e-4)
 
 
 def test_highs_and_cbc_agree():
     rng = random.Random(7)
     players, scores = random_mini_case(rng, 3, MINI3)
     a = solve_plan(players, scores, MINI3, budget=33.0)
+    checked(a, players, MINI3, budget=33.0)
     b = solve_plan(players, scores, MINI3, budget=33.0, solver=pulp.PULP_CBC_CMD(msg=False))
+    checked(b, players, MINI3, budget=33.0)
     assert a.objective == pytest.approx(b.objective, abs=1e-4)
