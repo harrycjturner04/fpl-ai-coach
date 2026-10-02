@@ -204,7 +204,7 @@ def split_report(per_gw: pd.DataFrame, match_log: pd.DataFrame, horizons: int = 
         d = per_gw[mask]
         g = d.groupby(["model", "horizon"])
         out = g[["mae", "rmse", "rho"]].mean().round(3)
-        out["gameweeks"] = g.apply(lambda x: len(x[["season", "gameweek"]].drop_duplicates()), include_groups=False)
+        out["gameweeks"] = d.drop_duplicates(["model", "horizon", "season", "gameweek"]).groupby(["model", "horizon"]).size()
         parts.append(out.assign(split=split).set_index("split", append=True))
     return pd.concat(parts).sort_index()
 

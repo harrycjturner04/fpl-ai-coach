@@ -1,9 +1,9 @@
+import dataclasses
+
 import pandas as pd
 import pytest
 
 from prediction.component_model import ModelParams
-import dataclasses
-
 from prediction.tune import TUNING_SEASONS, coordinate_descent, objective, with_value
 
 
@@ -51,3 +51,9 @@ def test_coordinate_descent_with_custom_setter():
     best, j, _ = coordinate_descent(evaluate, Flat(), {"a": [1, 3, 5], "b": [-1, 0]}, log=lambda *_: None,
                                     setter=setter)
     assert best == Flat(3, -1) and j == pytest.approx(0.0, abs=1e-4)
+
+
+def test_objective_skips_a_horizon_present_in_one_frame_only():
+    bench = pd.DataFrame({"horizon": [0, 1], "rmse": [2.0, 2.0], "rho": [0.5, 0.5]})
+    model = pd.DataFrame({"horizon": [0], "rmse": [1.0], "rho": [0.75]})  # J_0 = 1.0, no horizon 1
+    assert objective(model, bench, weights=(1.0, 1.0)) == pytest.approx(1.0, abs=1e-4)
