@@ -2,9 +2,9 @@ import copy
 
 import pytest
 
-from optimisation.model import solve_plan
+from optimisation.model import Plan, solve_plan
 from optimisation.validate import check_plan
-from tests.optimiser_helpers import FULL_RULES, pool
+from tests.optimiser_helpers import FULL_RULES, full_pool, pool
 from tests.test_plan import owned_full_squad, table
 
 
@@ -82,3 +82,49 @@ def test_wildcard_week_rules(case):
     wc = mutated(plan, 1, chip="wildcard", hits=0, free_transfers_next=1)
     assert check(wc, players, kw, chips={8: "wildcard"}) == []
     assert any("wildcard" in m for m in check(mutated(wc, 1, hits=1), players, kw, chips={8: "wildcard"}))
+
+
+def test_wildcard_keeps_banked_free_transfers(case):
+    plan, players, _ = case
+    kw = dict(current_squad=case[2]["current_squad"], bank=0.0, free_transfers=2)
+    plan = solve_plan(players, table({7: {i: 1.0 for i in players["id"]}, 8: {i: 1.0 for i in players["id"]}}),
+                      FULL_RULES, **kw)
+    wc = mutated(plan, 1, chip="wildcard", hits=0, free_transfers_next=plan.weeks[0].free_transfers_next)
+    assert check(wc, players, kw, chips={8: "wildcard"}) == []
+    assert any("free transfers" in m for m in check(mutated(wc, 1, free_transfers_next=1), players, kw,
+                                                    chips={8: "wildcard"}))
+
+
+def test_from_scratch_week_one_free_transfers():
+    players, base = pool(full_pool())
+    kw = dict(budget=100.0)
+    plan = solve_plan(players, table({1: base, 2: base}), FULL_RULES, **kw)
+    assert check_plan(plan, players, FULL_RULES, **kw) == []
+    bad = mutated(plan, 0, free_transfers_next=2)
+    assert any("free transfers" in m for m in check_plan(bad, players, FULL_RULES, **kw))
+
+
+def test_sell_rebuy_sell_again_is_legal_and_priced_at_price_paid():
+    rows, owned = owned_full_squad()
+    players, scores = pool(rows)
+    owned = {i: 4.0 for i in owned}                 # sells for 4.0, buys back at 4.5
+    kw = dict(current_squad=owned, bank=1.0, free_transfers=1)
+    base = solve_plan(players, scores.to_frame(7), FULL_RULES, **kw).weeks[0]
+    pos = players.set_index("id")["position"]
+    x = next(i for i in base.bench if pos[i] != "GKP")
+    y = next(i for i in players["id"] if i not in base.squad and pos[i] == pos[x])
+
+    def week(gw, out, into, money):
+        w = copy.deepcopy(base)
+        swap = lambda xs: [into if i == out else i for i in xs]   # noqa: E731
+        w.squad, w.bench = swap(w.squad), swap(w.bench)
+        w.transfers_in, w.transfers_out, w.hits = [into], [out], 0
+        w.free_transfers_next, w.money_left, w.gameweek, w.chip = 1, money, gw, None
+        return w
+
+    def three(last_money):
+        return Plan([7, 8, 9], [week(7, x, y, 0.5), week(8, y, x, 0.5), week(9, x, y, last_money)], 0.0)
+
+    assert check_plan(three(0.5), players, FULL_RULES, **kw) == []
+    wrong = check_plan(three(0.0), players, FULL_RULES, **kw)     # credits 4.0 instead of the 4.5 paid
+    assert any("bank" in m for m in wrong)

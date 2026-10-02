@@ -105,7 +105,7 @@ def check_plan(
     scratch = not owned
     values = {i: round(v * 10) for i, v in owned.items()}   # selling price if kept, else price paid
     bank_t = round((budget if scratch else bank) * 10)
-    free, sold_owned, problems = free_transfers, set(), []
+    free, problems = free_transfers, []
     cap = rules.max_free_transfers
 
     for n, (gw, sol) in enumerate(zip(plan.gameweeks, plan.weeks)):
@@ -140,19 +140,13 @@ def check_plan(
                 bad(f"free transfers next week {sol.free_transfers_next} != {free} after Free Hit")
             continue
 
-        if first:
-            spent, received = sum(price.values()), 0
-        else:
-            spent, received = sum(price[i] for i in bought), sum(values[i] for i in sold)
-        if first and bank_t - spent < 0 or not first and bank_t + received - spent < 0:
+        spent = sum(price[i] for i in (squad if first else bought))
+        received = sum(values[i] for i in sold)
+        if bank_t + received - spent < 0:
             bad("bank would be negative after transfers")
         bank_t += received - spent
         if round(sol.money_left * 10) != bank_t:
             bad(f"money_left {sol.money_left} != bank {bank_t / 10:.1f}")
-        for i in sold:
-            if i in owned and i in sold_owned:
-                bad(f"owned player {i} sold twice")
-            sold_owned.add(i)
 
         if first:
             hits, free_next = 0, 1
@@ -164,7 +158,7 @@ def check_plan(
             bad(f"hits {sol.hits} != {hits} ({len(bought)} transfers, {free} free" + (", wildcard)" if chip else ")"))
         if max_hits is not None and sol.hits > max_hits:
             bad(f"hits {sol.hits} > max_hits {max_hits}")
-        if (None if first else sol.free_transfers_next) != (None if first else free_next):
+        if sol.free_transfers_next not in ((None, free_next) if first else (free_next,)):  # solve_plan leaves week 1 from scratch as None
             bad(f"free transfers next week {sol.free_transfers_next} != {free_next}")
         values = {i: values.get(i, price[i]) if i not in bought else price[i] for i in squad}
         free = free_next
