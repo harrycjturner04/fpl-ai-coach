@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--horizon", type=_horizon_arg, help="gameweeks to plan (default: settings, 5)")
     parser.add_argument("--discount", type=float, help="weekly discount on later gameweeks (default: settings)")
     parser.add_argument("--chip", type=_chip_arg, action="append", default=[], metavar="NAME:GW",
-                        help="play a chip in a gameweek as a what-if, e.g. bboost:12; repeatable")
+                        help="play a chip in a gameweek as a what-if, e.g. bboost:12; repeatable, one chip per gameweek")
     parser.add_argument("--max-transfers", type=int,
                         help="cap on transfers (default: free transfers + 2; placeholder scorer only)")
     parser.add_argument("--budget", type=float, help="budget in £m for from-scratch mode (default 100)")

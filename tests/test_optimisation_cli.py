@@ -5,7 +5,7 @@ import pytest
 
 from ingestion import storage
 from optimisation import cli
-from optimisation.model import Plan, solve
+from optimisation.model import Plan, SquadRules, Solution, solve
 from tests.optimiser_helpers import FULL_RULES, full_pool, pool
 
 NOW = datetime(2026, 9, 25, 12, 0, tzinfo=timezone.utc)
@@ -213,6 +213,16 @@ def test_chip_window_not_open_is_rejected(tmp_path, monkeypatch):
         _run_chips(tmp_path, monkeypatch, [("bboost", 10)], used=[("bboost", 3)])  # first half used, second not open yet
 
 
+def test_chip_requested_before_its_window_opens_is_rejected(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    _team_state(tmp_path, players)
+    storage.save_table(pd.DataFrame({"id": [2], "name": ["bboost"], "number": [1],
+                                     "start_event": [20], "stop_event": [38]}), "chips", tmp_path)
+    _fake_predictions(monkeypatch, players, [9, 10])
+    with pytest.raises(SystemExit, match="Chip bboost is not available in gameweek 10"):
+        cli.run(entry_id=42, data_dir=tmp_path, chips=[("bboost", 10)])
+
+
 def test_second_half_chip_after_first_half_used_is_accepted(tmp_path, monkeypatch):
     plan, _ = _run_chips(tmp_path, monkeypatch, [("bboost", 25)], used=[("bboost", 5)], gws=(24, 25))
     assert plan.weeks[1].chip == "bboost"
@@ -275,39 +285,66 @@ def test_horizon_must_be_between_one_and_five(value):
     assert e.value.code == 2
 
 
-def test_one_week_output_is_pinned(tmp_path, monkeypatch):
-    players = _write_data(tmp_path)
-    _team_state(tmp_path, players)
-    _fake_predictions(monkeypatch, players, [9])
-    plan, context = cli.run(entry_id=42, data_dir=tmp_path)
-    assert cli.format_solution(plan, context) == PINNED
+def _hand_built():
+    """Solver-free plan: ids 1-15 (GKP 1-2, DEF 3-7, MID 8-12, FWD 13-15), player 20 bought for player 7."""
+    pos = ["GKP"] * 2 + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3
+    rows = [{"id": i + 1, "web_name": f"N{i + 1}", "position": pos[i], "team_short": "AAA",
+             "price": 4.0 + i / 10} for i in range(15)]
+    rows.append({"id": 20, "web_name": "New", "position": "DEF", "team_short": "BBB", "price": 5.5})
+    starting = [1, 3, 4, 5, 6, 8, 9, 10, 11, 13, 14]
+    week1 = Solution(squad=[*range(1, 7), *range(8, 16), 20], starting=starting, bench=[2, 20, 12, 15],
+                     captain=10, vice_captain=14, transfers_in=[20], transfers_out=[7], hits=0,
+                     free_transfers_next=2, cost=62.5, money_left=0.5, projected_points=40.25, gameweek=9)
+    week2 = Solution(squad=week1.squad, starting=starting, bench=[2, 20, 12, 15], captain=14,
+                     vice_captain=10, transfers_in=[7], transfers_out=[20], hits=1, projected_points=38.04,
+                     gameweek=10, chip="bboost")
+    owned = [{"player_id": i, "selling_price": 4.0 + (i - 1) / 10} for i in range(1, 16)]
+    context = {"players": pd.DataFrame(rows), "rules": FULL_RULES, "mode": "transfers for Test FC",
+               "state": {"squad": owned}, "free_transfers": 1, "max_transfers": 3,
+               "scores": pd.Series({i: i / 4 for i in range(1, 16)} | {20: 1.5})}
+    return week1, week2, context
 
 
-PINNED = """Mode: transfers for Test FC
+WEEK_ONE = """Mode: transfers for Test FC
 
 Starting XI:
-  GKP  P1002 (C)              T  £4.5m  score 2.00
-  DEF  P1009 (V)              T  £4.5m  score 2.00
-  DEF  P1010                  T  £4.5m  score 2.00
-  DEF  P1012                  T  £4.5m  score 2.00
-  DEF  P1014                  T  £4.5m  score 2.00
-  MID  P1023                  T  £4.5m  score 2.00
-  MID  P1026                  T  £4.5m  score 2.00
-  MID  P1027                  T  £4.5m  score 2.00
-  MID  P1028                  T  £4.5m  score 2.00
-  FWD  P1035                  T  £4.5m  score 2.00
-  FWD  P1037                  T  £4.5m  score 2.00
+  GKP  N1                     AAA  £4.0m  score 0.25
+  DEF  N3                     AAA  £4.2m  score 0.75
+  DEF  N4                     AAA  £4.3m  score 1.00
+  DEF  N5                     AAA  £4.4m  score 1.25
+  DEF  N6                     AAA  £4.5m  score 1.50
+  MID  N8                     AAA  £4.7m  score 2.00
+  MID  N9                     AAA  £4.8m  score 2.25
+  MID  N10 (C)                AAA  £4.9m  score 2.50
+  MID  N11                    AAA  £5.0m  score 2.75
+  FWD  N13                    AAA  £5.2m  score 3.25
+  FWD  N14 (V)                AAA  £5.3m  score 3.50
 
 Bench (in order):
-  GKP  P1003                  T  £4.5m  score 2.00
-  DEF  P1016                  T  £4.5m  score 2.00
-  MID  P1022                  T  £4.5m  score 2.00
-  FWD  P1031                  T  £4.5m  score 2.00
+  GKP  N2                     AAA  £4.1m  score 0.50
+  DEF  New                    BBB  £5.5m  score 1.50
+  MID  N12                    AAA  £5.1m  score 3.00
+  FWD  N15                    AAA  £5.4m  score 3.75
 
-Transfers (5 free, max 7):
-  none - roll the transfer
+Transfers (1 free, max 3):
+  OUT N7 (sell £4.6m)  ->  IN New (£5.5m)
   Hits: 0 (-0 pts)
-  Free transfers next gameweek: 5
+  Free transfers next gameweek: 2
 
-Squad cost: £67.5m   Money left: £0.0m
-Projected points (XI + captain - hits): 24.00"""
+Squad cost: £62.5m   Money left: £0.5m
+Projected points (XI + captain - hits): 40.25"""
+
+
+def test_one_week_output_matches_the_single_week_format():
+    week1, _, context = _hand_built()
+    assert cli.format_solution(Plan([9], [week1], 40.25), context) == WEEK_ONE
+    assert cli.format_solution(week1, context) == WEEK_ONE
+
+
+def test_two_week_plan_prints_week_one_then_the_later_weeks_block():
+    week1, week2, context = _hand_built()
+    out = cli.format_solution(Plan([9, 10], [week1, week2], 78.0), context)
+    assert out == WEEK_ONE + """
+
+Plan for later gameweeks (provisional, re-solved each week):
+GW10: OUT New -> IN N7; captain N14; expected 38.0; hits 1 [chip: bboost]"""
