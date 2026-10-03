@@ -1,8 +1,11 @@
+import json
+
 import pandas as pd
 import pytest
 
 from ingestion import storage
 from prediction import cli
+from prediction.component_model import ModelParams
 from tests.test_backtest import synthetic_log
 
 # Team codes deliberately differ from team ids, so the id-to-code mapping in live_inputs is
@@ -55,7 +58,8 @@ def test_live_inputs_raises_clear_error_when_match_log_is_missing(tmp_path):
 
 def test_load_live_params_falls_back_to_shipped_params_when_no_processed_file(tmp_path):
     params = cli.load_live_params(tmp_path)
-    assert params.player.minutes_half_life_days == 10  # from prediction/model_params.json
+    shipped = json.loads(cli.SHIPPED_PARAMS_PATH.read_text())
+    assert params.to_dict() == ModelParams.from_dict(shipped).to_dict()
 
 
 def test_prediction_table_uses_the_nearest_gameweeks_p60_not_merge_order():
