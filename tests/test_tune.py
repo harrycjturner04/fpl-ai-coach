@@ -1,4 +1,3 @@
-import dataclasses
 
 import pandas as pd
 import pytest
@@ -38,19 +37,6 @@ def test_weighted_objective_over_horizons():
     model = bench.assign(rmse=[1.0, 2.0], rho=[0.75, 0.5])  # J_0 = 1.0, J_1 = 2.0
     assert objective(model, bench, weights=(1.0, 0.0)) == pytest.approx(1.0, abs=1e-4)
     assert objective(model, bench, weights=(1.0, 1.0)) == pytest.approx(1.5, abs=1e-4)
-
-
-def test_coordinate_descent_with_custom_setter():
-    @dataclasses.dataclass(frozen=True)
-    class Flat:
-        a: float = 0.0
-        b: float = 0.0
-
-    setter = lambda p, k, v: dataclasses.replace(p, **{k: v})  # noqa: E731
-    evaluate = lambda p: (p.a - 3) ** 2 + (p.b + 1) ** 2  # noqa: E731
-    best, j, _ = coordinate_descent(evaluate, Flat(), {"a": [1, 3, 5], "b": [-1, 0]}, log=lambda *_: None,
-                                    setter=setter)
-    assert best == Flat(3, -1) and j == pytest.approx(0.0, abs=1e-4)
 
 
 def test_objective_skips_a_horizon_present_in_one_frame_only():

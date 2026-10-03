@@ -1,6 +1,6 @@
 """Time solve_plan on the processed data on disk (no network).
 
-Usage: python scripts/time_plan_solve.py
+Usage: python scripts/time_plan_solve.py ENTRY_ID   (run `python -m ingestion.cli --entry ENTRY_ID` first)
 """
 
 import statistics
@@ -15,10 +15,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ingestion import storage
 from optimisation.model import SquadRules, solve_plan
+from optimisation.settings import load_settings
 from optimisation.validate import check_plan
 from prediction import cli as prediction_cli
-
-ENTRY = 8298351
 
 
 def timed(runs, players, scores, rules, **kw):
@@ -31,14 +30,17 @@ def timed(runs, players, scores, rules, **kw):
 
 
 def main():
+    entry = int(sys.argv[1])
     players = storage.load_table("players")
     rules = SquadRules.from_data(storage.load_json("game_rules"), storage.load_table("positions"))
     pred = prediction_cli.run()
     table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack()
-    state = storage.load_json(f"manager_state_{ENTRY}")
+    state = storage.load_json(f"manager_state_{entry}")
     owned = {p["player_id"]: p["selling_price"] for p in state["squad"]}
-    transfer = dict(current_squad=owned, bank=state["bank"], free_transfers=state["free_transfers"],
-                    max_hits=2, leftover_values=[1.5] * 4, discount=0.9)
+    s = load_settings(storage.DATA_DIR)
+    shipped = dict(max_hits=s.max_hits, leftover_values=s.leftover_values, discount=s.discount,
+                   bench_weight=s.bench_weight, hit_margin=s.hit_margin)
+    transfer = dict(current_squad=owned, bank=state["bank"], free_transfers=state["free_transfers"], **shipped)
     check_keys = ("budget", "current_squad", "bank", "free_transfers", "max_hits", "chips")
 
     print(f"Python {sys.version.split()[0]}, pulp {pulp.__version__}, highspy {version('highspy')}")
@@ -46,7 +48,7 @@ def main():
     for horizon in (1, 3, 5):
         scores = table.iloc[:, :horizon]
         first = scores.columns[0]
-        cases = [("from scratch", dict(budget=100.0)), ("transfers", transfer)]
+        cases = [("from scratch", dict(budget=100.0, **shipped)), ("transfers", transfer)]
         if horizon > 1:
             cases.append(("transfers + freehit", {**transfer, "chips": {first: "freehit"}}))
         for mode, kw in cases:

@@ -11,7 +11,7 @@ dependencies = [
     "requests>=2.31",
     "pandas>=2.1",
     "pyarrow>=14",
-    "pulp>=3.3,<4",  # <4: 4.0 drops the bundled CBC solver
+    "pulp>=3.3.1,<4",  # 3.3.1: LpProblem.add_variable_dicts; <4: 4.0 drops the bundled CBC solver
     "scipy>=1.11",
     "highspy>=1.7",
 ]

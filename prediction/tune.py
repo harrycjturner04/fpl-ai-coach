@@ -63,7 +63,7 @@ def with_value(params: ModelParams, key: str, value: float) -> ModelParams:
 
 
 def coordinate_descent(evaluate, start: ModelParams, grid: dict[str, list[float]], max_passes: int = 3,
-                       log=print, setter=with_value) -> tuple[ModelParams, float, list[dict]]:
+                       log=print) -> tuple[ModelParams, float, list[dict]]:
     best, best_j = start, evaluate(start)
     history = [{"pass": 0, "key": "start", "value": None, "J": best_j}]
     log(f"start: J = {best_j:.4f}")
@@ -71,7 +71,7 @@ def coordinate_descent(evaluate, start: ModelParams, grid: dict[str, list[float]
         improved = False
         for key, values in grid.items():
             for value in values:
-                candidate = setter(best, key, value)
+                candidate = with_value(best, key, value)
                 if candidate == best:
                     continue
                 j = evaluate(candidate)
