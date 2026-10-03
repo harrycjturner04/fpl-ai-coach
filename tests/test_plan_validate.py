@@ -131,3 +131,14 @@ def test_sell_rebuy_sell_again_is_legal_and_priced_at_price_paid():
     assert check_plan(three(0.5), players, FULL_RULES, **kw) == []
     wrong = check_plan(three(0.0), players, FULL_RULES, **kw)     # credits 4.0 instead of the 4.5 paid
     assert any("bank" in m for m in wrong)
+
+
+def test_detects_gameweek_count_mismatch(case):
+    plan, players, kw = case
+    bad = Plan(plan.gameweeks + [9], plan.weeks, plan.objective)
+    assert any("gameweeks but" in m for m in check(bad, players, kw))
+
+
+def test_detects_week_labelled_with_the_wrong_gameweek(case):
+    plan, players, kw = case
+    assert any("labelled" in m for m in check(mutated(plan, 1, gameweek=9), players, kw))

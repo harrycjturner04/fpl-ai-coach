@@ -109,11 +109,15 @@ def check_plan(
     bank_t = round((budget if scratch else bank) * 10)
     free, problems = free_transfers, []
     cap = rules.max_free_transfers
+    if len(plan.gameweeks) != len(plan.weeks):
+        problems.append(f"{len(plan.gameweeks)} gameweeks but {len(plan.weeks)} weeks")
 
     for n, (gw, sol) in enumerate(zip(plan.gameweeks, plan.weeks)):
         def bad(msg):
             problems.append(f"GW{gw}: {msg}")
 
+        if sol.gameweek != gw:
+            bad(f"week labelled GW{sol.gameweek}")
         lineup = _check_lineup(sol, p, rules)
         for msg in lineup:
             bad(msg)

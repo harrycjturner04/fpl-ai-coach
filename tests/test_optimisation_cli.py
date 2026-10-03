@@ -22,6 +22,7 @@ def _write_data(tmp_path):
         "squad_min_play": [1, 3, 2, 1], "squad_max_play": [1, 5, 5, 3]}), "positions", tmp_path)
     storage.save_json({"starting_xi": 11, "max_per_club": 3, "hit_cost": 4,
                        "max_free_transfers": 5, "total_budget": 100.0}, "game_rules", tmp_path)
+    _gameweeks(tmp_path, "2026-09-12T10:00Z")   # deadline passed: no plan_log record
     return players
 
 
@@ -286,6 +287,23 @@ def test_horizon_must_be_between_one_and_five(value):
     assert e.value.code == 2
 
 
+@pytest.mark.parametrize("args", [["--discount", "0"], ["--discount", "1.1"], ["--discount", "x"],
+                                  ["--bench-weight", "-0.1"], ["--bench-weight", "1.5"]])
+def test_discount_and_bench_weight_must_be_in_range(args):
+    with pytest.raises(SystemExit) as e:
+        cli.main(args)
+    assert e.value.code == 2
+
+
+@pytest.mark.parametrize("bad", [{"summed": True}, {"hold": True}, {"horizon": 6}])
+def test_benchmark_or_out_of_range_settings_are_rejected(tmp_path, monkeypatch, bad):
+    players = _write_data(tmp_path)
+    storage.save_json(bad, "plan_params", tmp_path)
+    _fake_predictions(monkeypatch, players, [9, 10])
+    with pytest.raises(SystemExit, match="replay benchmarks only"):
+        cli.run(data_dir=tmp_path)
+
+
 def _hand_built():
     """Solver-free plan: ids 1-15 (GKP 1-2, DEF 3-7, MID 8-12, FWD 13-15), player 20 bought for player 7."""
     pos = ["GKP"] * 2 + ["DEF"] * 5 + ["MID"] * 5 + ["FWD"] * 3
@@ -357,16 +375,16 @@ def _gameweeks(tmp_path, deadline):
                        "gameweeks", tmp_path)
 
 
-def _plan_run(tmp_path, monkeypatch, **kw):
+def _plan_run(tmp_path, monkeypatch, deadline, now="2026-09-25T12:00Z", **kw):
     players = _write_data(tmp_path)
+    _gameweeks(tmp_path, deadline)
     _team_state(tmp_path, players)
     _fake_predictions(monkeypatch, players, [9, 10])
-    return cli.run(data_dir=tmp_path, now=pd.Timestamp("2026-09-25T12:00Z"), **kw)
+    return cli.run(data_dir=tmp_path, now=pd.Timestamp(now), **kw)
 
 
 def test_plan_is_logged_before_the_deadline_and_replaced_on_rerun(tmp_path, monkeypatch):
-    _gameweeks(tmp_path, "2026-09-26T10:00Z")
-    plan, context = _plan_run(tmp_path, monkeypatch, entry_id=42)
+    plan, context = _plan_run(tmp_path, monkeypatch, "2026-09-26T10:00Z", entry_id=42)
     log = storage.load_table("plan_log", tmp_path)
     w = plan.weeks[0]
     assert len(log) == 1
@@ -376,18 +394,17 @@ def test_plan_is_logged_before_the_deadline_and_replaced_on_rerun(tmp_path, monk
     assert row["transfers_in"] == ",".join(map(str, w.transfers_in)) and row["chip"] == ""
     assert row["hits"] == w.hits and row["projected_points"] == pytest.approx(w.projected_points)
     assert json.loads(row["settings"]) == context["settings"].to_dict()
-    _plan_run(tmp_path, monkeypatch, entry_id=42)
-    assert len(storage.load_table("plan_log", tmp_path)) == 1
+    _plan_run(tmp_path, monkeypatch, "2026-09-26T10:00Z", now="2026-09-25T18:00Z", entry_id=42)
+    log = storage.load_table("plan_log", tmp_path)
+    assert len(log) == 1 and log["recorded_at"].iloc[0] == pd.Timestamp("2026-09-25T18:00Z")
 
 
 def test_plan_is_not_logged_after_the_deadline(tmp_path, monkeypatch):
-    _gameweeks(tmp_path, "2026-09-25T10:00Z")
-    _plan_run(tmp_path, monkeypatch, entry_id=42)
+    _plan_run(tmp_path, monkeypatch, "2026-09-25T10:00Z", entry_id=42)
     assert storage.load_table_or_none("plan_log", tmp_path) is None
 
 
 def test_plan_is_not_logged_without_entry_or_with_placeholder(tmp_path, monkeypatch):
-    _gameweeks(tmp_path, "2026-09-26T10:00Z")
-    _plan_run(tmp_path, monkeypatch)
-    _plan_run(tmp_path, monkeypatch, entry_id=42, scorer="placeholder")
+    _plan_run(tmp_path, monkeypatch, "2026-09-26T10:00Z")
+    _plan_run(tmp_path, monkeypatch, "2026-09-26T10:00Z", entry_id=42, scorer="placeholder")
     assert storage.load_table_or_none("plan_log", tmp_path) is None

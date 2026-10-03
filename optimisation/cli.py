@@ -110,6 +110,9 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
 
     from prediction import cli as prediction_cli
     settings = load_settings(data_dir)
+    if settings.summed or settings.hold or not 1 <= settings.horizon <= 5:
+        raise SystemExit("Optimiser settings must have summed and hold off and a horizon of 1 to 5 "
+                         "(summed and hold are replay benchmarks only).")
     pred = prediction_cli.run(data_dir=data_dir)
     table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack().sort_index(axis=1)
     table = table.iloc[:, :horizon if horizon is not None else settings.horizon]
@@ -132,8 +135,8 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
         raise SystemExit("Optimiser produced an illegal plan:\n  " + "\n  ".join(problems))
     context["scores"] = table.iloc[:, 0]
     context["settings"] = settings
-    gameweeks = storage.load_table_or_none("gameweeks", data_dir)
-    if entry_id is not None and gameweeks is not None:
+    gameweeks = storage.load_table("gameweeks", data_dir)   # present: the predictions needed it
+    if entry_id is not None:
         _record_plan(plan, context, gameweeks, transform.season_label(gameweeks), entry_id, data_dir,
                      now or pd.Timestamp.now(tz="UTC"))
     return plan, context
@@ -212,6 +215,15 @@ def _chip_arg(value: str) -> tuple[str, int]:
     return name, int(gw)
 
 
+def _unit_arg(low_open: bool):
+    def parse(value: str) -> float:
+        x = float(value)
+        if not (0 < x <= 1 if low_open else 0 <= x <= 1):
+            raise argparse.ArgumentTypeError("must be in " + ("(0, 1]" if low_open else "[0, 1]"))
+        return x
+    return parse
+
+
 def _horizon_arg(value: str) -> int:
     if not value.isdigit() or not 1 <= int(value) <= 5:
         raise argparse.ArgumentTypeError("must be between 1 and 5 (predictions cover five gameweeks)")
@@ -225,9 +237,9 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--entry", type=int, help="optimise transfers for this FPL team ID")
     parser.add_argument("--ep-weight", type=float, default=0.7,
                         help="weight on ep_next vs form (default 0.7; placeholder scorer only)")
-    parser.add_argument("--bench-weight", type=float, help="value of bench points (default: settings, 0.1)")
+    parser.add_argument("--bench-weight", type=_unit_arg(False), help="value of bench points (default: settings, 0.1)")
     parser.add_argument("--horizon", type=_horizon_arg, help="gameweeks to plan (default: settings, 5)")
-    parser.add_argument("--discount", type=float, help="weekly discount on later gameweeks (default: settings)")
+    parser.add_argument("--discount", type=_unit_arg(True), help="weekly discount on later gameweeks (default: settings)")
     parser.add_argument("--chip", type=_chip_arg, action="append", default=[], metavar="NAME:GW",
                         help="play a chip in a gameweek as a what-if, e.g. bboost:12; repeatable, one chip per gameweek")
     parser.add_argument("--max-transfers", type=int,
