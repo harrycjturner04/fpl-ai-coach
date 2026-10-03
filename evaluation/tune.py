@@ -2,6 +2,8 @@
 
 Every solve is exact, single-threaded HiGHS in its own worker process. Predictions are computed once per
 season up front and read from a cache in the workers.
+Pass --fresh after any code or data change; a resume without it is only valid for the same code, archive and
+prediction parameters.
 """
 
 from __future__ import annotations
@@ -137,11 +139,32 @@ def precompute_predictions(seasons: list[str], workers: int, data_dir: Path, lim
     return preds
 
 
-def _save_results(results: dict, data_dir: Path, name: str) -> None:
+def _replace_with_retry(src: Path, dst: Path) -> None:
+    """os.replace, retried while a sync client (OneDrive) briefly holds the target."""
+    for attempt in range(10):
+        try:
+            return os.replace(src, dst)
+        except PermissionError:
+            if attempt == 9:
+                raise
+            time.sleep(min(0.5 * 2 ** attempt, 5))
+
+
+def _delete_saved(names: list[str], data_dir: Path) -> None:
+    """Remove this run's saved tables and JSON files, with their metas, and nothing else."""
+    for name in names:
+        for stem in (name, f"{name}_meta"):
+            for ext in (".parquet", ".json"):
+                (data_dir / "processed" / f"{stem}{ext}").unlink(missing_ok=True)
+
+
+def _save_results(results: dict, data_dir: Path, name: str, meta: dict | None = None) -> None:
     frames = [f.assign(config=key) for key, by_season in results.items() for f in by_season.values()]
     storage.save_table(pd.concat(frames, ignore_index=True), f"{name}_tmp", data_dir)
     processed = data_dir / "processed"
-    os.replace(processed / f"{name}_tmp.parquet", processed / f"{name}.parquet")
+    _replace_with_retry(processed / f"{name}_tmp.parquet", processed / f"{name}.parquet")
+    if meta is not None:
+        storage.save_json(meta, f"{name}_meta", data_dir)
 
 
 def load_results(name: str, data_dir: Path) -> dict:
@@ -151,7 +174,8 @@ def load_results(name: str, data_dir: Path) -> dict:
     return results
 
 
-def evaluate(settings_list, pool, seasons, results, limit, *, data_dir: Path, name: str = "replay_results") -> None:
+def evaluate(settings_list, pool, seasons, results, limit, *, data_dir: Path, name: str = "replay_results",
+             meta: dict | None = None) -> None:
     """Replay every (settings, season) not yet in `results` as one batch, then save everything so far."""
     todo = [(s, season) for s in settings_list for season in seasons if season not in results.get(config_key(s), {})]
     todo = list({(config_key(s), season): (s, season) for s, season in todo}.values())
@@ -159,7 +183,7 @@ def evaluate(settings_list, pool, seasons, results, limit, *, data_dir: Path, na
     for (s, season), frame in zip(todo, pool.map(run_replay, jobs)):
         results.setdefault(config_key(s), {})[season] = frame
     if todo:
-        _save_results(results, data_dir, name)
+        _save_results(results, data_dir, name, meta)
 
 
 def main(argv=None) -> None:
@@ -179,6 +203,9 @@ def main(argv=None) -> None:
     def say(msg: str) -> None:
         print(f"[{(time.time() - start) / 60:.1f} min] {msg}", flush=True)
 
+    left_name = f"leftover_table{suffix}"
+    if args.fresh:
+        _delete_saved([pred_name, res_name, left_name], data_dir)
     say("predictions")
     precompute_predictions(seasons, args.workers, data_dir, limit, name=pred_name, fresh=args.fresh)
 
@@ -186,14 +213,13 @@ def main(argv=None) -> None:
     fp = fingerprint(seasons, data_dir)
     if not args.fresh and _meta_matches(res_name, data_dir, fp):
         results = load_results(res_name, data_dir)
-    storage.save_json(fp, f"{res_name}_meta", data_dir)
 
     benchmarks = [SINGLE_WEEK, HOLD, SUMMED]
     pass_logs: list[str] = []
     with ProcessPoolExecutor(max_workers=args.workers, initializer=_init_worker,
                              initargs=(data_dir, pred_name)) as pool:
         def run(settings_list):
-            evaluate(settings_list, pool, seasons, results, limit, data_dir=data_dir, name=res_name)
+            evaluate(settings_list, pool, seasons, results, limit, data_dir=data_dir, name=res_name, meta=fp)
 
         def total(s):
             return total_points([results[config_key(s)][x] for x in seasons])
@@ -201,7 +227,6 @@ def main(argv=None) -> None:
         say("benchmarks")
         run(benchmarks)
 
-        left_name = f"leftover_table{suffix}"
 
         def run_states(s):
             frames = list(pool.map(run_replay, [(s, x, True, limit) for x in seasons]))

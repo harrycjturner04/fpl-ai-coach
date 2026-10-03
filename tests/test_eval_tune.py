@@ -142,3 +142,35 @@ def test_evaluate_saves_and_reload_restores_in_order(tmp_path, monkeypatch):
         for season, frame in results[key].items():
             assert "state" not in loaded[key][season].columns
             pd.testing.assert_frame_equal(loaded[key][season], frame)
+
+
+def test_replace_retries_after_permission_errors(monkeypatch):
+    calls = []
+
+    def flaky(src, dst):
+        calls.append(1)
+        if len(calls) <= 2:
+            raise PermissionError
+        return "done"
+
+    monkeypatch.setattr(tune.os, "replace", flaky)
+    monkeypatch.setattr(tune.time, "sleep", lambda s: None)
+    tune._replace_with_retry("a", "b")
+    assert len(calls) == 3
+
+
+def test_replace_gives_up_after_ten_attempts(monkeypatch):
+    monkeypatch.setattr(tune.os, "replace", lambda s, d: (_ for _ in ()).throw(PermissionError))
+    monkeypatch.setattr(tune.time, "sleep", lambda s: None)
+    with pytest.raises(PermissionError):
+        tune._replace_with_retry("a", "b")
+
+
+def test_fresh_delete_removes_old_results_and_metas_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(tune, "run_replay", lambda job: pd.DataFrame(dict(season=job[1], gameweek=[1], points=[1.0], hits=0)))
+    results = {}
+    evaluate([PlanSettings()], FakePool(), ["s1"], results, None, data_dir=tmp_path, name="res", meta={"v": 1})
+    (tmp_path / "processed" / "other.json").write_text("{}")
+    assert (tmp_path / "processed" / "res_meta.json").exists()
+    tune._delete_saved(["res"], tmp_path)
+    assert sorted(p.name for p in (tmp_path / "processed").iterdir()) == ["other.json"]
