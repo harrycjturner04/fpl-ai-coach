@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 
 import pandas as pd
@@ -348,3 +349,45 @@ def test_two_week_plan_prints_week_one_then_the_later_weeks_block():
 
 Plan for later gameweeks (provisional, re-solved each week):
 GW10: OUT New -> IN N7; captain N14; expected 38.0; hits 1 [chip: bboost]"""
+
+
+def _gameweeks(tmp_path, deadline):
+    storage.save_table(pd.DataFrame({"id": [8, 9], "is_next": [False, True],
+                                     "deadline_time": pd.to_datetime(["2026-09-12T10:00Z", deadline])}),
+                       "gameweeks", tmp_path)
+
+
+def _plan_run(tmp_path, monkeypatch, **kw):
+    players = _write_data(tmp_path)
+    _team_state(tmp_path, players)
+    _fake_predictions(monkeypatch, players, [9, 10])
+    return cli.run(data_dir=tmp_path, now=pd.Timestamp("2026-09-25T12:00Z"), **kw)
+
+
+def test_plan_is_logged_before_the_deadline_and_replaced_on_rerun(tmp_path, monkeypatch):
+    _gameweeks(tmp_path, "2026-09-26T10:00Z")
+    plan, context = _plan_run(tmp_path, monkeypatch, entry_id=42)
+    log = storage.load_table("plan_log", tmp_path)
+    w = plan.weeks[0]
+    assert len(log) == 1
+    row = log.iloc[0]
+    assert (row["season"], row["gameweek"], row["entry"]) == ("2026-27", 9, 42)
+    assert row["captain"] == w.captain and row["vice_captain"] == w.vice_captain
+    assert row["transfers_in"] == ",".join(map(str, w.transfers_in)) and row["chip"] == ""
+    assert row["hits"] == w.hits and row["projected_points"] == pytest.approx(w.projected_points)
+    assert json.loads(row["settings"]) == context["settings"].to_dict()
+    _plan_run(tmp_path, monkeypatch, entry_id=42)
+    assert len(storage.load_table("plan_log", tmp_path)) == 1
+
+
+def test_plan_is_not_logged_after_the_deadline(tmp_path, monkeypatch):
+    _gameweeks(tmp_path, "2026-09-25T10:00Z")
+    _plan_run(tmp_path, monkeypatch, entry_id=42)
+    assert storage.load_table_or_none("plan_log", tmp_path) is None
+
+
+def test_plan_is_not_logged_without_entry_or_with_placeholder(tmp_path, monkeypatch):
+    _gameweeks(tmp_path, "2026-09-26T10:00Z")
+    _plan_run(tmp_path, monkeypatch)
+    _plan_run(tmp_path, monkeypatch, entry_id=42, scorer="placeholder")
+    assert storage.load_table_or_none("plan_log", tmp_path) is None

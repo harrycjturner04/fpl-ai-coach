@@ -10,6 +10,7 @@ Run `python -m ingestion.cli [--entry ID]` first to refresh the data.
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from pathlib import Path
 import pandas as pd
 
 from ingestion import cli as ingestion_cli
-from ingestion import freshness, storage
+from ingestion import freshness, storage, transform
 from ingestion.manager_state import chip_status
 from prediction.current_stats import score_players
 
@@ -69,7 +70,8 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
         max_transfers: int | None = None, budget: float | None = None,
         ft_value: float = 1.5, data_dir: Path = storage.DATA_DIR,
         scorer: str = "component", horizon: int | None = None, discount: float | None = None,
-        chips: list[tuple[str, int]] | None = None) -> tuple[Plan | Solution, dict]:
+        chips: list[tuple[str, int]] | None = None,
+        now: pd.Timestamp | None = None) -> tuple[Plan | Solution, dict]:
     players = storage.load_table("players", data_dir)
     game_rules = storage.load_json("game_rules", data_dir)
     rules = SquadRules.from_data(game_rules, storage.load_table("positions", data_dir))
@@ -132,7 +134,33 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
     if problems:
         raise SystemExit("Optimiser produced an illegal plan:\n  " + "\n  ".join(problems))
     context["scores"] = table.iloc[:, 0]
+    context["settings"] = settings
+    gameweeks = storage.load_table_or_none("gameweeks", data_dir)
+    if entry_id is not None and gameweeks is not None:
+        _record_plan(plan, context, gameweeks, transform.season_label(gameweeks), entry_id, data_dir,
+                     now or pd.Timestamp.now(tz="UTC"))
     return plan, context
+
+
+def _record_plan(plan: Plan, context: dict, gameweeks: pd.DataFrame, season: str, entry_id: int,
+                 data_dir: Path, now: pd.Timestamp) -> pd.DataFrame | None:
+    """Save this week's recommendation, keeping the latest record before the deadline: the forward
+    test of the multi-week plan as the season is played."""
+    upcoming = gameweeks[gameweeks["is_next"]]
+    if upcoming.empty or now >= upcoming["deadline_time"].iloc[0]:
+        return None
+    w = plan.weeks[0]
+    new = pd.DataFrame([{
+        "season": season, "gameweek": w.gameweek, "entry": entry_id,
+        "transfers_in": ",".join(map(str, w.transfers_in)), "transfers_out": ",".join(map(str, w.transfers_out)),
+        "captain": w.captain, "vice_captain": w.vice_captain, "chip": w.chip or "", "hits": w.hits,
+        "projected_points": w.projected_points, "settings": json.dumps(context["settings"].to_dict()),
+        "recorded_at": now}])
+    old = storage.load_table_or_none("plan_log", data_dir)
+    log = new if old is None else pd.concat([old, new], ignore_index=True)
+    log = log.sort_values("recorded_at").drop_duplicates(["season", "gameweek", "entry"], keep="last")
+    storage.save_table(log.reset_index(drop=True), "plan_log", data_dir)
+    return log
 
 
 def format_solution(result: Plan | Solution, context: dict) -> str:
