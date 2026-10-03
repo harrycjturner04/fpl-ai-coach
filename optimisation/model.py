@@ -75,7 +75,7 @@ class Solution:
     transfers_in: list[int] = field(default_factory=list)
     transfers_out: list[int] = field(default_factory=list)
     hits: int = 0
-    free_transfers_next: int | None = None  # transfer mode only
+    free_transfers_next: int | None = None  # None only from the single-week `solve` in from-scratch mode
     cost: float = 0.0           # squad value at buy/sell prices
     money_left: float = 0.0
     projected_points: float = 0.0  # XI + captain bonus - hit cost
@@ -104,7 +104,7 @@ def solve_plan(
     bench_weight: float = 0.1,
     current_squad: dict[int, float] | None = None,
     bank: float = 0.0,
-    free_transfers: int = 1,
+    free_transfers: int | None = 1,
     max_hits: int | None = None,
     max_transfers: int | None = None,
     discount: float = 1.0,
@@ -119,6 +119,8 @@ def solve_plan(
     A transfer beyond the free ones is a hit; `u = min(free, transfers)` is enforced
     exactly. `leftover_values[k-1]` is the worth of the k-th free transfer carried
     past the horizon. `max_transfers` caps week one only; `max_hits` every week.
+    `free_transfers=None` (before gameweek 1): week one's transfers are unlimited and free,
+    as in from-scratch mode, so `max_transfers` is ignored and `max_hits` applies from week two.
     """
     chips = chips or {}
     left = list(leftover_values)
@@ -135,6 +137,7 @@ def solve_plan(
                          "the team and player data are probably from different pulls.")
 
     scratch = not owned
+    unlimited = scratch or free_transfers is None   # week one's transfers are free and uncapped
 
     # Pool: scored players plus anything already owned (it may be kept or sold).
     pool = players[players["id"].isin(set(scores.index) | set(owned))].set_index("id")
@@ -147,6 +150,8 @@ def solve_plan(
         raise ValueError(f"unknown chips {sorted(set(chips.values()) - CHIPS)}; expected {sorted(CHIPS)}")
     if scratch and weeks[0] in chips:
         raise ValueError("a chip cannot be played in the first week of a from-scratch plan")
+    if unlimited and chips.get(weeks[0]) in ("wildcard", "freehit"):
+        raise ValueError("a Wildcard or Free Hit cannot be played in a week with unlimited transfers")
     chip_at = [chips.get(w) for w in weeks]
     sc = scores.reindex(ids).fillna(0.0)
     score = {(i, t): float(sc.iat[r, t]) for r, i in enumerate(ids) for t in range(H)}
@@ -169,7 +174,7 @@ def solve_plan(
     f = {0: free_transfers, **prob.add_variable_dicts("free", range(1, H + 1), lowBound=0, upBound=F, cat="Integer")}
     z = prob.add_variable_dicts("left", range(1, F), cat="Binary")
 
-    big = max(F, free_transfers, rules.squad_size)
+    big = max(F, free_transfers or 0, rules.squad_size)
     squad_var = lambda i, t: q[i, t] if chip_at[t] == "freehit" else x[i, t]  # noqa: E731
     bench_w = [1.0 if chip_at[t] == "bboost" else bench_weight for t in T]
     cap_w = [2 if chip_at[t] == "3xc" else 1 for t in T]
@@ -211,7 +216,7 @@ def solve_plan(
             prob += pulp.lpSum(squad_var(i, t) for i in group) <= rules.max_per_club
 
         n_in = pulp.lpSum(b[i, t] for i in ids)
-        if scratch and t == 0:
+        if unlimited and t == 0:
             prob += u[t] == 0
             prob += h[t] == 0
             prob += f[1] == 1
@@ -263,6 +268,8 @@ def solve_plan(
         t_out = [i for i in prev if i not in squad]
         if scratch and t == 0:
             n_hits, ft_next, t_in, t_out = 0, 1, [], []
+        elif unlimited and t == 0:
+            n_hits, ft_next = 0, 1
         elif fh:
             n_hits, ft_next = 0, ft
         elif chip == "wildcard":

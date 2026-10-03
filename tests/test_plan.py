@@ -97,6 +97,33 @@ def test_from_scratch_plan_then_one_free_transfer():
     assert plan.weeks[0].hits == 0 and plan.weeks[1].hits == 0 and len(plan.weeks[1].transfers_in) <= 1
 
 
+def first_gameweek_case():
+    """Five players worth buying in week 1; four more worth a hit from week 2 but costly to hold in week 1."""
+    later = [(6 + k, pos, 35 + k, 4.5, -100.0) for k, pos in enumerate(["DEF", "DEF", "MID", "MID"])]
+    rows, owned = owned_full_squad()
+    players, base = pool(rows + FIVE + later)
+    wk2 = base.copy()
+    wk2[[6, 7, 8, 9]] = 20.0
+    return owned, players, table({1: base, 2: wk2, 3: wk2})
+
+
+def test_first_gameweek_transfers_are_free_and_unlimited_then_one_free_transfer():
+    owned, players, scores = first_gameweek_case()
+    kw = dict(current_squad=owned, free_transfers=None, max_hits=1)
+    plan = checked(solve_plan(players, scores, FULL_RULES, max_transfers=0, **kw), players, FULL_RULES, **kw)
+    first, second, _ = plan.weeks
+    assert len(first.transfers_in) >= 5 and first.hits == 0 and first.free_transfers_next == 1
+    assert len(second.transfers_in) == 2 and second.hits == 1       # max_hits binds from week 2
+
+
+def test_validator_rejects_five_free_transfers_after_an_unlimited_first_week():
+    owned, players, scores = first_gameweek_case()
+    old = solve_plan(players, scores, FULL_RULES, current_squad=owned, free_transfers=15)   # the old workaround
+    assert old.weeks[0].free_transfers_next == 5
+    problems = check_plan(old, players, FULL_RULES, current_squad=owned, free_transfers=None)
+    assert any("free transfers" in m for m in problems)
+
+
 def test_one_week_plan_equals_single_week_solve():
     rows, owned = owned_full_squad()
     players, scores = pool(rows + [(1, "MID", 30, 4.5, 6.0), (2, "DEF", 31, 4.5, 5.0)])
@@ -143,6 +170,22 @@ def test_plan_matches_brute_force_with_transfers(seed):
               hit_margin=rng.choice([0.0, 1.0]), chips=rng.choice([None, {1: "wildcard"}, {2: "bboost"}, {1: "3xc"}]))
     plan = solve_plan(players, scores, rules, **kw)
     checked(plan, players, rules, **kw)
+    assert plan.objective == pytest.approx(brute_force_plan(players, scores, rules, **kw), abs=1e-4)
+
+
+@pytest.mark.parametrize("seed", range(8))
+def test_plan_matches_brute_force_before_gameweek_one(seed):
+    rng = random.Random(200 + seed)
+    rules = rng.choice([MINI_RULES, MINI3])
+    players, scores = random_mini_case(rng, rng.choice([2, 3]), rules)
+    start = solve_plan(players, scores.iloc[:, :1] * 0 + 1, rules, budget=40.0).weeks[0].squad
+    owned = {i: float(players.set_index("id").at[i, "price"]) for i in start}
+    kw = dict(current_squad=owned, bank=rng.choice([0.0, 1.0]), free_transfers=None, max_hits=rng.choice([0, 1]),
+              discount=rng.choice([0.7, 1.0]), leftover_values=[1.0] * (rules.max_free_transfers - 1),
+              chips=rng.choice([None, {2: "bboost"}, {1: "3xc"}]))
+    plan = solve_plan(players, scores, rules, **kw)
+    checked(plan, players, rules, **kw)
+    assert plan.weeks[0].hits == 0 and plan.weeks[0].free_transfers_next == 1
     assert plan.objective == pytest.approx(brute_force_plan(players, scores, rules, **kw), abs=1e-4)
 
 

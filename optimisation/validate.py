@@ -95,11 +95,13 @@ def check_plan(
     budget: float | None = None,
     current_squad: dict[int, float] | None = None,
     bank: float = 0.0,
-    free_transfers: int = 1,
+    free_transfers: int | None = 1,
     max_hits: int | None = None,
     chips: dict[int, str] | None = None,
 ) -> list[str]:
-    """Walk a multi-week plan in plain Python and return every rule violation."""
+    """Walk a multi-week plan in plain Python and return every rule violation.
+
+    `free_transfers=None` means week one's transfers are unlimited and free (before gameweek 1)."""
     owned, chips = current_squad or {}, chips or {}
     p = players.set_index("id")
     scratch = not owned
@@ -148,7 +150,7 @@ def check_plan(
         if round(sol.money_left * 10) != bank_t:
             bad(f"money_left {sol.money_left} != bank {bank_t / 10:.1f}")
 
-        if first:
+        if first or free is None:
             hits, free_next = 0, 1
         elif chip == "wildcard":
             hits, free_next = 0, min(cap, free)

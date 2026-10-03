@@ -115,10 +115,7 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
     table = table.iloc[:, :horizon if horizon is not None else settings.horizon]
     plan_args: dict = {"max_hits": settings.max_hits, "chips": {gw: name for name, gw in chips}}
     if state is not None:
-        plan_args.update(current_squad=owned, bank=state["bank"],
-                         free_transfers=free if free is not None else rules.squad_size)
-        if free is None:
-            plan_args["max_hits"] = None
+        plan_args.update(current_squad=owned, bank=state["bank"], free_transfers=free)
         context["max_transfers"] = None if free is None else free + settings.max_hits
     else:
         plan_args["budget"] = budget if budget is not None else game_rules["total_budget"]

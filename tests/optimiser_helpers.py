@@ -100,7 +100,8 @@ def brute_force_plan(players, scores, rules, *, budget=None, bench_weight=0.1, c
                      chips=None):
     """Best plan objective by dynamic programming over (squad, owned players already sold, free transfers).
 
-    Shares nothing with the ILP. Chips supported: wildcard, bboost, 3xc (not freehit)."""
+    Shares nothing with the ILP. Chips supported: wildcard, bboost, 3xc (not freehit).
+    `free_transfers=None`: week one's transfers are unlimited and free, then one free transfer."""
     chips = chips or {}
     weeks = list(scores.columns)
     by_pos = {pos: players.loc[players["position"] == pos, "id"].tolist() for pos in rules.composition}
@@ -144,7 +145,7 @@ def brute_force_plan(players, scores, rules, *, budget=None, bench_weight=0.1, c
                 if cost(new, new_sold) > total:
                     continue
                 n = len(new - squad)
-                if not owned and t == 0:
+                if t == 0 and (not owned or free_transfers is None):
                     hits, ft_next = 0, 1
                 elif chips.get(gw) == "wildcard":
                     hits, ft_next = 0, min(rules.max_free_transfers, ft)

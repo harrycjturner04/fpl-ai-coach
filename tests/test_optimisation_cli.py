@@ -119,14 +119,14 @@ def test_settings_file_applies_and_options_override(tmp_path, monkeypatch):
     assert len(plan.weeks) == 3
 
 
-def test_first_gameweek_passes_unlimited_hits_and_full_free_transfers(tmp_path, monkeypatch):
+def test_first_gameweek_passes_unlimited_free_transfers_and_the_usual_hit_cap(tmp_path, monkeypatch):
     players = _write_data(tmp_path)
     _team_state(tmp_path, players, free=None)
     _fake_predictions(monkeypatch, players, [1, 2])
     seen = _spy(monkeypatch, "solve_plan")
-    plan, _ = cli.run(entry_id=42, data_dir=tmp_path)
-    assert seen["max_hits"] is None and seen["free_transfers"] == 15
-    assert plan.weeks[0].hits == 0
+    plan, context = cli.run(entry_id=42, data_dir=tmp_path)
+    assert seen["free_transfers"] is None and seen["max_hits"] == context["settings"].max_hits
+    assert plan.weeks[0].hits == 0 and plan.weeks[0].free_transfers_next == 1
 
 
 def _spy(monkeypatch, name):
