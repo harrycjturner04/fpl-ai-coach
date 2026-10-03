@@ -4,6 +4,8 @@ Every solve is exact, single-threaded HiGHS in its own worker process. Predictio
 season up front and read from a cache in the workers.
 Pass --fresh after any code or data change; a resume without it is only valid for the same code, archive and
 prediction parameters.
+The replay always uses the shipped prediction parameters (`prediction/model_params.json`), even when a local
+re-tune in `data/processed/model_params.json` exists, which the live command line would prefer.
 """
 
 from __future__ import annotations

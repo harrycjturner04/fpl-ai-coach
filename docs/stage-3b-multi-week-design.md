@@ -1,6 +1,6 @@
 # Stage 3b design: multi-week optimiser
 
-Status: design agreed 2026-10-02, not yet built.
+Status: design agreed 2026-10-02; built 2026-10-03 (amendments in section 12).
 
 ## 1. Problem
 
@@ -291,7 +291,8 @@ by a local re-tune, in the same way as the prediction parameters.
   later week's budget; each chip's effect; the squad after a Free Hit.
 - Brute-force enumeration of every plan on a scaled-down game over two and three weeks, with random free
   transfers, discount and leftover values; the model's objective must match.
-- The validator applied to every solve, in tests, in the replay and live.
+- The validator applied to every solve in tests, in the replay and live (not to the extra solves that measure the
+  leftover-transfer table).
 - HiGHS against CBC on the same instances.
 - Auto-substitution scoring against hand-worked gameweeks (captain absent, no valid substitute, goalkeeper).
 - Replay: a season is reproduced exactly on a second run; no prediction uses data from after its deadline.
@@ -321,3 +322,57 @@ first week's decisions across all scenarios, let later weeks differ by scenario,
 values flexibility directly instead of through a discount. It needs outcome distributions that Stage 3a does not
 yet produce and multiplies the model's size by the number of scenarios. The only provision made for it now is
 that predictions enter the optimiser as a plain table of player by week, to which a scenario index can be added.
+
+## 12. Amendments (2026-10-03)
+
+What was built differently from this spec, and why.
+
+### 12.1 Free transfers before hits, enforced exactly
+
+Section 4.3 argued that the solver uses free transfers before hits on its own, from optimality. The model now
+enforces `u[t] = min(f[t], n[t])` exactly with one binary per week. The argument holds only at the optimum and
+relies on the leftover values staying below the hit cost; an exact rule makes every feasible plan count hits as FPL
+does, at the cost of a handful of binaries.
+
+### 12.2 No player-pool trimming and no optimality gap
+
+Neither trimming (4.8) nor a replay gap was adopted: every solve, live and in the replay, is to proven optimality.
+At checkpoint 1, trimming only halved a 50-second solve, because the time goes on proving optimality rather than on
+the model's size. Speed for the replay comes instead from running seasons and settings in parallel processes.
+
+### 12.3 Short minutes memory tuned to 5 days
+
+Section 5.1 kept the short memory at 10 days. It was tuned with the blend instead and settled at 5 days. With the
+long memory now covering later weeks, the short memory only has to serve the next fixture, where a shorter memory
+is best.
+
+### 12.4 Leftover-transfer table measured at discount 0.9
+
+The table (4.6) was measured with the discount at 0.9. At 1.0 the iteration is not a contraction and the values
+drift up to the cap. The shipped discount is 0.7; the replay's scale grid (0, 0.5, 1) absorbs any mismatch between
+the discount the table was measured at and the one it is used with.
+
+### 12.5 Validator does not reject an owned player sold twice
+
+The model sells a player owned today at most once in the horizon (4.3). That is a simplification of the model, not
+an FPL rule, so the independent validator accepts a plan that sells, re-buys and sells again, and checks that the
+second sale is credited at the price paid on re-buying.
+
+### 12.6 Recommendation log
+
+For the forward test (6.4), each live run with a team before the deadline records its recommendation in
+`plan_log`: transfers, captain, vice-captain, chip, hits, projected points and the settings used, keeping the latest
+record per gameweek and team. Actual points are joined in later to score it.
+
+### 12.7 First gameweek of a season
+
+Before gameweek 1 the manager state has no free-transfer count, because transfers are unlimited. `solve_plan` and
+`check_plan` accept `free_transfers=None` for this: week 1's transfers are free and uncapped (no hits, no transfer
+cap), week 2 starts with one free transfer as after a from-scratch week, and the hit cap applies from week 2. The
+command line previously passed 15 free transfers and no hit cap, which gave week 2 five free transfers and lifted
+the hit cap in every week.
+
+### 12.8 Results
+
+In a four-season replay, looking ahead beat single-week planning by about 2 to 3 points a gameweek, with the
+held-out multi-week interval narrowly including zero; see [validation.md](validation.md).

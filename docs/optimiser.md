@@ -167,11 +167,13 @@ The rules are the correctness backbone of the project, so they are checked in th
 
 - **Independent validator.** `optimisation/validate.py` re-checks every planned week and every transition between
   weeks (squad carry-over, bank, free transfers, hits, chips) in plain Python, without the solver. It runs after
-  every solve: in tests, in every replayed gameweek, and live.
+  every solve in the tests, in every replayed gameweek and live; the extra solves that measure the leftover-transfer
+  table are not validated.
 - **Brute force on a small game.** On a scaled-down game (10 players, small squads), every possible plan over two
   and three weeks is enumerated to find the best one. The optimiser's objective must match it exactly,
   across 30 random cases with transfers (random free transfers, bank, hit limit, discount, hit margin, leftover
-  values and chips) and 10 from-scratch cases.
+  values and chips), 8 cases starting before gameweek 1 (unlimited free transfers in the first week), and 10
+  from-scratch cases drawn, of which 9 have a legal squad.
 - **Known answers.** Hand-built cases with obvious correct answers: a transfer held for the week it gains most,
   waiting for a free transfer when a hit does not pay over the horizon, a hit taken when it does, a selling price
   limiting a later week's budget, each chip's effect, the squad returning after a Free Hit.
@@ -188,8 +190,8 @@ python -m optimisation.cli --entry 1234567 --chip bboost:12 # what-if: Bench Boo
 ```
 
 The output lists this week's transfers, XI, bench and captain, then one line per later week with its planned
-transfers, captain and expected points, marked provisional. Each run with `--entry` before a deadline is recorded
-in `plan_log` (the latest record per gameweek and team is kept), for the forward test. Settings come from `optimisation/plan_params.json`,
+transfers, captain and expected points, marked provisional. A run with `--entry` and the component scorer before
+a deadline is recorded in `plan_log` (the latest record per gameweek and team is kept), for the forward test. Settings come from `optimisation/plan_params.json`,
 or from `data/processed/plan_params.json` after a local re-tune.
 
 ## Not modelled

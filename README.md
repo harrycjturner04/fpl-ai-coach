@@ -160,9 +160,10 @@ Next-gameweek accuracy barely changed and later horizons improved (RMSE five gam
 These figures are in-sample; the next untouched test is the live 2026/27 season. See
 [docs/prediction-model.md](docs/prediction-model.md).
 
-Reproduce the holdout: `python -m prediction.backtest --seasons 2025-26 --models naive,form,component --params
-data/processed/model_params.json` (`--models` defaults to `naive,form`; add `component` explicitly, with `--params`
-pointing at a tuned parameters file, to include it).
+Reproduce the holdout with the Stage 3a parameters: `git show 04a8f0e:prediction/model_params.json > params_3a.json`,
+then `python -m prediction.backtest --seasons 2025-26 --models naive,form,component --params params_3a.json`
+(`--models` defaults to `naive,form`; add `component` explicitly to include it). The current parameters, shipped and
+re-tuned alike, were tuned with 2025/26 included, so using them here would leak the holdout season.
 
 ## How this project is built
 

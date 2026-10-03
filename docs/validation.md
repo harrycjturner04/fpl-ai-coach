@@ -95,7 +95,9 @@ the true difference; one that includes zero means the replay cannot rule out no 
 | All 146 | +2.03 | -0.10 to +4.33 |
 | 52 with no double or blank in the next five | +2.54 | -1.12 to +6.87 |
 
-Both intervals include zero, narrowly in the first case.
+Both intervals include zero, narrowly in the first case. A moving-block bootstrap with blocks of 1, 3, 5 and 8
+gameweeks, run on the saved results by the final reviewer, leaves every conclusion unchanged: the held-out
+comparisons still include zero and the simple look-ahead's gain over single-week keeps a positive lower bound.
 
 **Season totals** (real points, no chips):
 
@@ -171,7 +173,8 @@ The live season is untouched by any tuning. Every live run before a deadline rec
 model is scored against FPL's real pre-deadline forecast, including injury news the backtest never had. Each
 optimiser run for a team before a deadline also records its recommendation (`plan_log`: transfers, captain,
 projected points and the settings used, keeping the latest record per gameweek and team), giving a record of what
-the multi-week plan advised and how it scored.
+the multi-week plan advised. The log holds projected points only; scoring the advice needs the actual points joined
+in later.
 
 ## Reproducing
 
@@ -184,4 +187,6 @@ python scripts/make_charts.py            # redraw the charts on these pages
 ```
 
 `evaluation.tune` writes `replay_results.parquet`, `leftover_table.json`, `replay_report.txt` and `plan_params.json`
-to `data/processed/`; pass `--fresh` after any change to code or data.
+to `data/processed/`; pass `--fresh` after any change to code or data. The replay always uses the shipped
+prediction parameters (`prediction/model_params.json`), even where a local re-tune in
+`data/processed/model_params.json` exists and the live command line would prefer it.
