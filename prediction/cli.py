@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -105,6 +106,8 @@ def prediction_table(pred: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
 
 
 def main(argv: list[str] | None = None) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Expected points for the next five gameweeks.")
     parser.add_argument("--position", choices=["GKP", "DEF", "MID", "FWD"])
     parser.add_argument("--top", type=int, default=20)

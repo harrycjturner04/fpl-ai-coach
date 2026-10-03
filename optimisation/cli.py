@@ -10,6 +10,7 @@ Run `python -m ingestion.cli [--entry ID]` first to refresh the data.
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,29 +41,42 @@ def ensure_fresh_data(entry_id: int | None, data_dir: Path = storage.DATA_DIR,
     return f"Data pulled {minutes:.0f} min ago ({pulled_at:%a %d %b %H:%M} UTC)"
 
 
-def _check_chips(chips: dict[int, str], state: dict | None, data_dir: Path) -> None:
-    """Exit unless every requested chip can be played in its gameweek."""
-    for gw, name in chips.items():
-        if state is None:
+def _check_chips(chips: list[tuple[str, int]], state: dict | None, data_dir: Path) -> None:
+    """Exit unless every requested chip can be played in its gameweek (one use per chip instance)."""
+    if not chips:
+        return
+    if len({gw for _, gw in chips}) < len(chips):
+        raise SystemExit("Only one chip can be played per gameweek.")
+    if state is None:
+        names = [name for name, _ in chips]
+        for name in names:
             if name in ("wildcard", "freehit"):
                 raise SystemExit(f"Chip {name} needs a current squad: pass --entry.")
-            continue
-        used = pd.DataFrame(state["chips_used"], columns=["name", "gameweek"])
-        status = chip_status(storage.load_table("chips", data_dir), used, gw)
-        if not ((status["name"] == name) & (status["status"] == "available")).any():
+            if names.count(name) > 1:
+                raise SystemExit(f"Chip {name} can only be played once without --entry.")
+        return
+    defs, taken = storage.load_table("chips", data_dir), set()
+    used = pd.DataFrame(state["chips_used"], columns=["name", "gameweek"])
+    for name, gw in chips:
+        status = chip_status(defs, used, gw)
+        free = status.loc[(status["name"] == name) & (status["status"] == "available") & ~status["id"].isin(taken), "id"]
+        if free.empty:
             raise SystemExit(f"Chip {name} is not available in gameweek {gw}.")
+        taken.add(free.iloc[0])
 
 
 def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float | None = None,
         max_transfers: int | None = None, budget: float | None = None,
         ft_value: float = 1.5, data_dir: Path = storage.DATA_DIR,
         scorer: str = "component", horizon: int | None = None, discount: float | None = None,
-        chips: dict[int, str] | None = None) -> tuple[Plan | Solution, dict]:
+        chips: list[tuple[str, int]] | None = None) -> tuple[Plan | Solution, dict]:
     players = storage.load_table("players", data_dir)
     game_rules = storage.load_json("game_rules", data_dir)
     rules = SquadRules.from_data(game_rules, storage.load_table("positions", data_dir))
     state = storage.load_json(f"manager_state_{entry_id}", data_dir) if entry_id is not None else None
-    chips = chips or {}
+    chips = chips or []
+    if chips and scorer != "component":
+        raise SystemExit("Chips need the component scorer.")
     _check_chips(chips, state, data_dir)
     context: dict = {"players": players, "rules": rules, "mode": "from scratch"}
     owned = None
@@ -97,7 +111,7 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
     pred = prediction_cli.run(data_dir=data_dir)
     table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack().sort_index(axis=1)
     table = table.iloc[:, :horizon if horizon is not None else settings.horizon]
-    plan_args: dict = {"max_hits": settings.max_hits, "chips": chips}
+    plan_args: dict = {"max_hits": settings.max_hits, "chips": {gw: name for name, gw in chips}}
     if state is not None:
         plan_args.update(current_squad=owned, bank=state["bank"],
                          free_transfers=free if free is not None else rules.squad_size)
@@ -173,13 +187,21 @@ def _chip_arg(value: str) -> tuple[str, int]:
     return name, int(gw)
 
 
+def _horizon_arg(value: str) -> int:
+    if not value.isdigit() or not 1 <= int(value) <= 5:
+        raise argparse.ArgumentTypeError("must be between 1 and 5 (predictions cover five gameweeks)")
+    return int(value)
+
+
 def main(argv: list[str] | None = None) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Optimise an FPL squad from the latest ingested data.")
     parser.add_argument("--entry", type=int, help="optimise transfers for this FPL team ID")
     parser.add_argument("--ep-weight", type=float, default=0.7,
                         help="weight on ep_next vs form (default 0.7; placeholder scorer only)")
     parser.add_argument("--bench-weight", type=float, help="value of bench points (default: settings, 0.1)")
-    parser.add_argument("--horizon", type=int, help="gameweeks to plan (default: settings, 5)")
+    parser.add_argument("--horizon", type=_horizon_arg, help="gameweeks to plan (default: settings, 5)")
     parser.add_argument("--discount", type=float, help="weekly discount on later gameweeks (default: settings)")
     parser.add_argument("--chip", type=_chip_arg, action="append", default=[], metavar="NAME:GW",
                         help="play a chip in a gameweek as a what-if, e.g. bboost:12; repeatable")
@@ -195,7 +217,7 @@ def main(argv: list[str] | None = None) -> None:
     print(ensure_fresh_data(args.entry))
     result, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget,
                           args.ft_value, scorer=args.scorer, horizon=args.horizon, discount=args.discount,
-                          chips={gw: name for name, gw in args.chip})
+                          chips=args.chip)
     print(format_solution(result, context))
 
 

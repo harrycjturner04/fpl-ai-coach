@@ -82,8 +82,9 @@ def _team_state(tmp_path, players, free=5, chips_used=()):
                        "chips_used": [{"name": n, "gameweek": g} for n, g in chips_used],
                        "squad": [{"player_id": int(i), "selling_price": 4.5} for i in owned]},
                       "manager_state_42", tmp_path)
-    storage.save_table(pd.DataFrame({"id": [1, 2], "name": ["bboost", "bboost"], "number": [1, 1],
-                                     "start_event": [1, 20], "stop_event": [19, 38]}), "chips", tmp_path)
+    storage.save_table(pd.DataFrame({"id": [1, 2, 3, 4], "name": ["bboost", "bboost", "wildcard", "wildcard"],
+                                     "number": [1, 1, 1, 1], "start_event": [1, 20, 1, 20],
+                                     "stop_event": [19, 38, 19, 38]}), "chips", tmp_path)
     return owned
 
 
@@ -117,19 +118,32 @@ def test_settings_file_applies_and_options_override(tmp_path, monkeypatch):
     assert len(plan.weeks) == 3
 
 
-def test_first_gameweek_has_no_hits(tmp_path, monkeypatch):
+def test_first_gameweek_passes_unlimited_hits_and_full_free_transfers(tmp_path, monkeypatch):
     players = _write_data(tmp_path)
     _team_state(tmp_path, players, free=None)
     _fake_predictions(monkeypatch, players, [1, 2])
+    seen = _spy(monkeypatch, "solve_plan")
     plan, _ = cli.run(entry_id=42, data_dir=tmp_path)
+    assert seen["max_hits"] is None and seen["free_transfers"] == 15
     assert plan.weeks[0].hits == 0
+
+
+def _spy(monkeypatch, name):
+    seen = {}
+    real = getattr(cli, name)
+
+    def wrapper(*a, **kw):
+        seen.update(kw)
+        return real(*a, **kw)
+    monkeypatch.setattr(cli, name, wrapper)
+    return seen
 
 
 def test_chip_is_set_on_the_requested_week(tmp_path, monkeypatch):
     players = _write_data(tmp_path)
     _team_state(tmp_path, players)
     _fake_predictions(monkeypatch, players, [9, 10, 11])
-    plan, _ = cli.run(entry_id=42, data_dir=tmp_path, chips={10: "bboost"})
+    plan, _ = cli.run(entry_id=42, data_dir=tmp_path, chips=[("bboost", 10)])
     assert [w.chip for w in plan.weeks] == [None, "bboost", None]
 
 
@@ -138,22 +152,22 @@ def test_used_chip_exits_with_message(tmp_path, monkeypatch):
     _team_state(tmp_path, players, chips_used=[("bboost", 5)])
     _fake_predictions(monkeypatch, players, [9, 10])
     with pytest.raises(SystemExit, match=r"Chip bboost is not available in gameweek 10\."):
-        cli.run(entry_id=42, data_dir=tmp_path, chips={10: "bboost"})
+        cli.run(entry_id=42, data_dir=tmp_path, chips=[("bboost", 10)])
 
 
 def test_chip_outside_plan_exits_cleanly(tmp_path, monkeypatch):
     players = _write_data(tmp_path)
     _fake_predictions(monkeypatch, players, [9, 10])
     with pytest.raises(SystemExit, match="not in the score table"):
-        cli.run(data_dir=tmp_path, chips={15: "bboost"})
+        cli.run(data_dir=tmp_path, chips=[("bboost", 15)])
 
 
 def test_squad_chips_need_an_entry(tmp_path, monkeypatch):
     players = _write_data(tmp_path)
     _fake_predictions(monkeypatch, players, [9, 10])
     with pytest.raises(SystemExit, match="needs a current squad"):
-        cli.run(data_dir=tmp_path, chips={10: "wildcard"})
-    plan, _ = cli.run(data_dir=tmp_path, chips={10: "3xc"})
+        cli.run(data_dir=tmp_path, chips=[("wildcard", 10)])
+    plan, _ = cli.run(data_dir=tmp_path, chips=[("3xc", 10)])
     assert plan.weeks[1].chip == "3xc"
 
 
@@ -168,7 +182,7 @@ def test_later_weeks_block_format_on_two_week_plan(tmp_path, monkeypatch):
     players = _write_data(tmp_path)
     _team_state(tmp_path, players)
     _fake_predictions(monkeypatch, players, [9, 10])
-    plan, context = cli.run(entry_id=42, data_dir=tmp_path, chips={10: "bboost"})
+    plan, context = cli.run(entry_id=42, data_dir=tmp_path, chips=[("bboost", 10)])
     out = cli.format_solution(plan, context)
     w = plan.weeks[1]
     name = context["players"].set_index("id").at[w.captain, "web_name"]
@@ -185,3 +199,115 @@ def test_one_week_plan_prints_like_the_single_week_output(tmp_path, monkeypatch)
     out = cli.format_solution(plan, context)
     assert "Plan for later" not in out
     assert out == cli.format_solution(plan.weeks[0], context)
+
+
+def _run_chips(tmp_path, monkeypatch, chips, used=(), gws=(9, 10), **kw):
+    players = _write_data(tmp_path)
+    _team_state(tmp_path, players, chips_used=used)
+    _fake_predictions(monkeypatch, players, list(gws))
+    return cli.run(entry_id=42, data_dir=tmp_path, chips=chips, **kw)
+
+
+def test_chip_window_not_open_is_rejected(tmp_path, monkeypatch):
+    with pytest.raises(SystemExit, match="Chip bboost is not available in gameweek 10"):
+        _run_chips(tmp_path, monkeypatch, [("bboost", 10)], used=[("bboost", 3)])  # first half used, second not open yet
+
+
+def test_second_half_chip_after_first_half_used_is_accepted(tmp_path, monkeypatch):
+    plan, _ = _run_chips(tmp_path, monkeypatch, [("bboost", 25)], used=[("bboost", 5)], gws=(24, 25))
+    assert plan.weeks[1].chip == "bboost"
+
+
+def test_wildcard_with_entry_is_accepted(tmp_path, monkeypatch):
+    plan, _ = _run_chips(tmp_path, monkeypatch, [("wildcard", 10)])
+    assert plan.weeks[1].chip == "wildcard"
+
+
+def test_two_chips_in_one_gameweek_are_rejected(tmp_path, monkeypatch):
+    with pytest.raises(SystemExit, match="Only one chip can be played per gameweek."):
+        _run_chips(tmp_path, monkeypatch, [("bboost", 10), ("wildcard", 10)])
+
+
+def test_same_chip_twice_in_one_window_is_rejected(tmp_path, monkeypatch):
+    with pytest.raises(SystemExit, match="Chip bboost is not available in gameweek 10"):
+        _run_chips(tmp_path, monkeypatch, [("bboost", 9), ("bboost", 10)])
+
+
+def test_same_chip_twice_without_entry_is_rejected(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    _fake_predictions(monkeypatch, players, [9, 10, 11])
+    with pytest.raises(SystemExit, match="only be played once"):
+        cli.run(data_dir=tmp_path, chips=[("3xc", 10), ("3xc", 11)])
+
+
+def test_chips_need_the_component_scorer(tmp_path):
+    _write_data(tmp_path)
+    with pytest.raises(SystemExit, match="Chips need the component scorer."):
+        cli.run(data_dir=tmp_path, scorer="placeholder", chips=[("bboost", 9)])
+
+
+def test_discount_and_bench_weight_overrides_reach_the_solver(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    storage.save_json({"discount": 0.5, "bench_weight": 0.2}, "plan_params", tmp_path)
+    _fake_predictions(monkeypatch, players, [9, 10])
+    seen = _spy(monkeypatch, "solve_plan")
+    cli.run(data_dir=tmp_path)
+    assert (seen["discount"], seen["bench_weight"]) == (0.5, 0.2)
+    cli.run(data_dir=tmp_path, discount=0.9, bench_weight=0.3)
+    assert (seen["discount"], seen["bench_weight"]) == (0.9, 0.3)
+
+
+def test_check_plan_receives_the_solvers_legality_arguments(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    owned = _team_state(tmp_path, players)
+    _fake_predictions(monkeypatch, players, [9, 10])
+    solved, checked = _spy(monkeypatch, "solve_plan"), _spy(monkeypatch, "check_plan")
+    cli.run(entry_id=42, data_dir=tmp_path, chips=[("bboost", 10)])
+    keys = ("current_squad", "bank", "free_transfers", "max_hits", "chips")
+    assert {k: checked[k] for k in keys} == {k: solved[k] for k in keys}
+    assert checked["chips"] == {10: "bboost"} and set(checked["current_squad"]) == set(owned)
+
+
+@pytest.mark.parametrize("value", ["0", "6", "x"])
+def test_horizon_must_be_between_one_and_five(value):
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--horizon", value])
+    assert e.value.code == 2
+
+
+def test_one_week_output_is_pinned(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    _team_state(tmp_path, players)
+    _fake_predictions(monkeypatch, players, [9])
+    plan, context = cli.run(entry_id=42, data_dir=tmp_path)
+    assert cli.format_solution(plan, context) == PINNED
+
+
+PINNED = """Mode: transfers for Test FC
+
+Starting XI:
+  GKP  P1002 (C)              T  £4.5m  score 2.00
+  DEF  P1009 (V)              T  £4.5m  score 2.00
+  DEF  P1010                  T  £4.5m  score 2.00
+  DEF  P1012                  T  £4.5m  score 2.00
+  DEF  P1014                  T  £4.5m  score 2.00
+  MID  P1023                  T  £4.5m  score 2.00
+  MID  P1026                  T  £4.5m  score 2.00
+  MID  P1027                  T  £4.5m  score 2.00
+  MID  P1028                  T  £4.5m  score 2.00
+  FWD  P1035                  T  £4.5m  score 2.00
+  FWD  P1037                  T  £4.5m  score 2.00
+
+Bench (in order):
+  GKP  P1003                  T  £4.5m  score 2.00
+  DEF  P1016                  T  £4.5m  score 2.00
+  MID  P1022                  T  £4.5m  score 2.00
+  FWD  P1031                  T  £4.5m  score 2.00
+
+Transfers (5 free, max 7):
+  none - roll the transfer
+  Hits: 0 (-0 pts)
+  Free transfers next gameweek: 5
+
+Squad cost: £67.5m   Money left: £0.0m
+Projected points (XI + captain - hits): 24.00"""
