@@ -186,6 +186,8 @@ data/processed/model_params.json      tuned parameters from a local re-tune (pre
                                       priority over the copy shipped at prediction/model_params.json
 data/processed/tuning_log.parquet     one row per coordinate-descent step (prediction/tune.py)
 data/processed/prediction_log.parquet the model's own predictions, recorded before each deadline (forward test)
+data/processed/plan_log.parquet       the optimiser's recommendation for a team, recorded before each deadline
+                                      (latest per season, gameweek and team)
 data/processed/replay_predictions.parquet  predictions for every replayed gameweek (evaluation/tune.py)
 data/processed/replay_results.parquet one row per replayed gameweek and setting: points, hits, transfers
 data/processed/replay_report.txt      the replay's season totals, leave-one-season-out and hits report

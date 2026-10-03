@@ -18,7 +18,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from evaluation.replay import HOLD, SINGLE_WEEK, SUMMED  # noqa: E402
-from evaluation.tune import SEASONS, config_key  # noqa: E402
+from evaluation.tune import SEASONS, config_key, leave_one_season_out  # noqa: E402
 from ingestion import storage  # noqa: E402
 from optimisation.settings import SHIPPED_PARAMS_PATH as PLAN_PARAMS, PlanSettings  # noqa: E402
 from prediction.backtest import calibration, form_predictor, load_params, make_component_predictor, run_backtest  # noqa: E402
@@ -43,15 +43,20 @@ def save(fig, name: str) -> None:
 
 def replay_chart() -> None:
     results = storage.load_table("replay_results")
-    shipped = PlanSettings.from_dict(json.loads(PLAN_PARAMS.read_text()))
-    policies = [("Multi-week (shipped settings)", shipped, BLUE, "-"),
-                ("Simple look-ahead", SUMMED, ORANGE, "-"),
-                ("Single-week", SINGLE_WEEK, AQUA, "-"),
-                ("No transfers after the first week", HOLD, GREY, "--")]
-    fig, axes = plt.subplots(2, 2, figsize=(10, 7), sharey=True)
+    shipped = config_key(PlanSettings.from_dict(json.loads(PLAN_PARAMS.read_text())))
+    benchmarks = {config_key(s) for s in (SINGLE_WEEK, HOLD, SUMMED)}
+    totals = (results[~results["config"].isin(benchmarks)]
+              .groupby(["config", "season"], as_index=False, sort=False)["points"].sum())
+    held_out = {r.season: r.config for r in leave_one_season_out(totals).itertuples() if r.season != "total"}
+    policies = [("Multi-week, held out (settings chosen on the other seasons)", None, BLUE, "-"),
+                ("Multi-week, shipped settings (in-sample)", shipped, "#8fb8ea", "--"),
+                ("Simple look-ahead", config_key(SUMMED), ORANGE, "-"),
+                ("Single-week", config_key(SINGLE_WEEK), AQUA, "-"),
+                ("No transfers after the first week", config_key(HOLD), GREY, ":")]
+    fig, axes = plt.subplots(2, 2, figsize=(10, 7.4), sharey=True)
     for ax, season in zip(axes.flat, SEASONS):
-        for label, settings, colour, style in policies:
-            r = results[(results["config"] == config_key(settings)) & (results["season"] == season)]
+        for label, key, colour, style in policies:
+            r = results[(results["config"] == (key or held_out[season])) & (results["season"] == season)]
             r = r.sort_values("gameweek")
             ax.plot(r["gameweek"], r["points"].cumsum(), color=colour, linestyle=style, label=label)
         ax.set_title(season.replace("-", "/"))
@@ -59,9 +64,9 @@ def replay_chart() -> None:
     for ax in axes[:, 0]:
         ax.set_ylabel("Cumulative real points")
     handles, labels = axes[0, 0].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, -0.04))
+    fig.legend(handles, labels, loc="lower center", ncol=2, frameon=False, bbox_to_anchor=(0.5, -0.06))
     fig.suptitle("Season replay: cumulative points by planning method", fontsize=12)
-    fig.tight_layout(rect=(0, 0.04, 1, 1))
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
     save(fig, "replay_cumulative_points.png")
 
 

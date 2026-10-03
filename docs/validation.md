@@ -13,13 +13,15 @@ section).
 
 ## Walk-forward backtest (predictions)
 
-For every past gameweek, the model is given only the data that existed before that gameweek's first kickoff,
+For every past gameweek, the model is given only the matches that kicked off before that gameweek's first kickoff
+(no match is played between the deadline and that kickoff),
 predicts the next five gameweeks, and is scored against what actually happened. Nothing from the future can leak
 in: every feature is computed from matches before the cutoff, and a test checks that appending made-up future
 matches changes no prediction. Gameweeks are never split randomly into training and test sets, because that would
 let a model learn from weeks after the ones it is predicting.
 
-The benchmark is rebuilt FPL form, FPL's own pre-deadline method. Results by horizon, calibration, and the one
+The benchmark is rebuilt FPL form: points per match over the last 30 days, rebuilt at every past deadline. FPL's own
+`ep_next` forecast equals `form` for most players, so this stands in for FPL's pre-deadline method. Results by horizon, calibration, and the one
 held-out prediction result (2025/26, from Stage 3a) are on the [prediction model](prediction-model.md#accuracy)
 page. In short: across all four seasons the model beats form at every horizon from one to five gameweeks ahead, on
 both error and ranking, but those figures are in-sample because the same seasons were used to tune it.
@@ -29,7 +31,7 @@ both error and ranking, but those figures are in-sample because the same seasons
 The replay plays each past season as a simulated manager would:
 
 - Gameweek 1 (gameweek 6 in 2022/23): pick a squad from scratch with £100m.
-- Every gameweek after that: predict the next five gameweeks from data before the deadline only; solve the
+- Every gameweek after that: predict the next five gameweeks from matches before the gameweek's first kickoff only; solve the
   optimiser; carry out week one's transfers; score the team on real points; carry the squad, bank, free transfers
   and each player's purchase price forward.
 - **Scoring follows FPL**: if a starter does not play, the first bench player who did comes on, keeping a valid
@@ -55,7 +57,7 @@ so the comparison isolates the planning method.
 
 ### Policies compared
 
-- **Single-week**: the optimiser planning one week at a time (the Stage 2 model with the Stage 3a predictions),
+- **Single-week**: the optimiser planning one week at a time (the Stage 2 model),
   with each free transfer saved for next week valued at 1.5 points.
 - **Simple look-ahead**: the same one-week solve, fed each player's discounted five-week total
   (`p1 + 0.85 p2 + 0.85^2 p3 + ...`) instead of next week's points. Untuned.
@@ -118,7 +120,10 @@ up to two hits a week.
 | Shipped multi-week (in-sample) minus simple look-ahead | +1.14 | -1.21 to +3.44 |
 | Shipped multi-week (in-sample) minus single-week | +4.35 | +2.19 to +6.99 |
 
-![Cumulative points by planning method, per season](img/replay_cumulative_points.png)
+The chart shows, per season, the multi-week model both held out (the settings leave-one-season-out chose for that
+season) and with the shipped settings, which were chosen on all four seasons and so are in-sample.
+
+![Cumulative points per season for no transfers, single-week, simple look-ahead, multi-week held out, and multi-week with the shipped (in-sample) settings](img/replay_cumulative_points.png)
 
 ### Every setting tried
 
@@ -154,7 +159,8 @@ horizon 5, discount 0.7, bench weight 0.1, the leftover table at full strength a
   consistent order by discount or horizon: discount 1.0 scored more than 0.8, and horizon 4 scored less than both 3
   and 5. The shipped settings are the best estimate from this replay, not a proven optimum.
 - **Hits and the measured leftover table showed a consistent direction.** Banning hits scored 8,661 against 8,740
-  with up to two a week allowed, and no safety margin on hits was needed. The leftover table scored 8,443 at zero
+  with up to two a week allowed. Hit margins (an extra penalty per hit) were not tried, because allowing hits already
+  beat banning them (8,740 against 8,661). The leftover table scored 8,443 at zero
   strength, 8,635 at half and 8,740 at full, and three of the four held-out folds chose full strength.
 - **The true test is the live 2026/27 season.**
 
@@ -162,8 +168,10 @@ horizon 5, discount 0.7, bench weight 0.1, the leftover table at full strength a
 
 The live season is untouched by any tuning. Every live run before a deadline records the model's predictions
 (`prediction_log`) next to FPL's own published forecast, `ep_next` (`ep_next_log`). As gameweeks are played, the
-model is scored against FPL's real pre-deadline forecast, including injury news the backtest never had, and the
-weekly recommendations give a record of what the multi-week plan advised.
+model is scored against FPL's real pre-deadline forecast, including injury news the backtest never had. Each
+optimiser run for a team before a deadline also records its recommendation (`plan_log`: transfers, captain,
+projected points and the settings used, keeping the latest record per gameweek and team), giving a record of what
+the multi-week plan advised and how it scored.
 
 ## Reproducing
 

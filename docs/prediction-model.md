@@ -11,7 +11,8 @@ Code: `features/team_ratings.py`, `features/player_rates.py`, `prediction/compon
 ## One timeline rule
 
 Every feature is computed from matches that kicked off before a cutoff time, and nothing after it. Live
-predictions use "now"; the backtest uses each past gameweek's first kickoff. Both run the same code, and a test
+predictions use "now"; the backtest uses each past gameweek's first kickoff (no match is played between the
+deadline and that kickoff, so it sees the same match data a manager had at the deadline). Both run the same code, and a test
 checks that adding made-up future matches never changes a prediction.
 
 ## Team ratings
@@ -56,7 +57,7 @@ shrunk = (sum of weighted observations + kappa * prior) / (sum of weights + kapp
 
 How far back should a player's record count? For next gameweek, a short memory is best: the last match is the best
 signal of an injury or a change in role. For a fixture four weeks away, a longer memory is better. The data show
-why. Across 1,111 player-seasons in the archive, the correlation between "played 60 minutes or more" in two
+why. Across 1,111 player-seasons on the tuning seasons of Stage 3a (2022/23 to 2024/25), the correlation between "played 60 minutes or more" in two
 matches, after removing each player's own average, is:
 
 | Matches apart | 1 | 2 | 3 | 4 | 5 |
@@ -106,7 +107,7 @@ minutes `E[m] = p60 * m60 + psub * msub`:
 | Goals conceded | `-p60 * E[floor(G / 2)]`, `G ~ Poisson(lambda_O)` (goalkeepers, defenders) |
 | Saves | `p60 * E[floor(S / 3)]`, saves `S` Poisson (goalkeepers) |
 | Bonus | bonus per 90 * `E[m] / 90` |
-| Defensive contribution | `2 * p60 * chance of reaching the threshold` (from 2025/26 only) |
+| Defensive contribution | `2 * p60 * chance of reaching the threshold` (outfield players, from 2025/26 only) |
 | Discipline | `-(1 * yellow rate + 3 * red rate) * E[m] / 90` |
 
 Points values come from `prediction/scoring.py`, which holds each season's rules (defensive contribution points
@@ -141,7 +142,7 @@ there is no earlier data to predict from).
 ## Accuracy
 
 Walk-forward backtest over every gameweek of 2022/23 to 2025/26, with the shipped parameters. Each row is a
-gameweek's predictions made at its deadline, scored against what happened 1 to 5 gameweeks later.
+gameweek's predictions made from matches before its first kickoff, scored against what happened 1 to 5 gameweeks later.
 
 **These results are in-sample**: the same four seasons were used to tune the parameters, so they flatter the model
 somewhat. The one genuinely held-out prediction result is the 2025/26 holdout further down.
@@ -185,8 +186,9 @@ against its mean actual score.
 
 ![Predicted against actual points by decile](img/calibration.png)
 
-The component model sits close to the diagonal: its top group is predicted 4.61 and scores 4.47, and its lowest
-group is predicted 0.13 and scores 0.24. Form over-predicts badly at the top (predicted 6.63, actual 3.90): the players
+The component model sits close to the diagonal but under-predicts by 0.11 to 0.28 points in the lower six
+groups (for example predicted 0.40, actual 0.56; predicted 1.10, actual 1.31); its top group is predicted 4.61 and
+scores 4.47. Form over-predicts badly at the top (predicted 6.63, actual 3.90): the players
 with the highest recent form score far less, on average, than that form suggests.
 
 ## The held-out result (Stage 3a)

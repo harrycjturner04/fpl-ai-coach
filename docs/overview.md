@@ -20,7 +20,7 @@ next, so each layer can be tested on its own.
    manager's history, chips and transfers, and an archive of past seasons for testing.
 2. **Feature engineering** turns match history into inputs for the model: attack and defence ratings for every
    team, and each player's chance of playing and per-90-minute rates. Every feature is computed from matches before
-   a cutoff time only, so a past gameweek can be replayed exactly as it looked at its deadline.
+   a cutoff time only, so a past gameweek can be replayed using only data from before its deadline.
 3. **Prediction** turns those features into expected FPL points per player for each of the next five gameweeks,
    through FPL's own scoring rules.
 4. **Optimisation** chooses the squad, transfers, starting XI and captain that maximise expected points over the

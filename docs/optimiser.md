@@ -159,8 +159,7 @@ before solving.
 The model is solved with HiGHS, through PuLP, to a proven optimum (no early stopping, single-threaded). On the
 project owner's real squad with 562 players, a five-week plan takes about 47 to 50 seconds and a one-week plan under
 a second. The full season replay and tuning run (146 gameweeks for each of 15 settings, plus the leftover-transfer
-measurement)
-took 5.2 hours on 16 parallel processes.
+measurement) took 5.2 hours on 16 parallel processes.
 
 ## How it is checked
 
@@ -189,7 +188,8 @@ python -m optimisation.cli --entry 1234567 --chip bboost:12 # what-if: Bench Boo
 ```
 
 The output lists this week's transfers, XI, bench and captain, then one line per later week with its planned
-transfers, captain and expected points, marked provisional. Settings come from `optimisation/plan_params.json`,
+transfers, captain and expected points, marked provisional. Each run with `--entry` before a deadline is recorded
+in `plan_log` (the latest record per gameweek and team is kept), for the forward test. Settings come from `optimisation/plan_params.json`,
 or from `data/processed/plan_params.json` after a local re-tune.
 
 ## Not modelled
