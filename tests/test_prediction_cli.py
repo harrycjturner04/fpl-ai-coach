@@ -73,3 +73,34 @@ def test_prediction_table_uses_the_nearest_gameweeks_p60_not_merge_order():
                            index=pd.Index([1], name="id"))
     table = cli.prediction_table(pred, players)
     assert table.loc[1, "p60"] == pytest.approx(0.4)
+
+
+def _log_inputs():
+    gameweeks = pd.DataFrame({"id": [9, 10], "is_next": [True, False],
+                              "deadline_time": pd.to_datetime(["2023-10-06T17:30Z", "2023-10-13T17:30Z"], utc=True)})
+    pred = pd.DataFrame({"player_code": [100, 100, 100, 200], "gameweek": [9, 9, 10, 9],
+                         "total": [1.0, 0.5, 2.0, 3.0]})
+    return pred, gameweeks
+
+
+def test_predictions_logged_before_deadline_keeping_latest(tmp_path):
+    pred, gws = _log_inputs()
+    cli._record_predictions(pred, gws, "2023-24", tmp_path, pd.Timestamp("2023-10-04T09:00Z"))
+    pred2 = pred.assign(total=pred["total"] + 1)
+    log = cli._record_predictions(pred2, gws, "2023-24", tmp_path, pd.Timestamp("2023-10-06T12:00Z"))
+    assert len(log) == 3 and set(log.made_for_gameweek) == {9}
+    row = log[(log.player_code == 100) & (log.gameweek == 9)].iloc[0]
+    assert row.total == pytest.approx(3.5, abs=1e-4)  # fixtures summed, latest record kept
+    assert storage.load_table("prediction_log", tmp_path).shape[0] == 3
+
+
+def test_predictions_not_logged_after_deadline(tmp_path):
+    pred, gws = _log_inputs()
+    assert cli._record_predictions(pred, gws, "2023-24", tmp_path, pd.Timestamp("2023-10-07T09:00Z")) is None
+    assert storage.load_table_or_none("prediction_log", tmp_path) is None
+
+
+def test_run_logs_predictions_before_deadline(tmp_path):
+    write_live_tables(tmp_path)
+    cli.run(data_dir=tmp_path, now=pd.Timestamp("2023-10-06T12:00Z"))
+    assert set(storage.load_table("prediction_log", tmp_path).player_code) == {100, 203}
