@@ -24,6 +24,7 @@ packages = ["ingestion", "prediction", "optimisation", "features", "evaluation"]
 
 [tool.setuptools.package-data]
 prediction = ["model_params.json"]
+optimisation = ["plan_params.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

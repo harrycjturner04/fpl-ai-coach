@@ -1,0 +1,15 @@
+{
+  "horizon": 5,
+  "discount": 0.7,
+  "bench_weight": 0.1,
+  "leftover_values": [
+    3.35,
+    2.93,
+    2.34,
+    1.93
+  ],
+  "hit_margin": 0.0,
+  "max_hits": 2,
+  "summed": false,
+  "hold": false
+}
