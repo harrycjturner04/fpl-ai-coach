@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import itertools
+from collections import Counter
+from math import inf
 
 import pandas as pd
 
@@ -91,3 +93,72 @@ def brute_force(players, scores, rules, budget, bench_weight=0.1,
             if best is None or value > best:
                 best = value
     return best
+
+
+def brute_force_plan(players, scores, rules, *, budget=None, bench_weight=0.1, current_squad=None, bank=0.0,
+                     free_transfers=1, max_hits=None, discount=1.0, leftover_values=(), hit_margin=0.0,
+                     chips=None):
+    """Best plan objective by dynamic programming over (squad, owned players already sold, free transfers).
+
+    Shares nothing with the ILP. Chips supported: wildcard, bboost, 3xc (not freehit).
+    `free_transfers=None`: week one's transfers are unlimited and free, then one free transfer."""
+    chips = chips or {}
+    weeks = list(scores.columns)
+    by_pos = {pos: players.loc[players["position"] == pos, "id"].tolist() for pos in rules.composition}
+    price = {i: round(p * 10) for i, p in players.set_index("id")["price"].items()}
+    club = players.set_index("id")["team"].to_dict()
+    pos_of = players.set_index("id")["position"].to_dict()
+    owned = {i: round(v * 10) for i, v in (current_squad or {}).items()}
+    total = round(bank * 10) + sum(owned.values()) if owned else round(budget * 10)
+
+    squads = []
+    for combo in itertools.product(*(itertools.combinations(by_pos[p], n) for p, n in rules.composition.items())):
+        squad = frozenset(i for group in combo for i in group)
+        if max(Counter(club[i] for i in squad).values()) <= rules.max_per_club:
+            squads.append(squad)
+
+    def lineup(squad, gw):
+        w = 1.0 if chips.get(gw) == "bboost" else bench_weight
+        cap = 2 if chips.get(gw) == "3xc" else 1
+        best = -inf
+        for xi in itertools.combinations(sorted(squad), rules.starting_xi):
+            counts = Counter(pos_of[i] for i in xi)
+            if any(not rules.xi_min[p] <= counts.get(p, 0) <= rules.xi_max[p] for p in rules.composition):
+                continue
+            pts = [scores.at[i, gw] for i in xi]
+            best = max(best, sum(pts) + cap * max(pts) + w * sum(scores.at[i, gw] for i in squad if i not in xi))
+        return best
+
+    def cost(squad, sold):  # owned and never sold: selling price; everyone else: buy price
+        return sum(owned[i] if i in owned and i not in sold else price[i] for i in squad)
+
+    states = {(frozenset(owned), frozenset(), free_transfers): 0.0}
+    for t, gw in enumerate(weeks):
+        values = {s: lineup(s, gw) for s in squads}
+        nxt = {}
+        for (squad, sold, ft), value in states.items():
+            for new in squads:
+                out = squad - new
+                if out & sold:  # an owned player is sold at most once
+                    continue
+                new_sold = sold | frozenset(i for i in out if i in owned)
+                if cost(new, new_sold) > total:
+                    continue
+                n = len(new - squad)
+                if t == 0 and (not owned or free_transfers is None):
+                    hits, ft_next = 0, 1
+                elif chips.get(gw) == "wildcard":
+                    hits, ft_next = 0, min(rules.max_free_transfers, ft)
+                else:
+                    used = min(ft, n)
+                    hits = n - used
+                    if max_hits is not None and hits > max_hits:
+                        continue
+                    ft_next = min(rules.max_free_transfers, ft - used + 1)
+                v = value + discount ** t * (values[new] - (rules.hit_cost + hit_margin) * hits)
+                key = (new, new_sold, ft_next)
+                if v > nxt.get(key, -inf):
+                    nxt[key] = v
+        states = nxt
+    return max(v + discount ** len(weeks) * sum(list(leftover_values)[: ft - 1])
+               for (_, _, ft), v in states.items())

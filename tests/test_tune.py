@@ -1,8 +1,9 @@
+
 import pandas as pd
 import pytest
 
 from prediction.component_model import ModelParams
-from prediction.tune import coordinate_descent, objective, with_value
+from prediction.tune import TUNING_SEASONS, coordinate_descent, objective, with_value
 
 
 def test_objective_is_two_when_level_with_benchmark():
@@ -24,3 +25,21 @@ def test_coordinate_descent_finds_the_minimum_of_a_known_bowl():
     best, j, history = coordinate_descent(evaluate, ModelParams(), grid, log=lambda *_: None)
     assert best.team.ridge == 4.0 and best.player.kappa_xg == 8.0 and j == pytest.approx(2.0)
     assert len(history) >= 7
+
+
+def test_tuning_seasons_include_2025_26():
+    assert TUNING_SEASONS == ["2022-23", "2023-24", "2024-25", "2025-26"]
+
+
+def test_weighted_objective_over_horizons():
+    bench = pd.DataFrame({"horizon": [0, 1], "rmse": [2.0, 2.0], "rho": [0.5, 0.5]})
+    assert objective(bench, bench, weights=(1.0, 0.5, 0.25)) == pytest.approx(2.0, abs=1e-4)
+    model = bench.assign(rmse=[1.0, 2.0], rho=[0.75, 0.5])  # J_0 = 1.0, J_1 = 2.0
+    assert objective(model, bench, weights=(1.0, 0.0)) == pytest.approx(1.0, abs=1e-4)
+    assert objective(model, bench, weights=(1.0, 1.0)) == pytest.approx(1.5, abs=1e-4)
+
+
+def test_objective_skips_a_horizon_present_in_one_frame_only():
+    bench = pd.DataFrame({"horizon": [0, 1], "rmse": [2.0, 2.0], "rho": [0.5, 0.5]})
+    model = pd.DataFrame({"horizon": [0], "rmse": [1.0], "rho": [0.75]})  # J_0 = 1.0, no horizon 1
+    assert objective(model, bench, weights=(1.0, 1.0)) == pytest.approx(1.0, abs=1e-4)

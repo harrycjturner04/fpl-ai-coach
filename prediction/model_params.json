@@ -3,13 +3,15 @@
     "half_life_days": 120,
     "ridge": 2.0,
     "xg_weight": 0.5,
-    "prev_season_fade": 0.75,
-    "promoted_attack": -0.3,
+    "prev_season_fade": 0.25,
+    "promoted_attack": -0.15,
     "promoted_defence": -0.3
   },
   "player": {
     "half_life_days": 30,
-    "minutes_half_life_days": 10,
+    "minutes_half_life_days": 5,
+    "minutes_long_half_life_days": 60.0,
+    "minutes_fade_days": 14,
     "prev_season_fade": 0.75,
     "kappa_minutes": 0.1,
     "kappa_typical_minutes": 3.0,
@@ -17,7 +19,7 @@
     "kappa_xa": 2.0,
     "kappa_bonus": 6.0,
     "kappa_saves": 12.0,
-    "kappa_dc": 5.0,
+    "kappa_dc": 2.0,
     "kappa_cards": 10.0
   },
   "flag_fade": 0.5

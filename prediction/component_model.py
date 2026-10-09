@@ -95,6 +95,11 @@ def predict(history: pd.DataFrame, players_now: pd.DataFrame, fixtures_ahead: pd
         return pd.DataFrame(columns=["player_code", "gameweek", "total"])
 
     rows["horizon"] = rows["gameweek"] - fixtures_ahead["gameweek"].min()
+    days = ((rows["kickoff"] - cutoff).dt.total_seconds() / 86400).clip(lower=0)
+    days = days.fillna(7 * rows["horizon"])
+    v = 0.5 ** (days / params.player.minutes_fade_days)
+    for col in ("p60", "psub"):
+        rows[col] = v * rows[col] + (1 - v) * rows[col + "_long"]
     chance = rows["chance"].fillna(100) / 100
     availability = 1 - (1 - chance) * params.flag_fade ** rows["horizon"]
     rows["p60"] = rows["p60"] * availability
