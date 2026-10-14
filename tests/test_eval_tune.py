@@ -174,3 +174,13 @@ def test_fresh_delete_removes_old_results_and_metas_only(tmp_path, monkeypatch):
     assert (tmp_path / "processed" / "res_meta.json").exists()
     tune._delete_saved(["res"], tmp_path)
     assert sorted(p.name for p in (tmp_path / "processed").iterdir()) == ["other.json"]
+
+
+def test_saved_leftover_table_is_reused_only_for_the_same_sampling(tmp_path):
+    from ingestion import storage
+    fp = {"v": 1, "every_state": 4, "passes": 3}
+    storage.save_json(dict(base_table=[1.0], passes=[]), "left", tmp_path)
+    storage.save_json(fp, "left_meta", tmp_path)
+    assert tune._saved_leftover("left", tmp_path, fp)["base_table"] == [1.0]
+    assert tune._saved_leftover("left", tmp_path, {**fp, "every_state": 2}) is None
+    assert tune._saved_leftover("missing", tmp_path, fp) is None

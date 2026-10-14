@@ -129,6 +129,13 @@ def _meta_matches(name: str, data_dir: Path, fp: dict) -> bool:
     return True
 
 
+def _saved_leftover(name: str, data_dir: Path, fp: dict) -> dict | None:
+    """The saved leftover table if it was measured from the same inputs and sampling, else None (re-measure)."""
+    if storage.load_json_or_none(f"{name}_meta", data_dir) != fp:
+        return None
+    return storage.load_json_or_none(name, data_dir)
+
+
 def precompute_predictions(seasons: list[str], workers: int, data_dir: Path, limit: int | None = None, *,
                            name: str = "replay_predictions", fresh: bool = False) -> pd.DataFrame:
     fp = fingerprint(seasons, data_dir)
@@ -238,16 +245,17 @@ def main(argv=None) -> None:
             pass_logs.append(msg)
             say(msg)
 
-        if not args.fresh and _meta_matches(left_name, data_dir, fp):
+        left_fp = {**fp, "every_state": every, "passes": passes}
+        saved_left = None if args.fresh else _saved_leftover(left_name, data_dir, left_fp)
+        if saved_left:
             say("leftover values: reusing saved table")
-            saved_left = storage.load_json(left_name, data_dir)
             base_table, pass_logs = tuple(saved_left["base_table"]), saved_left["passes"]
         else:
             say("leftover values")
             base = fixed_point(run_states, PlanSettings(discount=0.9), passes=passes, log=log_pass, map_fn=pool.map)
             base_table = base.leftover_values
             storage.save_json(dict(base_table=list(base_table), passes=pass_logs), left_name, data_dir)
-            storage.save_json(fp, f"{left_name}_meta", data_dir)
+            storage.save_json(left_fp, f"{left_name}_meta", data_dir)
 
         say("coordinate descent")
         best = PlanSettings(discount=0.9, leftover_values=base_table)
