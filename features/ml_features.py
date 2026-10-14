@@ -78,5 +78,5 @@ def build_features(snap, team_params: TeamParams) -> pd.DataFrame:
     for col in ("ownership", "net_transfers"):
         if col not in rows:
             rows[col] = np.nan
-    keys = ["player_code", "fixture_id", "gameweek", "horizon", "kickoff"]
+    keys = ["player_code", "fixture_id", "gameweek", "kickoff"]
     return rows[keys + FEATURE_COLUMNS].reset_index(drop=True)

@@ -22,3 +22,9 @@ def test_labelled_only_returns_played_fixtures():
     cut = rows["kickoff"].sort_values().iloc[len(rows) // 2]
     got = labelled(rows, cut)
     assert len(got) and (got["kickoff"] < cut).all() and got["t_minutes"].notna().all()
+
+def test_training_table_keeps_prior_season_history(tmp_path):
+    from prediction.ml_data import training_table
+    t = training_table(synthetic_log(), ["2022-23", "2023-24"], workers=1, data_dir=tmp_path)
+    row = t[(t["season"] == "2023-24") & (t["deadline_gw"] == 1) & (t["player_code"] == 100)]
+    assert len(row) and (row["matches_total"] > 0).all()

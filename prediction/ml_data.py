@@ -10,6 +10,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from features import ml_features
 from features.ml_features import build_features
 from ingestion import storage
 from prediction.backtest import WARM_UP_GAMEWEEKS, load_params, snapshot
@@ -32,7 +33,6 @@ def deadline_rows(match_log: pd.DataFrame, season: str, gw: int, team_params) ->
     """Features at the gw deadline for the next 5 gameweeks, with the realised stats joined as t_* columns."""
     snap = snapshot(match_log, season, gw, 5)
     feats = build_features(snap, team_params)
-    feats = feats.loc[:, ~feats.columns.duplicated()]      # "horizon" is both a key and a feature
     s = match_log[(match_log["season"] == season) & match_log["gameweek"].between(gw, gw + 4)]
     targets = (s[["player_code", "fixture_id", "position"] + TARGET_STATS]
                .rename(columns={**{c: f"t_{c}" for c in TARGET_STATS}, "position": "t_position"}))
@@ -49,15 +49,23 @@ def _season_rows(args) -> pd.DataFrame:
                          ignore_index=True)
 
 
+def _code_hash() -> str:
+    """Hash of the feature code and this file, so the cache is rebuilt when either changes."""
+    h = hashlib.sha256()
+    for f in (ml_features.__file__, __file__):
+        h.update(Path(f).read_bytes())
+    return h.hexdigest()
+
+
 def training_table(match_log: pd.DataFrame, seasons: list[str], workers: int = 8,
                    data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
     fp = dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
-              match_log_rows=len(match_log), seasons=sorted(seasons), feature_version=FEATURE_VERSION)
+              match_log_rows=len(match_log), code_sha256=_code_hash(), seasons=sorted(seasons), feature_version=FEATURE_VERSION)
     if not fresh and storage.load_json_or_none(f"{NAME}_meta", data_dir) == fp:
         return storage.load_table(NAME, data_dir)
     team_params = load_params(str(SHIPPED_PARAMS_PATH)).team
     first = match_log["season"].min()
-    jobs = [(match_log[match_log["season"] == s], s, WARM_UP_GAMEWEEKS + 1 if s == first else 1, team_params)
+    jobs = [(match_log, s, WARM_UP_GAMEWEEKS + 1 if s == first else 1, team_params)
             for s in seasons]
     with ProcessPoolExecutor(max_workers=workers) as pool:
         table = pd.concat(pool.map(_season_rows, jobs), ignore_index=True)
