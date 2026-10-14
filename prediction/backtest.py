@@ -26,6 +26,7 @@ STANDARD_RULES = SquadRules(
     starting_xi=11, max_per_club=3, hit_cost=4, max_free_transfers=5,
 )
 WARM_UP_GAMEWEEKS = 5
+MARKET_LAG = 0  # scripts/check_market_timing.py: same_gw > 0.9 and same_gw - next_gw > 0.3 in every season
 
 
 @dataclass
