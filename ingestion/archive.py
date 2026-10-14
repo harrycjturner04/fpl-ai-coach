@@ -60,6 +60,8 @@ def season_match_rows(merged: pd.DataFrame, players_raw: pd.DataFrame, teams: pd
         df["defensive_contribution"] = 0
     for col in ("player_code", "team_code", "opponent_code"):
         df[col] = df[col].astype(int)
+    for col in ("bps", "influence", "creativity", "threat", "selected", "transfers_in", "transfers_out"):
+        df[col] = pd.to_numeric(df[col], errors="coerce")
     return df[MATCH_COLUMNS].reset_index(drop=True)
 
 

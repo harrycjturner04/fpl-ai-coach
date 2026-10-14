@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from ingestion.transform import MATCH_COLUMNS, live_match_rows, season_label
@@ -22,7 +23,8 @@ def _stat(**kw):
 
 
 LIVE = {"elements": [
-    {"id": 10, "stats": _stat(minutes=150, goals_scored=1, expected_goals="0.90", total_points=9),
+    {"id": 10, "stats": _stat(minutes=150, goals_scored=1, expected_goals="0.90", total_points=9,
+                              bps=20, influence="31.2", creativity="4.0", threat="12.0"),
      "explain": [{"fixture": 1, "stats": [{"identifier": "minutes", "value": 90, "points": 2},
                                           {"identifier": "goals_scored", "value": 1, "points": 5}]},
                  {"fixture": 2, "stats": [{"identifier": "minutes", "value": 60, "points": 2}]}]},
@@ -109,3 +111,12 @@ def test_double_gameweek_with_second_fixture_in_progress_keeps_only_the_finished
     row = mid.iloc[0]
     assert row.minutes == 90 and row.goals == 1 and row.points == 7   # not the gameweek totals
     assert abs(row.xg - 0.90 * 90 / 135) < 1e-9
+
+
+def test_single_fixture_row_has_bps_ict_and_nan_market_columns():
+    live = {"elements": [{"id": 10, "stats": _stat(minutes=90, bps=20, influence="31.2",
+                                                   creativity="4.0", threat="12.0"), "explain": []}]}
+    fixtures = FIXTURES.iloc[:1]  # one finished fixture: team 1 at home to team 2
+    row = live_match_rows(live, 6, fixtures, PLAYERS, TEAMS, "2026-27").set_index("player_code").loc[100]
+    assert row["bps"] == 20 and row["influence"] == 31.2
+    assert np.isnan(row["selected"]) and np.isnan(row["transfers_in"]) and np.isnan(row["transfers_out"])

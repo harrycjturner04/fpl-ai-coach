@@ -132,6 +132,8 @@ def _update_current_season(client: FPLClient, tables: dict, data_dir: Path) -> p
     gws = tables["gameweeks"]
     season = transform.season_label(gws)
     cached = storage.load_table_or_none("current_season_rows", data_dir)
+    if cached is not None and not set(transform.MATCH_COLUMNS) <= set(cached.columns):
+        cached = None  # rows saved before new columns were added: refetch the season
     if cached is not None:
         cached = cached[cached["season"] == season]
     todo = [int(g.id) for g in gws[gws["finished"] | gws["is_current"]].itertuples()

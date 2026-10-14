@@ -18,6 +18,8 @@ def _season_frames():
         "own_goals": [0, 0, 0], "penalties_saved": [0, 0, 0], "penalties_missed": [0, 0, 0],
         "saves": [4, 0, 0], "bonus": [0, 3, 0], "yellow_cards": [0, 0, 0], "red_cards": [0, 0, 0],
         "total_points": [1, 13, 0], "value": [45, 140, 0], "xP": [2.0, 7.5, 0.0],
+        "bps": [12] * 3, "influence": ["20.4"] * 3, "creativity": [5.0] * 3, "threat": [8.0] * 3,
+        "selected": [150000] * 3, "transfers_in": [900] * 3, "transfers_out": [300] * 3,
     })
     players_raw = pd.DataFrame({"id": [11, 12, 13], "code": [111, 222, 333]})
     teams = pd.DataFrame({"id": [1, 2], "code": [90, 43], "name": ["Burnley", "Man City"]})
@@ -32,6 +34,13 @@ def test_season_rows_map_codes_positions_and_drop_managers():
     assert gk.position == "GKP" and gk.team_code == 90 and gk.opponent_code == 43 and gk.price == 4.5
     assert rows.defensive_contribution.eq(0).all()  # column absent before 2025/26
     assert str(rows.kickoff.dt.tz) == "UTC"
+
+
+def test_archive_rows_keep_bps_ict_and_market_columns():
+    rows = season_match_rows(*_season_frames(), season="2024-25")
+    for col in ("bps", "influence", "creativity", "threat", "selected", "transfers_in", "transfers_out"):
+        assert col in rows.columns
+        assert pd.api.types.is_numeric_dtype(rows[col])
 
 
 def test_unmapped_team_name_raises():
