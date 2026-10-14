@@ -4,7 +4,7 @@ import pytest
 
 from ingestion.transform import MATCH_COLUMNS
 from prediction.backtest import (actual_points, calibration, decision_points, eligible_players,
-                                 naive_predictor, run_backtest, score_metrics, snapshot, xp_predictor)
+                                 naive_predictor, run_backtest, score_metrics, snapshot, split_report, xp_predictor)
 
 
 def synthetic_log(n_gw=8, seed=0):
@@ -146,3 +146,30 @@ def test_snapshot_keeps_players_whose_team_blanks_this_gameweek():
     blank_player = pred[pred.player_code == 300]
     assert 3 not in set(blank_player.gameweek)   # no fixture this week
     assert 4 in set(blank_player.gameweek)       # but predicted for the next one
+
+
+def test_split_report_excludes_windows_containing_a_double_gameweek():
+    log = synthetic_log()
+    extra = log[(log.season == "2023-24") & (log.gameweek == 4) & (log.team_code == 1)].assign(fixture_id=999)
+    log = pd.concat([log, extra], ignore_index=True)
+    per_gw = pd.DataFrame([{"model": "m", "season": "2023-24", "gameweek": gw, "horizon": 0,
+                            "mae": 1.0, "rmse": 2.0, "rho": 0.5} for gw in range(1, 9)])
+    rep = split_report(per_gw, log, horizons=2)
+    # windows {g, g+1} containing gw 4 are g = 3 and 4; the other 6 gameweeks are clean
+    assert rep.loc[("m", 0, "no_double_or_blank"), "gameweeks"] == 6
+    assert rep.loc[("m", 0, "early"), "gameweeks"] == 5
+    assert rep.loc[("m", 0, "rest"), "gameweeks"] == 3
+    assert rep.loc[("m", 0, "early"), "rmse"] == pytest.approx(2.0, abs=1e-4)
+
+
+def test_split_report_excludes_windows_containing_a_blank_gameweek_at_each_horizon():
+    log = synthetic_log()
+    # gameweek 6 of 2023-24: team 1's fixture (1 v 3) is removed, so teams 1 and 3 blank
+    log = log[~((log.season == "2023-24") & (log.gameweek == 6) & (log.fixture_id == 60))]
+    per_gw = pd.DataFrame([{"model": "m", "season": "2023-24", "gameweek": gw, "horizon": h,
+                            "mae": 1.0, "rmse": 2.0, "rho": 0.5} for gw in range(1, 9) for h in (0, 1)])
+    rep = split_report(per_gw, log, horizons=2)
+    # windows {g, g+1} containing gw 6 are g = 5 and 6
+    for h in (0, 1):
+        assert rep.loc[("m", h, "no_double_or_blank"), "gameweeks"] == 6
+        assert rep.loc[("m", h, "rest"), "gameweeks"] == 3

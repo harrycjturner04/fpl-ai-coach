@@ -182,6 +182,33 @@ def summary(per_gw: pd.DataFrame) -> pd.DataFrame:
     return per_gw.groupby(["model", "horizon"])[cols].mean().round(3)
 
 
+def _clean_gameweeks(match_log: pd.DataFrame, horizons: int) -> set[tuple[str, int]]:
+    """Season-gameweeks whose whole window g..g+horizons-1 has exactly one fixture for every team."""
+    clean = set()
+    for season, grp in match_log.groupby("season"):
+        counts = grp.groupby(["gameweek", "team_code"])["fixture_id"].nunique().unstack(fill_value=0)
+        single = (counts == 1).all(axis=1)
+        for g in single.index:
+            if single[(single.index >= g) & (single.index < g + horizons)].all():
+                clean.add((season, g))
+    return clean
+
+
+def split_report(per_gw: pd.DataFrame, match_log: pd.DataFrame, horizons: int = 5) -> pd.DataFrame:
+    clean = _clean_gameweeks(match_log, horizons)
+    in_clean = pd.Series([(s, g) in clean for s, g in zip(per_gw["season"], per_gw["gameweek"])], index=per_gw.index)
+    masks = {"early": per_gw["gameweek"] <= WARM_UP_GAMEWEEKS, "rest": per_gw["gameweek"] > WARM_UP_GAMEWEEKS,
+             "no_double_or_blank": in_clean}
+    parts = []
+    for split, mask in masks.items():
+        d = per_gw[mask]
+        g = d.groupby(["model", "horizon"])
+        out = g[["mae", "rmse", "rho"]].mean().round(3)
+        out["gameweeks"] = d.drop_duplicates(["model", "horizon", "season", "gameweek"]).groupby(["model", "horizon"]).size()
+        parts.append(out.assign(split=split).set_index("split", append=True))
+    return pd.concat(parts).sort_index()
+
+
 def calibration(per_player: pd.DataFrame, model: str, horizon: int = 0) -> pd.DataFrame:
     rows = per_player[(per_player["model"] == model) & (per_player["horizon"] == horizon)]
     groups = pd.qcut(rows["predicted"].rank(method="first"), 10, labels=False)
@@ -254,12 +281,15 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--every", type=int, default=1, help="use every Nth gameweek (faster)")
     parser.add_argument("--no-decision", action="store_true")
     parser.add_argument("--ablation", action="store_true")
+    parser.add_argument("--splits", action="store_true", help="also print accuracy by early season and double/blank windows")
     args = parser.parse_args(argv)
     log = storage.load_table("archive_match_log")
     per_gw, per_player = run_backtest(log, args.seasons.split(","),
                                       build_predictors(args.models.split(","), args.params, ablation=args.ablation),
                                       decision=not args.no_decision, every=args.every)
     print(summary(per_gw).to_string())
+    if args.splits:
+        print("\nBy split:\n" + split_report(per_gw, log).to_string())
     for model in args.models.split(","):
         print(f"\nCalibration ({model}, next gameweek):\n{calibration(per_player, model).to_string()}")
     if "form" in per_gw["model"].unique():

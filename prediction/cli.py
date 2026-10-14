@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import pandas as pd
@@ -69,7 +70,26 @@ def run(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp |
                    x["teams_in_season"], load_live_params(data_dir))
     pred.insert(0, "player_id", pred["player_code"].map(x["code_to_id"]))
     storage.save_table(pred, "predictions", data_dir)
+    _record_predictions(pred, storage.load_table("gameweeks", data_dir), x["season"], data_dir, x["cutoff"])
     return pred
+
+
+def _record_predictions(pred: pd.DataFrame, gameweeks: pd.DataFrame, season: str, data_dir: Path,
+                        now: pd.Timestamp) -> pd.DataFrame | None:
+    """Save the per-gameweek predictions made for the next gameweek, keeping the latest record
+    before its deadline: the forward test of the model as the season is played."""
+    upcoming = gameweeks[gameweeks["is_next"]]
+    if upcoming.empty or now >= upcoming["deadline_time"].iloc[0]:
+        return None
+    totals = pred.groupby(["gameweek", "player_code"], as_index=False)["total"].sum()
+    new = totals.assign(season=season, made_for_gameweek=int(upcoming["id"].iloc[0]), recorded_at=now)
+    old = storage.load_table_or_none("prediction_log", data_dir)
+    log = new if old is None else pd.concat([old, new], ignore_index=True)
+    key = ["season", "made_for_gameweek", "gameweek", "player_code"]
+    log = log.sort_values("recorded_at").drop_duplicates(key, keep="last")
+    log = log[key + ["total", "recorded_at"]].reset_index(drop=True)
+    storage.save_table(log, "prediction_log", data_dir)
+    return log
 
 
 def prediction_table(pred: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
@@ -86,6 +106,8 @@ def prediction_table(pred: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
 
 
 def main(argv: list[str] | None = None) -> None:
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     parser = argparse.ArgumentParser(description="Expected points for the next five gameweeks.")
     parser.add_argument("--position", choices=["GKP", "DEF", "MID", "FWD"])
     parser.add_argument("--top", type=int, default=20)
