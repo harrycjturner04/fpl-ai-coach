@@ -134,7 +134,7 @@ def test_predictor_never_sees_the_future():
 
     def checked(snap):
         assert snap.history["kickoff"].max() < snap.cutoff
-        assert list(snap.players_now.columns) == ["player_code", "team_code", "position", "price", "chance"]
+        assert list(snap.players_now.columns) == ["player_code", "team_code", "position", "price", "chance", "ownership", "net_transfers"]
         calls.append(snap.gameweek)
         return naive_predictor(snap)
 

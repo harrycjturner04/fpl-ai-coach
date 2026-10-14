@@ -1,10 +1,11 @@
 import json
 
+import numpy as np
 import pandas as pd
 import pytest
 
 from ingestion import storage
-from prediction import cli
+from prediction import backtest, cli
 from prediction.component_model import ModelParams
 from tests.test_backtest import synthetic_log
 
@@ -20,7 +21,9 @@ def write_live_tables(tmp_path):
     storage.save_table(log, "match_log", tmp_path)
     players = pd.DataFrame({"id": [1, 2], "code": [100, 203], "team": [1, 2], "position": ["GKP", "MID"],
                             "price": [5.0, 8.0], "chance_of_playing_next_round": [None, 50.0],
-                            "can_select": [True, True], "web_name": ["Keeper", "Mid"]})
+                            "can_select": [True, True], "web_name": ["Keeper", "Mid"],
+                            "selected_by_percent": ["12.5", "50.0"], "transfers_in_event": [500, 0],
+                            "transfers_out_event": [100, 0]})
     teams = pd.DataFrame({"id": [1, 2, 3, 4], "code": [11, 12, 13, 14], "short_name": ["A", "B", "C", "D"]})
     fixtures = pd.DataFrame({"id": [1, 2], "event": [9, 9], "team_h": [1, 3], "team_a": [2, 4],
                              "kickoff_time": pd.to_datetime(["2023-10-07T14:00Z"] * 2, utc=True),
@@ -38,6 +41,39 @@ def test_live_predictions_are_saved_with_player_ids(tmp_path):
     assert (tmp_path / "processed" / "predictions.parquet").exists()
     mid = pred[pred.player_id == 2].iloc[0]
     assert 0 < mid.total and mid.p60 <= 0.5 + 1e-9  # 50% flag applied to next week
+
+
+def _market_row(gameweek, selected, total):
+    return {"season": "2023-24", "gameweek": gameweek, "player_code": 100, "selected_by_percent": selected,
+            "transfers_in_event": 50, "transfers_out_event": 10, "total_players": total,
+            "recorded_at": pd.Timestamp("2023-10-01", tz="UTC")}
+
+
+def test_live_market_columns_lag_zero_use_the_players_table(tmp_path, monkeypatch):
+    write_live_tables(tmp_path)
+    storage.save_table(pd.DataFrame([_market_row(9, 1.0, 1000)]), "market_log", tmp_path)
+    monkeypatch.setattr(backtest, "MARKET_LAG", 0)
+    p = cli.live_inputs(tmp_path)["players_now"].set_index("player_code")
+    assert p.loc[100, "ownership"] == pytest.approx(0.125)
+    assert p.loc[100, "net_transfers"] == pytest.approx(0.4)
+
+
+def test_live_market_columns_lag_zero_without_market_log_has_no_net_transfers(tmp_path, monkeypatch):
+    write_live_tables(tmp_path)
+    monkeypatch.setattr(backtest, "MARKET_LAG", 0)
+    p = cli.live_inputs(tmp_path)["players_now"].set_index("player_code")
+    assert p.loc[100, "ownership"] == pytest.approx(0.125)
+    assert p["net_transfers"].isna().all()
+
+
+def test_live_market_columns_lag_one_use_the_previous_gameweek_log(tmp_path, monkeypatch):
+    write_live_tables(tmp_path)
+    storage.save_table(pd.DataFrame([_market_row(8, 20.0, 500)]), "market_log", tmp_path)
+    monkeypatch.setattr(backtest, "MARKET_LAG", 1)
+    p = cli.live_inputs(tmp_path)["players_now"].set_index("player_code")
+    assert p.loc[100, "ownership"] == pytest.approx(0.2)
+    assert p.loc[100, "net_transfers"] == pytest.approx(0.08)
+    assert np.isnan(p.loc[203, "ownership"])
 
 
 def test_live_inputs_raises_clear_error_when_no_upcoming_gameweek(tmp_path):

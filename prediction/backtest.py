@@ -46,6 +46,17 @@ class Snapshot:
 Predictor = Callable[[Snapshot], pd.DataFrame]
 
 
+def market_at_deadline(season_rows: pd.DataFrame, gameweek: int, lag: int) -> pd.DataFrame:
+    """Ownership and net transfers per player as known at this gameweek's deadline."""
+    rows = season_rows[season_rows["gameweek"] == gameweek - lag].drop_duplicates("player_code")
+    managers = rows["selected"].sum() / 15
+    if rows.empty or not managers:
+        return pd.DataFrame(columns=["player_code", "ownership", "net_transfers"], dtype=float)
+    return pd.DataFrame({"player_code": rows["player_code"],
+                         "ownership": rows["selected"] / managers,
+                         "net_transfers": (rows["transfers_in"] - rows["transfers_out"]) / managers})
+
+
 def snapshot(match_log: pd.DataFrame, season: str, gameweek: int, horizon: int = 5) -> Snapshot:
     s = match_log[match_log["season"] == season]
     cutoff = s.loc[s["gameweek"] == gameweek, "kickoff"].min()
@@ -66,6 +77,7 @@ def snapshot(match_log: pd.DataFrame, season: str, gameweek: int, horizon: int =
         season=season, gameweek=gameweek, cutoff=cutoff,
         history=match_log[match_log["kickoff"] < cutoff],
         players_now=now[["player_code", "team_code", "position", "price"]].assign(chance=np.nan)
+        .merge(market_at_deadline(s, gameweek, MARKET_LAG), on="player_code", how="left")
         .reset_index(drop=True),
         fixtures_ahead=fixtures.reset_index(drop=True),
         teams_in_season=sorted(s["team_code"].unique()),

@@ -10,10 +10,12 @@ import json
 import sys
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from ingestion import storage, transform
 
+from . import backtest
 from .component_model import ModelParams, predict
 
 PARAMS_FILE = "model_params"
@@ -32,6 +34,25 @@ def load_live_params(data_dir: Path) -> ModelParams:
     return ModelParams()
 
 
+def _live_market(selectable: pd.DataFrame, next_gw: int, season: str, data_dir: Path) -> pd.DataFrame:
+    """Ownership and net transfers per player code as known at the next deadline (see backtest.MARKET_LAG)."""
+    log = storage.load_table_or_none("market_log", data_dir)
+    if log is not None:
+        log = log[log["season"] == season]
+    lag = backtest.MARKET_LAG
+    if lag == 0:
+        src = selectable[["code", "selected_by_percent", "transfers_in_event", "transfers_out_event"]]
+        total = log.sort_values("recorded_at")["total_players"].iloc[-1] if log is not None and len(log) else np.nan
+    else:
+        prev = None if log is None else log[log["gameweek"] == next_gw - lag]
+        if prev is None or prev.empty:
+            return pd.DataFrame(columns=["player_code", "ownership", "net_transfers"], dtype=float)
+        src, total = prev.rename(columns={"player_code": "code"}), prev["total_players"].iloc[0]
+    return pd.DataFrame({
+        "player_code": src["code"], "ownership": pd.to_numeric(src["selected_by_percent"]) / 100,
+        "net_transfers": (src["transfers_in_event"] - src["transfers_out_event"]) / total})
+
+
 def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = None) -> dict:
     now = now or pd.Timestamp.now(tz="UTC")
     players = storage.load_table("players", data_dir)
@@ -48,17 +69,19 @@ def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = Non
     next_gw = int(next_gw_rows.iloc[0])
     ahead = fixtures[(fixtures["event"] >= next_gw) & (fixtures["event"] < next_gw + horizon)]
     selectable = players[players["can_select"].fillna(True).astype(bool)]
+    season = transform.season_label(gameweeks)
     return {
         "history": history,
         "players_now": pd.DataFrame({
             "player_code": selectable["code"], "team_code": selectable["team"].map(code_of),
             "position": selectable["position"], "price": selectable["price"],
-            "chance": selectable["chance_of_playing_next_round"]}).reset_index(drop=True),
+            "chance": selectable["chance_of_playing_next_round"]}).reset_index(drop=True)
+        .merge(_live_market(selectable, next_gw, season, data_dir), on="player_code", how="left"),
         "fixtures_ahead": pd.DataFrame({
             "gameweek": ahead["event"].astype(int), "fixture_id": ahead["id"], "kickoff": ahead["kickoff_time"],
             "home_code": ahead["team_h"].map(code_of), "away_code": ahead["team_a"].map(code_of)}),
         "cutoff": now,
-        "season": transform.season_label(gameweeks),
+        "season": season,
         "teams_in_season": sorted(code_of.tolist()),
         "code_to_id": players.set_index("code")["id"],
     }
