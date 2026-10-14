@@ -6,7 +6,7 @@ An AI-assisted Fantasy Premier League coach. It combines a statistical/ML predic
 
 Five layers, each with a single responsibility; only clean, structured output crosses a layer boundary.
 
-1. **Ingestion**: official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks), later squad-screenshot parsing and injury/news sources.
+1. **Ingestion**: official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks, from which the squad, bank, free transfers and chips are reconstructed), later injury/news sources.
 2. **Feature engineering**: rolling form, per-90 rates, fixture difficulty, minutes reliability, set-piece duty, team strength.
 3. **Prediction**: expected points per player for the next 1–5 gameweeks, built component-by-component from team attack/defence ratings, player minutes/start probability and per-90 rates, combined through FPL's own scoring rules; next, gradient-boosted trees validated walk-forward by gameweek. Minutes/start probability is modelled separately.
 4. **Optimisation**: a PuLP integer linear program that plans five gameweeks at once, covering budget, 2/5/5/3 squad, max 3 per club, valid formation, captaincy, free transfers and the −4 transfer hit.
@@ -18,7 +18,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 - [x] Stage 2: ILP optimiser on current stats (from-scratch squads and transfer plans)
 - [x] Stage 3a: Component prediction model (appearance, goals, assists, clean sheets, bonus, etc.), live and feeding the optimiser by default
 - [x] Stage 3b: Multi-week optimiser (five-week plan, chips as what-ifs), tested by replaying four past seasons
-- [ ] Stage 4: Screenshot parsing
+- ~~Stage 4: Screenshot parsing~~ (dropped: the manager ID gives the same information more reliably)
 - [ ] Stage 5: ML prediction model
 - [ ] Stage 6: LLM reasoning layer
 - [ ] Stage 7: Presentation

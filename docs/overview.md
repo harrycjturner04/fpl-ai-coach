@@ -63,7 +63,7 @@ week before his team plays twice. The whole plan is solved again the following w
 | 2. Optimiser on current stats | Built | Single-week integer program with an independent rule checker |
 | 3a. Prediction model | Built | Component model of expected points, walk-forward backtest, tuned parameters |
 | 3b. Multi-week optimiser | Built | Five-week plan, chips as what-ifs, season replay and tuned planning settings |
-| 4. Screenshot parsing | Planned | Read a squad from a screenshot of the FPL app |
+| 4. Screenshot parsing | Dropped | Not needed: the team ID already gives squad, bank, free transfers and chips |
 | 5. Machine-learning prediction | Planned | Gradient-boosted model, validated walk-forward against the component model |
 | 6. Reasoning layer | Planned | News to risk flags, plan review, chip timing, written recommendation |
 | 7. Presentation | Planned | Dashboard |
