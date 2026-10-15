@@ -72,15 +72,22 @@ def _cached(name, fp, compute, data_dir, fresh) -> pd.DataFrame:
 
 
 def _code_hash() -> str:
-    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    return hashlib.sha256(b"".join((Path(__file__).parent / f).read_bytes() for f in
+                                   ("walkforward.py", "minutes_model.py", "ml_common.py", "ml_data.py"))).hexdigest()
 
 
 def run_minutes(table, kind: str, seasons=TEST_SEASONS, params=None, workers=6,
                 data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    fp = dict(table_meta=storage.load_json_or_none("ml_training_table_meta", data_dir), rows=len(table), kind=kind,
-              params=params, seasons=list(seasons), code_sha256=_code_hash())
-    fp = json.loads(json.dumps(fp, default=str))  # as it will read back from disk
-    return _cached(f"ml_oos_minutes_{kind}", fp, lambda: _walk(table, kind, seasons, params, workers), data_dir, fresh)
+    table_meta, code = storage.load_json_or_none("ml_training_table_meta", data_dir), _code_hash()
+    out = []
+    for season in seasons:
+        fp = dict(table_meta=table_meta, rows=len(table), kind=kind, params=params, season=season, code_sha256=code)
+        fp = json.loads(json.dumps(fp, default=str))  # as it will read back from disk
+        t0 = time.time()
+        out.append(_cached(f"ml_oos_minutes_{kind}_{season}", fp,
+                           lambda: _walk(table, kind, (season,), params, workers), data_dir, fresh))
+        print(f"{kind} {season} done ({time.time() - t0:.0f}s)", flush=True)
+    return pd.concat(out, ignore_index=True)
 
 
 def _component_season(args) -> pd.DataFrame:
@@ -95,7 +102,7 @@ def _component_season(args) -> pd.DataFrame:
     return pd.concat(out, ignore_index=True)
 
 
-def component_minutes(match_log, table, seasons=TEST_SEASONS, workers=6,
+def component_minutes(match_log, seasons=TEST_SEASONS, workers=6,
                       data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
     params = load_params(str(SHIPPED_PARAMS_PATH))
     fp = dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
@@ -141,13 +148,11 @@ def _grid(table, kind, seasons, workers):
     results = []
     for values in itertools.product(*GRIDS[kind].values()):
         params = dict(zip(GRIDS[kind], values))
-        shown = params
-        params = params | GRID_FIXED[kind]
         t0 = time.time()
-        oos = _scored(_walk(table, kind, seasons, params, workers), table)
+        oos = _scored(_walk(table, kind, seasons, params | GRID_FIXED[kind], workers), table)
         ll = _log_loss(oos[["p0", "p1", "p2"]].to_numpy(), minutes_class(oos["t_minutes"]))
-        print(f"{kind} {shown} log_loss={ll:.5f} ({time.time() - t0:.0f}s)", flush=True)
-        results.append((ll, shown))
+        print(f"{kind} {params} log_loss={ll:.5f} ({time.time() - t0:.0f}s)", flush=True)
+        results.append((ll, params))
     return min(results, key=lambda r: r[0])[1]
 
 
@@ -168,7 +173,7 @@ def main():
         return
     chosen = json.loads(ML_PARAMS_PATH.read_text())["minutes"] if ML_PARAMS_PATH.exists() else {}
     oos = {k: run_minutes(table, k, seasons, chosen.get(k), a.workers, fresh=a.fresh) for k in kinds}
-    comp = component_minutes(storage.load_table("match_log"), table, seasons, a.workers, fresh=a.fresh)
+    comp = component_minutes(storage.load_table("match_log"), seasons, a.workers, fresh=a.fresh)
     ll, cal = minutes_report(oos, table, comp)
     print(ll.pivot(index="model", columns="season", values="log_loss").round(4).to_string())
     print(cal.round(3).to_string(index=False))

@@ -1,7 +1,7 @@
 import numpy as np, pandas as pd
 from features.team_ratings import TeamParams
 from prediction.ml_data import deadline_rows
-from prediction.walkforward import minutes_report, retrain_blocks, run_minutes, training_rows
+from prediction.walkforward import _log_loss, minutes_report, retrain_blocks, run_minutes, training_rows
 from tests.test_backtest import synthetic_log
 
 
@@ -35,3 +35,17 @@ def test_run_minutes_returns_probabilities_for_every_test_deadline_and_reports(t
     comp = oos.assign(p60=oos["p2"], psub=oos["p1"])
     ll, cal = minutes_report({"lgbm": oos}, table, comp)
     assert set(ll["model"]) == {"lgbm", "component"} and (ll["log_loss"] > 0).all() and len(cal)
+
+
+def test_training_rows_exclude_a_later_season():
+    table = _table()
+    assert (training_rows(table, "2022-23", 7)["season"] == "2022-23").all()
+
+
+def test_log_loss_known_numbers_and_component_p0_clipping():
+    p = np.array([[0.5, 0.25, 0.25], [0.1, 0.1, 0.8]])
+    assert np.isclose(_log_loss(p, np.array([0, 2])), (np.log(2) + -np.log(0.8)) / 2)
+    comp = pd.DataFrame({"p60": [0.7], "psub": [0.4]})       # p0 = 1 - 0.7 - 0.4 = -0.1, clipped to 1e-6 then renormalised
+    p0 = (1 - comp["p60"] - comp["psub"]).to_numpy()
+    q = np.c_[p0, comp["psub"], comp["p60"]]
+    assert np.isclose(_log_loss(q, np.array([0])), -np.log(1e-6 / (1e-6 + 0.4 + 0.7)))

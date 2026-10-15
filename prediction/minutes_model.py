@@ -32,15 +32,12 @@ class LgbmMinutes:
         return self
 
     def predict_proba(self, X):
-        p = self.model.predict_proba(lgbm_frame(X, self.categories))
-        out = np.zeros((len(p), 3))
-        out[:, self.model.classes_] = p          # a class absent from training keeps probability 0
-        return out
+        return self.model.predict_proba(lgbm_frame(X, self.categories))
 
 
 class KerasMinutes:
-    def __init__(self, params: dict | None = None, seeds=(0, 1, 2)):
-        self.params, self.seeds = params or {}, seeds
+    def __init__(self, params: dict | None = None):
+        self.params = params or {}
 
     def fit(self, X, y, order):
         self.pre = Preprocessor().fit(X)
@@ -49,7 +46,7 @@ class KerasMinutes:
         train = {k: self.params[k] for k in ("epochs", "batch_size") if k in self.params}
         self.models = [fit_keras(build_mlp(self.pre, 3, "softmax", **arch), inputs, np.asarray(y), order,
                                  "sparse_categorical_crossentropy", seed=s, **train)
-                       for s in self.params.get("seeds", self.seeds)]
+                       for s in self.params.get("seeds", (0, 1, 2))]
         return self
 
     def predict_proba(self, X):
