@@ -116,3 +116,21 @@ def test_params_from_dict_raises_on_an_unknown_key():
     d["player"]["bogus_field"] = 1.0
     with pytest.raises(ValueError, match="bogus_field"):
         ModelParams.from_dict(d)
+
+
+def test_supplied_minutes_replace_the_components_own_and_flags_still_apply():
+    snap = _snapshot_inputs(synthetic_log())
+    args = (snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, "2023-24", snap.teams_in_season,
+            ModelParams(flag_fade=0.5))
+    base = predict(*args)
+    target = base[(base.player_code == 100) & (base.horizon == 0)].iloc[0]
+    minutes = pd.DataFrame([dict(player_code=100, fixture_id=target.fixture_id, p60=1.0, psub=0.0)])
+    out = predict(*args, minutes=minutes)
+    row = out[(out.player_code == 100) & (out.fixture_id == target.fixture_id)].iloc[0]
+    assert row.p60 == pytest.approx(1.0) and row.psub == 0.0
+    flagged = snap.players_now.assign(chance=np.where(snap.players_now.player_code == 100, 50.0, np.nan))
+    f = predict(snap.history, flagged, *args[2:], minutes=minutes)
+    assert f[(f.player_code == 100) & (f.fixture_id == target.fixture_id)].p60.iloc[0] == pytest.approx(0.5)
+    other = out[out.player_code != 100].set_index(["player_code", "fixture_id"]).p60
+    same = base[base.player_code != 100].set_index(["player_code", "fixture_id"]).p60
+    assert other.to_numpy() == pytest.approx(same.reindex(other.index).to_numpy())

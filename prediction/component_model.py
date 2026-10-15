@@ -75,7 +75,8 @@ def fixture_components(rows: pd.DataFrame, rules: ScoringRules, components=COMPO
 
 def predict(history: pd.DataFrame, players_now: pd.DataFrame, fixtures_ahead: pd.DataFrame,
             cutoff: pd.Timestamp, season: str, teams_in_season: list[int], params: ModelParams,
-            components=COMPONENTS) -> pd.DataFrame:
+            components=COMPONENTS, minutes: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`minutes` (player_code, fixture_id, p60, psub) replaces the blended minutes where it has a row."""
     ratings = fit_team_ratings(team_matches(history), cutoff, season, params.team, teams_in_season)
     feats, priors = player_features(history, cutoff, season, ratings, params.player)
 
@@ -100,6 +101,12 @@ def predict(history: pd.DataFrame, players_now: pd.DataFrame, fixtures_ahead: pd
     v = 0.5 ** (days / params.player.minutes_fade_days)
     for col in ("p60", "psub"):
         rows[col] = v * rows[col] + (1 - v) * rows[col + "_long"]
+    if minutes is not None:
+        sup = rows[["player_code", "fixture_id"]].merge(
+            minutes[["player_code", "fixture_id", "p60", "psub"]], how="left")
+        has = sup["p60"].notna().to_numpy()
+        rows.loc[has, "p60"] = sup.loc[has, "p60"].to_numpy()
+        rows.loc[has, "psub"] = sup.loc[has, "psub"].to_numpy()
     chance = rows["chance"].fillna(100) / 100
     availability = 1 - (1 - chance) * params.flag_fade ** rows["horizon"]
     rows["p60"] = rows["p60"] * availability

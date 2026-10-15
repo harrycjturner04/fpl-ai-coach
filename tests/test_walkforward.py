@@ -49,3 +49,23 @@ def test_log_loss_known_numbers_and_component_p0_clipping():
     p0 = (1 - comp["p60"] - comp["psub"]).to_numpy()
     q = np.c_[p0, comp["psub"], comp["p60"]]
     assert np.isclose(_log_loss(q, np.array([0])), -np.log(1e-6 / (1e-6 + 0.4 + 0.7)))
+
+
+def test_ml_minutes_predictor_uses_p2_as_p60_p1_as_psub_and_keeps_others():
+    from prediction.backtest import snapshot
+    from prediction.component_model import ModelParams, per_gameweek, predict
+    from prediction.walkforward import make_ml_minutes_predictor
+    snap = snapshot(synthetic_log(), "2023-24", 3)
+    args = (snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, "2023-24", snap.teams_in_season,
+            ModelParams())
+    base = predict(*args)
+    one = base[base.player_code == 100]
+    oos = one[["player_code", "fixture_id"]].assign(season="2023-24", deadline_gw=3, p0=1.0, p1=0.0, p2=0.0)
+    out = make_ml_minutes_predictor(ModelParams(), oos)(snap).set_index(["player_code", "gameweek"]).total
+    ref = per_gameweek(base).set_index(["player_code", "gameweek"]).total
+    assert (out[100] < ref[100]).all()                       # p60 forced to 0 lowers the player
+    rest = out.drop(100, level=0)
+    assert rest.to_numpy() == __import__("pytest").approx(ref.drop(100, level=0).reindex(rest.index).to_numpy())
+    # no oos rows for the deadline: unchanged
+    none = make_ml_minutes_predictor(ModelParams(), oos.assign(deadline_gw=99))(snap)
+    assert none.set_index(["player_code", "gameweek"]).total.to_numpy() == __import__("pytest").approx(ref.to_numpy())

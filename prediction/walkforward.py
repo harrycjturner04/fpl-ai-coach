@@ -15,9 +15,10 @@ import pandas as pd
 
 from features.ml_features import FEATURE_COLUMNS
 from ingestion import storage
-from prediction.backtest import load_params, snapshot
+from prediction.backtest import (Predictor, build_predictors, load_params, paired_bootstrap, run_backtest, snapshot,
+                                 summary)
 from prediction.cli import SHIPPED_PARAMS_PATH
-from prediction.component_model import predict
+from prediction.component_model import per_gameweek, predict
 from prediction.minutes_model import MINUTES_MODELS
 from prediction.ml_data import labelled, minutes_class
 
@@ -114,6 +115,20 @@ def component_minutes(match_log, seasons=TEST_SEASONS, workers=6,
     return _cached("ml_oos_component_minutes", fp, compute, data_dir, fresh)
 
 
+def make_ml_minutes_predictor(params, oos: pd.DataFrame) -> Predictor:
+    """Component model whose p60/psub come from the ML minutes model (p60 = p2, psub = p1)."""
+    minutes = oos.assign(p60=oos["p2"], psub=oos["p1"])[KEYS + ["p60", "psub"]]
+    minutes = minutes.drop_duplicates(KEYS)  # 2025-26 OOS holds 36 identical repeated player-fixture rows
+    by_deadline = {k: g for k, g in minutes.groupby(["season", "deadline_gw"])}
+
+    def predictor(snap) -> pd.DataFrame:
+        sup = by_deadline.get((snap.season, snap.gameweek))
+        pred = predict(snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, snap.season,
+                       snap.teams_in_season, params, minutes=sup)
+        return per_gameweek(pred)
+    return predictor
+
+
 def _log_loss(p: np.ndarray, y: np.ndarray) -> float:
     p = np.clip(p, 1e-6, 1)
     p = p / p.sum(axis=1, keepdims=True)
@@ -156,9 +171,40 @@ def _grid(table, kind, seasons, workers):
     return min(results, key=lambda r: r[0])[1]
 
 
+def _minutes_params(kind):
+    return json.loads(ML_PARAMS_PATH.read_text())["minutes"].get(kind) if ML_PARAMS_PATH.exists() else None
+
+
+def _compare_season(args) -> pd.DataFrame:
+    match_log, season, names, oos = args
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        predictors = build_predictors(names, str(SHIPPED_PARAMS_PATH), oos_minutes=oos)
+        return run_backtest(match_log, [season], predictors)[0]
+
+
+def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    """Walk-forward backtest (horizons 0-4) of `models`; "ml-minutes" takes its minutes from the `kind` model."""
+    match_log = storage.load_table("match_log", data_dir)
+    oos = run_minutes(storage.load_table("ml_training_table", data_dir), kind, seasons, _minutes_params(kind),
+                      workers, data_dir)
+    code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (
+        __file__, Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
+        SHIPPED_PARAMS_PATH))).hexdigest()
+    fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons, rows=len(match_log), oos_rows=len(oos),
+                                    code_sha256=code), default=str))
+
+    def compute():
+        jobs = [(match_log, s, models, oos[oos["season"] == s]) for s in seasons]
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            return pd.concat(pool.map(_compare_season, jobs), ignore_index=True)
+    return _cached("ml_compare_per_gw", fp, compute, data_dir, fresh)
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("task", choices=["minutes"])
+    ap.add_argument("task", choices=["minutes", "compare"])
+    ap.add_argument("--models", default="component,ml-minutes,form")
     ap.add_argument("--kind", default="lgbm,keras")
     ap.add_argument("--seasons", default=",".join(TEST_SEASONS))
     ap.add_argument("--workers", type=int, default=6)
@@ -166,13 +212,19 @@ def main():
     ap.add_argument("--fresh", action="store_true")
     a = ap.parse_args()
     kinds, seasons = a.kind.split(","), tuple(a.seasons.split(","))
+    if a.task == "compare":
+        per_gw = compare(a.models.split(","), kinds[0], seasons, a.workers, fresh=a.fresh)
+        print(summary(per_gw).to_string())
+        for h in range(5):
+            print(f"\nml-minutes minus component, horizon {h} (95% bootstrap interval):")
+            print(paired_bootstrap(per_gw, "ml-minutes", "component", horizon=h).to_string())
+        return
     table = storage.load_table("ml_training_table")
     if a.grid:
         for kind in kinds:
             print("best", kind, _grid(table, kind, seasons, a.workers))
         return
-    chosen = json.loads(ML_PARAMS_PATH.read_text())["minutes"] if ML_PARAMS_PATH.exists() else {}
-    oos = {k: run_minutes(table, k, seasons, chosen.get(k), a.workers, fresh=a.fresh) for k in kinds}
+    oos = {k: run_minutes(table, k, seasons, _minutes_params(k), a.workers, fresh=a.fresh) for k in kinds}
     comp = component_minutes(storage.load_table("match_log"), seasons, a.workers, fresh=a.fresh)
     ll, cal = minutes_report(oos, table, comp)
     print(ll.pivot(index="model", columns="season", values="log_loss").round(4).to_string())
