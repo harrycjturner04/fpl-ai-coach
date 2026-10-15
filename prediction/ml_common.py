@@ -13,8 +13,8 @@ from features.ml_features import CATEGORICAL  # noqa: E402
 
 
 def time_split(order: pd.Series, val_frac: float = 0.1):
-    cut = np.quantile(order.astype("int64"), 1 - val_frac)
-    val = order.astype("int64").to_numpy() > cut
+    rank = order.astype("int64").rank(method="first").to_numpy()   # ties broken by position: never an empty split
+    val = rank > (1 - val_frac) * len(rank)
     return ~val, val
 
 
