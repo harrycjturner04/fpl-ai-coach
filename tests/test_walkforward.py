@@ -1,4 +1,5 @@
 import numpy as np, pandas as pd
+import pytest
 from features.team_ratings import TeamParams
 from prediction.ml_data import deadline_rows
 from prediction.walkforward import _log_loss, minutes_report, retrain_blocks, run_minutes, training_rows
@@ -65,7 +66,27 @@ def test_ml_minutes_predictor_uses_p2_as_p60_p1_as_psub_and_keeps_others():
     ref = per_gameweek(base).set_index(["player_code", "gameweek"]).total
     assert (out[100] < ref[100]).all()                       # p60 forced to 0 lowers the player
     rest = out.drop(100, level=0)
-    assert rest.to_numpy() == __import__("pytest").approx(ref.drop(100, level=0).reindex(rest.index).to_numpy())
+    assert rest.to_numpy() == pytest.approx(ref.drop(100, level=0).reindex(rest.index).to_numpy())
     # no oos rows for the deadline: unchanged
     none = make_ml_minutes_predictor(ModelParams(), oos.assign(deadline_gw=99))(snap)
-    assert none.set_index(["player_code", "gameweek"]).total.to_numpy() == __import__("pytest").approx(ref.to_numpy())
+    assert none.set_index(["player_code", "gameweek"]).total.to_numpy() == pytest.approx(ref.to_numpy())
+
+
+def test_a_later_deadline_oos_row_does_not_change_an_earlier_snapshot():
+    from prediction.backtest import snapshot
+    from prediction.component_model import ModelParams
+    from prediction.walkforward import make_ml_minutes_predictor
+    snap = snapshot(synthetic_log(), "2023-24", 3)
+    rows = snap.fixtures_ahead
+    fx = rows.iloc[0].fixture_id
+    oos = pd.DataFrame(dict(season="2023-24", deadline_gw=3, player_code=100, fixture_id=fx, p0=0.0, p1=0.0, p2=1.0),
+                       index=[0])
+    later = oos.assign(deadline_gw=4, p0=1.0, p2=0.0)
+    a = make_ml_minutes_predictor(ModelParams(), oos)(snap)
+    b = make_ml_minutes_predictor(ModelParams(), pd.concat([oos, later]))(snap)
+    assert a.total.to_numpy() == pytest.approx(b.total.to_numpy())
+
+
+def test_training_table_keys_are_unique():
+    table = _table()
+    assert not table.duplicated(["season", "deadline_gw", "player_code", "fixture_id"]).any()

@@ -77,3 +77,12 @@ def test_main_gives_a_clear_message_when_the_download_fails(monkeypatch):
     monkeypatch.setattr(archive, "load_archive", _raise_connection_error)
     with pytest.raises(SystemExit, match="Could not download the archive"):
         archive.main()
+
+
+def test_exact_duplicate_rows_are_dropped_and_conflicting_ones_raise():
+    merged, players_raw, teams = _season_frames()
+    merged = pd.concat([merged, merged.iloc[[0]]], ignore_index=True)
+    assert len(season_match_rows(merged, players_raw, teams, "2023-24")) == 2
+    merged.loc[3, "minutes"] = 45
+    with pytest.raises(ValueError, match="conflicting"):
+        season_match_rows(merged, players_raw, teams, "2023-24")

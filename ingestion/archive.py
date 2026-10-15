@@ -62,7 +62,10 @@ def season_match_rows(merged: pd.DataFrame, players_raw: pd.DataFrame, teams: pd
         df[col] = df[col].astype(int)
     for col in ("bps", "influence", "creativity", "threat", "selected", "transfers_in", "transfers_out"):
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    return df[MATCH_COLUMNS].reset_index(drop=True)
+    df = df[MATCH_COLUMNS].drop_duplicates().reset_index(drop=True)  # the 2025/26 archive repeats 10 rows exactly
+    if df.duplicated(["player_code", "fixture_id"]).any():
+        raise ValueError(f"{season}: conflicting rows for the same player and fixture")
+    return df
 
 
 def load_archive(seasons=ARCHIVE_SEASONS, fetch=fetch_season) -> pd.DataFrame:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import inspect
 import itertools
 import json
 import time
@@ -73,8 +74,12 @@ def _cached(name, fp, compute, data_dir, fresh) -> pd.DataFrame:
 
 
 def _code_hash() -> str:
-    return hashlib.sha256(b"".join((Path(__file__).parent / f).read_bytes() for f in
-                                   ("walkforward.py", "minutes_model.py", "ml_common.py", "ml_data.py"))).hexdigest()
+    """Hash of the minutes path only: model, features and the walk-forward functions run_minutes uses."""
+    root = Path(__file__).parent
+    files = [root / f for f in ("minutes_model.py", "ml_common.py", "ml_data.py")] + [root.parent / "features" / "ml_features.py"]
+    funcs = (retrain_blocks, training_rows, _job, _jobs, _walk, run_minutes)
+    return hashlib.sha256(b"".join(f.read_bytes() for f in files)
+                          + "".join(inspect.getsource(f) for f in funcs).encode()).hexdigest()
 
 
 def run_minutes(table, kind: str, seasons=TEST_SEASONS, params=None, workers=6,
@@ -118,11 +123,15 @@ def component_minutes(match_log, seasons=TEST_SEASONS, workers=6,
 def make_ml_minutes_predictor(params, oos: pd.DataFrame) -> Predictor:
     """Component model whose p60/psub come from the ML minutes model (p60 = p2, psub = p1)."""
     minutes = oos.assign(p60=oos["p2"], psub=oos["p1"])[KEYS + ["p60", "psub"]]
-    minutes = minutes.drop_duplicates(KEYS)  # 2025-26 OOS holds 36 identical repeated player-fixture rows
     by_deadline = {k: g for k, g in minutes.groupby(["season", "deadline_gw"])}
+    missing = {}
 
     def predictor(snap) -> pd.DataFrame:
         sup = by_deadline.get((snap.season, snap.gameweek))
+        if sup is None:
+            missing.setdefault(snap.season, []).append(snap.gameweek)
+            print(f"ml-minutes: no OOS minutes for {snap.season} GW{snap.gameweek} "
+                  f"({len(missing[snap.season])} deadlines so far this season); component minutes used", flush=True)
         pred = predict(snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, snap.season,
                        snap.teams_in_season, params, minutes=sup)
         return per_gameweek(pred)
@@ -189,8 +198,9 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
     oos = run_minutes(storage.load_table("ml_training_table", data_dir), kind, seasons, _minutes_params(kind),
                       workers, data_dir)
     code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (
-        __file__, Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
-        SHIPPED_PARAMS_PATH))).hexdigest()
+        Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
+        SHIPPED_PARAMS_PATH, ML_PARAMS_PATH)) + inspect.getsource(make_ml_minutes_predictor).encode()
+        + _code_hash().encode()).hexdigest()
     fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons, rows=len(match_log), oos_rows=len(oos),
                                     code_sha256=code), default=str))
 
