@@ -27,6 +27,7 @@ ML_PARAMS_PATH = Path(__file__).with_name("ml_params.json")
 KEYS = ["season", "deadline_gw", "player_code", "fixture_id"]
 GRIDS = {"lgbm": {"num_leaves": [15, 31, 63], "min_child_samples": [50, 200]},
          "keras": {"hidden": [(64, 32), (128, 64)], "dropout": [0.1, 0.3]}}
+GRID_FIXED = {"lgbm": {}, "keras": {"seeds": (0,)}}   # one seed per grid config
 
 
 def retrain_blocks(table: pd.DataFrame, season: str) -> list[tuple[int, list[int]]]:
@@ -140,11 +141,13 @@ def _grid(table, kind, seasons, workers):
     results = []
     for values in itertools.product(*GRIDS[kind].values()):
         params = dict(zip(GRIDS[kind], values))
+        shown = params
+        params = params | GRID_FIXED[kind]
         t0 = time.time()
         oos = _scored(_walk(table, kind, seasons, params, workers), table)
         ll = _log_loss(oos[["p0", "p1", "p2"]].to_numpy(), minutes_class(oos["t_minutes"]))
-        print(f"{kind} {params} log_loss={ll:.5f} ({time.time() - t0:.0f}s)", flush=True)
-        results.append((ll, params))
+        print(f"{kind} {shown} log_loss={ll:.5f} ({time.time() - t0:.0f}s)", flush=True)
+        results.append((ll, shown))
     return min(results, key=lambda r: r[0])[1]
 
 

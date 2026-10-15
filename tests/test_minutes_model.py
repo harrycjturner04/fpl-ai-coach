@@ -26,3 +26,9 @@ def test_keras_minutes_is_deterministic_for_a_seed():
     a = MINUTES_MODELS["keras"]({"epochs": 2}, seeds=(0,)).fit(X, y, order).predict_proba(X)
     b = MINUTES_MODELS["keras"]({"epochs": 2}, seeds=(0,)).fit(X, y, order).predict_proba(X)
     np.testing.assert_allclose(a, b, atol=1e-5)
+
+def test_lgbm_predict_proba_has_three_columns_when_a_class_is_absent():
+    X, y, order = toy()
+    y = np.where(y == 1, 2, y)
+    p = MINUTES_MODELS["lgbm"]({"n_estimators": 20}).fit(X, y, order).predict_proba(X)
+    assert p.shape == (len(X), 3) and np.allclose(p.sum(axis=1), 1) and (p[:, 1] < 0.01).all()
