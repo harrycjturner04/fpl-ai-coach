@@ -59,3 +59,20 @@ def test_first_gameweek_of_a_season_builds():
     log = synthetic_log()
     f = build_features(snapshot(log, "2023-24", 1), TeamParams())
     assert len(f) > 0 and f["matches_this_season"].eq(0).all()
+
+
+def test_sequence_is_left_padded_and_ignores_the_future():
+    from features.ml_sequences import SEQ_LEN, SEQ_STATS, sequence_features
+    log = synthetic_log()
+    snap = snapshot(log, "2023-24", 3)
+    codes = snap.players_now["player_code"].tolist() + [999]
+    seq = sequence_features(snap.history, codes, snap.cutoff)
+    assert seq.shape == (len(codes), SEQ_LEN, len(SEQ_STATS) + 1)
+    assert "defensive_contribution" not in SEQ_STATS
+    assert seq[-1].sum() == 0                                   # new player: all padding
+    np.testing.assert_array_equal(seq, sequence_features(log, codes, snap.cutoff))   # later rows are ignored
+    n_real = int(seq[0, :, -1].sum())
+    assert n_real == min(SEQ_LEN, int((snap.history["player_code"] == codes[0]).sum()))
+    assert seq[0, : SEQ_LEN - n_real].sum() == 0                # padding is on the left
+    last = snap.history[snap.history["player_code"] == codes[0]].sort_values("kickoff").iloc[-1]
+    assert seq[0, -1, SEQ_STATS.index("points")] == last["points"]   # most recent match last

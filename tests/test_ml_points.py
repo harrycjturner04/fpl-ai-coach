@@ -69,3 +69,35 @@ def test_preprocessor_clips_extreme_values_and_drops_defensive_contribution_feat
     col = pre.num.index("xg_pm5")
     hi = X.iloc[:1].assign(xg_pm5=X["xg_pm5"].mean() + 50 * X["xg_pm5"].std())
     assert pre.transform(hi)["num"][0, col] == 5.0
+
+
+def test_gru_points_fits_and_predicts_two_columns():
+    from prediction.ml_gru import GruPoints
+    X, _, order = toy()
+    rng = np.random.default_rng(0)
+    seq = rng.normal(size=(len(X), 10, 11)).astype(np.float32)
+    seq[:, :, -1] = 1.0
+    seq[:5] = 0.0                                              # a fully padded player
+    cls = np.where(np.arange(len(X)) % 2, 2, 1)
+    y = np.where(cls == 2, 4.0, 1.0) + seq[:, -1, 0]
+    m = GruPoints({"epochs": 2, "batch_size": 64, "seeds": (0,), "units": 4}).fit(X, seq, cls, y, order)
+    out = m.predict(X, seq)
+    assert out.shape == (len(X), 2) and not np.isnan(out).any()
+
+
+def test_run_gru_points_totals_every_oos_minutes_row_and_caches_sequences_and_points(tmp_path):
+    from prediction.walkforward import run_gru_points, run_minutes, sequences
+    from tests.test_backtest import synthetic_log
+    from tests.test_walkforward import _table
+    table, log = _table(), synthetic_log(n_gw=8)
+    store = sequences(log, table, tmp_path)
+    again = sequences(log, table, tmp_path)
+    assert store.keys() == again.keys()
+    for k in store:
+        np.testing.assert_array_equal(store[k][1], again[k][1])
+    mins = run_minutes(table, "lgbm", seasons=("2023-24",), params={"n_estimators": 20}, workers=1, data_dir=tmp_path)
+    params = {"epochs": 2, "units": 4, "seeds": (0,)}
+    out = run_gru_points(table, store, mins, seasons=("2023-24",), params=params, workers=1, data_dir=tmp_path)
+    assert len(out) == len(mins) and out["total"].notna().all()
+    pd.testing.assert_frame_equal(out, run_gru_points(table, store, mins, seasons=("2023-24",), params=params,
+                                                      workers=1, data_dir=tmp_path))

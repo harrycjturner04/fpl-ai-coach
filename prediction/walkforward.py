@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 
 from features.ml_features import FEATURE_COLUMNS
+from features.ml_sequences import deadline_sequences, row_sequences
 from ingestion import storage
 from prediction.backtest import (Predictor, build_predictors, load_params, paired_bootstrap, run_backtest, snapshot,
                                  summary)
@@ -22,6 +23,7 @@ from prediction.cli import SHIPPED_PARAMS_PATH
 from prediction.component_model import per_gameweek, predict
 from prediction.minutes_model import MINUTES_MODELS
 from prediction.ml_data import labelled, minutes_class, target_points
+from prediction.ml_gru import GruPoints
 from prediction.ml_points import POINTS_MODELS, expected_points
 
 TEST_SEASONS = ("2023-24", "2024-25", "2025-26")
@@ -29,8 +31,9 @@ RETRAIN_EVERY = 4
 ML_PARAMS_PATH = Path(__file__).with_name("ml_params.json")
 KEYS = ["season", "deadline_gw", "player_code", "fixture_id"]
 GRIDS = {"lgbm": {"num_leaves": [15, 31, 63], "min_child_samples": [50, 200]},
-         "keras": {"hidden": [(64, 32), (128, 64)], "dropout": [0.1, 0.3]}}
-GRID_FIXED = {"lgbm": {}, "keras": {"seeds": (0,)}}   # one seed per grid config
+         "keras": {"hidden": [(64, 32), (128, 64)], "dropout": [0.1, 0.3]},
+         "gru": {"units": [16, 32], "epochs": [16, 32]}}
+GRID_FIXED = {"lgbm": {}, "keras": {"seeds": (0,)}, "gru": {"seeds": (0,)}}   # one seed per grid config
 
 
 def retrain_blocks(table: pd.DataFrame, season: str) -> list[tuple[int, list[int]]]:
@@ -143,6 +146,64 @@ def run_points(table, kind: str, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS
     return pd.concat(out, ignore_index=True)
 
 
+def sequences(match_log, table, data_dir: Path = storage.DATA_DIR, fresh: bool = False):
+    """Per-deadline player sequences, cached as one npz keyed by (season, deadline_gw)."""
+    path, fp = data_dir / "processed" / "ml_sequences.npz", dict(
+        table_meta=storage.load_json_or_none("ml_training_table_meta", data_dir), rows=len(match_log),
+        code_sha256=hashlib.sha256((Path(__file__).parent.parent / "features" / "ml_sequences.py").read_bytes()).hexdigest())
+    fp = json.loads(json.dumps(fp, default=str))
+    if not fresh and path.exists() and storage.load_json_or_none("ml_sequences_meta", data_dir) == fp:
+        with np.load(path) as z:
+            return {(k.split("|")[0], int(k.split("|")[1])): (z[k + "|codes"], z[k + "|seq"])
+                    for k in {k.rsplit("|", 1)[0] for k in z.files}}
+    store = deadline_sequences(match_log, table)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(path, **{f"{s}|{g}|{part}": a for (s, g), (c, q) in store.items() for part, a in (("codes", c), ("seq", q))})
+    storage.save_json(fp, "ml_sequences_meta", data_dir)
+    return store
+
+
+def _gru_job(args) -> pd.DataFrame:
+    params, train, ahead, store = args
+    import torch
+    torch.set_num_threads(2)
+    y = target_points(train, ahead["season"].iloc[0]).to_numpy()
+    model = GruPoints(params).fit(train[FEATURE_COLUMNS], row_sequences(train, store),
+                                  minutes_class(train["t_minutes"]), y, train["kickoff"])
+    pts = model.predict(ahead[FEATURE_COLUMNS], row_sequences(ahead, store))
+    return ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True).assign(pts_cameo=pts[:, 0], pts_full=pts[:, 1])
+
+
+def _gru_walk(table, kind, season, params, workers, store) -> pd.DataFrame:
+    jobs = ((params, train, ahead, store) for _, params, train, ahead in _jobs(table, kind, (season,), params))
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        return pd.concat(pool.map(_gru_job, jobs), ignore_index=True)
+
+
+def _gru_hash(minutes_oos: pd.DataFrame) -> str:
+    """GRU path only (model, sequences, shared plumbing and the walk functions it uses) plus the minutes OOS."""
+    root = Path(__file__).parent
+    files = [root / f for f in ("ml_gru.py", "ml_common.py", "ml_data.py", "scoring.py")] + [root.parent / "features" / "ml_sequences.py"]
+    funcs = (retrain_blocks, training_rows, _jobs, _gru_job, _gru_walk, _with_minutes, run_gru_points)
+    minutes = pd.util.hash_pandas_object(minutes_oos[KEYS + ["p0", "p1", "p2"]], index=False).to_numpy().tobytes()
+    return hashlib.sha256(b"".join(f.read_bytes() for f in files) + minutes
+                          + "".join(inspect.getsource(f) for f in funcs).encode()).hexdigest()
+
+
+def run_gru_points(table, store, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS, params=None, workers=6,
+                   data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    table_meta, out = storage.load_json_or_none("ml_training_table_meta", data_dir), []
+    for season in seasons:
+        m = minutes_oos[minutes_oos["season"] == season]
+        fp = dict(table_meta=table_meta, rows=len(table), kind="gru", params=params, season=season, code_sha256=_gru_hash(m))
+        fp = json.loads(json.dumps(fp, default=str))
+        t0 = time.time()
+        out.append(_cached(f"ml_oos_points_gru_{season}", fp,
+                           lambda: _with_minutes(_gru_walk(table, "gru", season, params, workers, store), m), data_dir, fresh))
+        print(f"points gru {season} done ({time.time() - t0:.0f}s)", flush=True)
+    return pd.concat(out, ignore_index=True)
+
+
 def make_table_predictor(oos: pd.DataFrame) -> Predictor:
     """Serves precomputed OOS totals: per player and gameweek for the deadline, fixtures summed."""
     by_deadline = {k: g for k, g in oos.groupby(["season", "deadline_gw"])}
@@ -239,14 +300,16 @@ def _grid(table, kind, seasons, workers):
     return min(results, key=lambda r: r[0])[1]
 
 
-def _grid_points(table, kind, minutes_oos, season, workers):
+def _grid_points(table, kind, minutes_oos, season, workers, store=None):
     """RMSE of expected points per fixture against the realised points, on the tuning season."""
     results = []
     for values in itertools.product(*GRIDS[kind].values()):
         params = dict(zip(GRIDS[kind], values))
         t0 = time.time()
-        oos = _with_minutes(_points_walk(table, kind, season, params | GRID_FIXED[kind], workers),
-                            minutes_oos[minutes_oos["season"] == season])
+        fixed = GRID_FIXED[kind] | ({k: v for k, v in _ml_params("points", "keras").items() if k in ("hidden", "dropout")}
+                                    if kind == "gru" else {})   # the MLP branch keeps the frozen keras settings
+        walk = _gru_walk(table, kind, season, params | fixed, workers, store) if kind == "gru" else             _points_walk(table, kind, season, params | fixed, workers)
+        oos = _with_minutes(walk, minutes_oos[minutes_oos["season"] == season])
         d = oos[KEYS + ["total"]].merge(table[KEYS + [c for c in table if c.startswith("t_")]], on=KEYS)
         d = d[d["t_minutes"].notna()]
         rmse = float(np.sqrt(np.mean((d["total"] - target_points(d, season)) ** 2)))
@@ -276,8 +339,10 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
     match_log = storage.load_table("match_log", data_dir)
     table = storage.load_table("ml_training_table", data_dir)
     oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
-    oos_points = {m: run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
-                  for m in models if m in POINTS_MODELS}
+    store = sequences(match_log, table, data_dir) if "gru" in models else None
+    oos_points = {m: run_gru_points(table, store, oos, seasons, _ml_params("points", m), workers, data_dir) if m == "gru"
+                  else run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
+                  for m in models if m in POINTS_MODELS or m == "gru"}
     code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (
         Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
         SHIPPED_PARAMS_PATH, ML_PARAMS_PATH)) + inspect.getsource(make_ml_minutes_predictor).encode()
@@ -317,9 +382,12 @@ def main():
     table = storage.load_table("ml_training_table")
     if a.task == "points":
         minutes = run_minutes(table, "lgbm", seasons, _minutes_params("lgbm"), a.workers)   # cached, never fresh
+        store = sequences(storage.load_table("match_log"), table, fresh=a.fresh) if "gru" in kinds else None
         for kind in kinds:
             if a.grid:
-                print("best", kind, _grid_points(table, kind, minutes, seasons[0], a.workers))
+                print("best", kind, _grid_points(table, kind, minutes, seasons[0], a.workers, store))
+            elif kind == "gru":
+                run_gru_points(table, store, minutes, seasons, _ml_params("points", kind), a.workers, fresh=a.fresh)
             else:
                 run_points(table, kind, minutes, seasons, _ml_params("points", kind), a.workers, fresh=a.fresh)
         return
