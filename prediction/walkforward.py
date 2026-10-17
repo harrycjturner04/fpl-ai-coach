@@ -101,7 +101,7 @@ def _points_job(args) -> pd.DataFrame:
     kind, params, train, ahead = args
     import torch
     torch.set_num_threads(2)
-    y = target_points(train.drop(columns="position"), ahead["season"].iloc[0]).to_numpy()
+    y = target_points(train, ahead["season"].iloc[0]).to_numpy()
     model = POINTS_MODELS[kind](params).fit(train[FEATURE_COLUMNS], minutes_class(train["t_minutes"]), y, train["kickoff"])
     pts = model.predict(ahead[FEATURE_COLUMNS])
     return ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True).assign(pts_cameo=pts[:, 0], pts_full=pts[:, 1])
@@ -121,7 +121,7 @@ def _with_minutes(pts: pd.DataFrame, minutes_oos: pd.DataFrame) -> pd.DataFrame:
 def _points_hash(minutes_oos: pd.DataFrame) -> str:
     """Points path only (models, features, the walk functions it uses) plus the minutes OOS it consumes."""
     root = Path(__file__).parent
-    files = [root / f for f in ("ml_points.py", "ml_common.py", "ml_data.py")] + [root.parent / "features" / "ml_features.py"]
+    files = [root / f for f in ("ml_points.py", "minutes_model.py", "ml_common.py", "ml_data.py", "scoring.py")] + [root.parent / "features" / "ml_features.py"]
     funcs = (retrain_blocks, training_rows, _jobs, _points_job, _points_walk, _with_minutes, run_points)
     minutes = pd.util.hash_pandas_object(minutes_oos[KEYS + ["p0", "p1", "p2"]], index=False).to_numpy().tobytes()
     return hashlib.sha256(b"".join(f.read_bytes() for f in files) + minutes
@@ -274,9 +274,8 @@ def _compare_season(args) -> pd.DataFrame:
 def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
     """Walk-forward backtest (horizons 0-4) of `models`; "ml-minutes" takes its minutes from the `kind` model."""
     match_log = storage.load_table("match_log", data_dir)
-    oos = run_minutes(storage.load_table("ml_training_table", data_dir), kind, seasons, _minutes_params(kind),
-                      workers, data_dir)
     table = storage.load_table("ml_training_table", data_dir)
+    oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
     oos_points = {m: run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
                   for m in models if m in POINTS_MODELS}
     code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (

@@ -23,6 +23,8 @@ class Preprocessor:
         self.num = [c for c in X.columns if c not in CATEGORICAL]
         num = X[self.num].astype(float)
         self.mean, self.std = num.mean(), num.std().replace(0, 1).fillna(1)
+        binary = num.apply(lambda c: c.dropna().isin([0, 1]).all())    # flags stay raw: a rare 1 must not become a huge z
+        self.mean, self.std = self.mean.mask(binary, 0.0), self.std.mask(binary, 1.0)
         self.vocab = {c: {v: i + 1 for i, v in enumerate(sorted(X[c].dropna().unique()))} for c in CATEGORICAL}
         return self
 

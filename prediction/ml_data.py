@@ -75,7 +75,7 @@ def training_table(match_log: pd.DataFrame, seasons: list[str], workers: int = 8
 
 
 def target_points(table: pd.DataFrame, season: str) -> pd.Series:
-    rows = table.rename(columns={**{f"t_{c}": c for c in TARGET_STATS}, "t_position": "position"})
+    rows = table.drop(columns="position", errors="ignore").rename(columns={**{f"t_{c}": c for c in TARGET_STATS}, "t_position": "position"})
     return points_from_stats(rows, rules_for_season(season))
 
 

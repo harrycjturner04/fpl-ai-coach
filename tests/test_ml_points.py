@@ -48,3 +48,13 @@ def test_run_points_totals_every_oos_minutes_row_and_caches(tmp_path):
     assert len(out) == len(mins) and out["total"].notna().all()
     again = run_points(table, "lgbm", mins, seasons=("2023-24",), params={"n_estimators": 20}, workers=1, data_dir=tmp_path)
     pd.testing.assert_frame_equal(out, again)
+
+
+def test_preprocessor_passes_a_binary_column_through_unstandardised():
+    from prediction.ml_common import Preprocessor
+    X, _, _ = toy()
+    X["dc_rules"] = (np.arange(len(X)) % 50 == 0).astype(float)          # 2% ones, like a rule seen in few rows
+    pre = Preprocessor().fit(X)
+    z = pre.transform(X)["num"][:, pre.num.index("dc_rules")]
+    assert set(np.unique(z)) == {0.0, 1.0}
+    assert abs(pre.transform(X.assign(dc_rules=1.0))["num"][:, pre.num.index("dc_rules")]).max() == 1.0

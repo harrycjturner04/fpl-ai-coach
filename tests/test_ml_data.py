@@ -28,3 +28,11 @@ def test_training_table_keeps_prior_season_history(tmp_path):
     t = training_table(synthetic_log(), ["2022-23", "2023-24"], workers=1, data_dir=tmp_path)
     row = t[(t["season"] == "2023-24") & (t["deadline_gw"] == 1) & (t["player_code"] == 100)]
     assert len(row) and (row["matches_total"] > 0).all()
+
+
+def test_target_points_on_a_table_with_feature_and_target_position_scores_dc_by_season():
+    row = {f"t_{c}": 0 for c in TARGET_STATS} | {"t_minutes": 90, "t_defensive_contribution": 12,
+                                                  "t_position": "DEF", "position": "DEF"}
+    t = pd.DataFrame([row])
+    assert target_points(t, "2024-25").iloc[0] == 2
+    assert target_points(t, "2025-26").iloc[0] == 2 + 2
