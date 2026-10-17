@@ -58,3 +58,14 @@ def test_preprocessor_passes_a_binary_column_through_unstandardised():
     z = pre.transform(X)["num"][:, pre.num.index("dc_rules")]
     assert set(np.unique(z)) == {0.0, 1.0}
     assert abs(pre.transform(X.assign(dc_rules=1.0))["num"][:, pre.num.index("dc_rules")]).max() == 1.0
+
+
+def test_preprocessor_clips_extreme_values_and_drops_defensive_contribution_features():
+    from prediction.ml_common import Preprocessor
+    X, _, _ = toy()
+    X["defensive_contribution_pm5"] = 0.0
+    pre = Preprocessor().fit(X)
+    assert "defensive_contribution_pm5" not in pre.num
+    col = pre.num.index("xg_pm5")
+    hi = X.iloc[:1].assign(xg_pm5=X["xg_pm5"].mean() + 50 * X["xg_pm5"].std())
+    assert pre.transform(hi)["num"][0, col] == 5.0

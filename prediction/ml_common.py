@@ -20,7 +20,8 @@ def time_split(order: pd.Series, val_frac: float = 0.1):
 
 class Preprocessor:
     def fit(self, X: pd.DataFrame) -> "Preprocessor":
-        self.num = [c for c in X.columns if c not in CATEGORICAL]
+        # defensive_contribution_* is 0 in every season before 2025-26: its z-scores explode in the test season
+        self.num = [c for c in X.columns if c not in CATEGORICAL and not c.startswith("defensive_contribution_")]
         num = X[self.num].astype(float)
         self.mean, self.std = num.mean(), num.std().replace(0, 1).fillna(1)
         binary = num.apply(lambda c: c.dropna().isin([0, 1]).all())    # flags stay raw: a rare 1 must not become a huge z
@@ -30,7 +31,7 @@ class Preprocessor:
 
     def transform(self, X: pd.DataFrame) -> dict[str, np.ndarray]:
         num = X[self.num].astype(float)
-        z = ((num - self.mean) / self.std).fillna(0.0).to_numpy(np.float32)
+        z = ((num - self.mean) / self.std).fillna(0.0).clip(-5, 5).to_numpy(np.float32)
         miss = num.isna().to_numpy(np.float32)
         out = {"num": np.concatenate([z, miss], axis=1)}
         for c in CATEGORICAL:
