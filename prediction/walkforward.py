@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
+import io
 import inspect
 import itertools
 import json
@@ -17,10 +19,10 @@ import pandas as pd
 from features.ml_features import FEATURE_COLUMNS
 from features.ml_sequences import deadline_sequences, row_sequences
 from ingestion import storage
-from prediction.backtest import (Predictor, build_predictors, load_params, paired_bootstrap, run_backtest, snapshot,
-                                 summary)
+from prediction.backtest import Predictor, build_predictors, load_params, run_backtest, snapshot
 from prediction.cli import SHIPPED_PARAMS_PATH
 from prediction.component_model import per_gameweek, predict
+from prediction.ml_report import build_report
 from prediction.minutes_model import MINUTES_MODELS
 from prediction.ml_data import labelled, minutes_class, target_points
 from prediction.ml_gru import GruPoints
@@ -376,8 +378,8 @@ def _compare_season(args) -> pd.DataFrame:
         return run_backtest(match_log, [season], predictors)[0]
 
 
-def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    """Walk-forward backtest (horizons 0-4) of `models`; "ml-minutes" takes its minutes from the `kind` model."""
+def _compare_inputs(models, kind, seasons, workers, data_dir):
+    """(match_log, oos minutes, oos points per model, cache fingerprint) shared by the two comparison caches."""
     match_log = storage.load_table("match_log", data_dir)
     table = storage.load_table("ml_training_table", data_dir)
     oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
@@ -399,18 +401,47 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
     fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons, rows=len(match_log), oos_rows=len(oos),
                                     points=[pd.util.hash_pandas_object(d, index=False).sum() for d in oos_points.values()],
                                     code_sha256=code), default=str))
+    return match_log, oos, oos_points, fp
+
+
+def _comparison_jobs(match_log, models, seasons, oos, oos_points):
+    return [(match_log, s, models, oos[oos["season"] == s], {m: d[d["season"] == s] for m, d in oos_points.items()})
+            for s in seasons]
+
+
+def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    """Walk-forward backtest (horizons 0-4) of `models`; "ml-minutes" takes its minutes from the `kind` model."""
+    match_log, oos, oos_points, fp = _compare_inputs(models, kind, seasons, workers, data_dir)
 
     def compute():
-        jobs = [(match_log, s, models, oos[oos["season"] == s],
-                 {m: d[d["season"] == s] for m, d in oos_points.items()}) for s in seasons]
         with ProcessPoolExecutor(max_workers=workers) as pool:
-            return pd.concat(pool.map(_compare_season, jobs), ignore_index=True)
+            return pd.concat(pool.map(_compare_season, _comparison_jobs(match_log, models, seasons, oos, oos_points)),
+                             ignore_index=True)
     return _cached("ml_compare_per_gw", fp, compute, data_dir, fresh)
+
+
+def _players_season(args) -> pd.DataFrame:
+    match_log, season, names, oos, oos_points = args
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        predictors = build_predictors(names, str(SHIPPED_PARAMS_PATH), oos_minutes=oos, oos_points=oos_points)
+        return run_backtest(match_log, [season], predictors, horizons=1, decision=False)[1]
+
+
+def compare_players(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    """The same walk-forward backtest, keeping the horizon-0 per-player predictions (for the breakdowns)."""
+    match_log, oos, oos_points, fp = _compare_inputs(models, kind, seasons, workers, data_dir)
+
+    def compute():
+        with ProcessPoolExecutor(max_workers=workers) as pool:
+            return pd.concat(pool.map(_players_season, _comparison_jobs(match_log, models, seasons, oos, oos_points)),
+                             ignore_index=True)
+    return _cached("ml_compare_per_player", fp, compute, data_dir, fresh)
 
 
 def stacker_report(per_gw: pd.DataFrame, kind, seasons, workers, data_dir: Path = storage.DATA_DIR) -> None:
     """Prints the weights fitted at each season's last deadline and per-season horizon-0 RMSE (the backtest summary's:
-    root of the mean squared error over gameweeks, per model)."""
+    mean over gameweeks of the per-gameweek RMSE)."""
     match_log = storage.load_table("match_log", data_dir)
     table = storage.load_table("ml_training_table", data_dir)
     oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
@@ -426,8 +457,8 @@ def stacker_report(per_gw: pd.DataFrame, kind, seasons, workers, data_dir: Path 
             rows.append(dict(season=season, deadline_gw=gw, position=pos, **dict(zip(frames, w.round(3)))))
     print("\nstacker weights at each season's last deadline:\n" + pd.DataFrame(rows).to_string(index=False))
     h0 = per_gw[per_gw["horizon"] == 0]
-    print("\nhorizon-0 RMSE per season (sqrt of mean over gameweeks of the per-gameweek squared RMSE):")
-    print(h0.groupby(["model", "season"])["rmse"].apply(lambda r: float(np.sqrt((r ** 2).mean()))).unstack().round(3).to_string())
+    print("\nhorizon-0 RMSE per season (mean over gameweeks of the per-gameweek RMSE):")
+    print(h0.groupby(["model", "season"])["rmse"].mean().unstack().round(3).to_string())
 
 
 def main():
@@ -439,21 +470,22 @@ def main():
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--grid", action="store_true")
     ap.add_argument("--fresh", action="store_true")
+    ap.add_argument("--copy-report", nargs="*", default=[], help="extra paths for the compare report")
     a = ap.parse_args()
     kinds, seasons = a.kind.split(","), tuple(a.seasons.split(","))
     if a.task == "compare":
-        per_gw = compare(a.models.split(","), kinds[0], seasons, a.workers, fresh=a.fresh)
-        print(summary(per_gw).to_string())
-        for m in [m for m in a.models.split(",") if m not in ("component", "form")]:
-            for h in range(5):
-                print(f"\n{m} minus component, horizon {h} (95% bootstrap interval):")
-                print(paired_bootstrap(per_gw, m, "component", horizon=h).to_string())
-        if "stacked" in a.models.split(","):
-            for other in ("ml-minutes",):
-                for h in range(5):
-                    print(f"\nstacked minus {other}, horizon {h} (95% bootstrap interval):")
-                    print(paired_bootstrap(per_gw, "stacked", other, horizon=h).to_string())
-            stacker_report(per_gw, kinds[0], seasons, a.workers)
+        models = a.models.split(",")
+        per_gw = compare(models, kinds[0], seasons, a.workers, fresh=a.fresh)
+        per_player = compare_players(models, kinds[0], seasons, a.workers, fresh=a.fresh)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            print(build_report(per_gw, per_player, storage.load_table("match_log"), models), end="")
+            if "stacked" in models:
+                stacker_report(per_gw, kinds[0], seasons, a.workers)
+        report = buf.getvalue()
+        print(report)
+        for path in (storage.DATA_DIR / "processed" / "ml_report.txt", *map(Path, a.copy_report)):
+            path.write_text(report, encoding="utf-8")
         return
     table = storage.load_table("ml_training_table")
     if a.task == "points":
