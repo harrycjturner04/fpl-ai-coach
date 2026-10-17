@@ -15,14 +15,22 @@ def fit_weights(preds: pd.DataFrame, actual: pd.Series) -> np.ndarray:
     return nnls(preds.to_numpy(float), actual.to_numpy(float))[0]
 
 
-def wide_table(frames: dict[str, pd.DataFrame], actuals: pd.DataFrame, positions: pd.Series) -> pd.DataFrame:
-    """One row per (season, deadline, player, target gameweek): a column per member, the actual and the position."""
+def wide_table(frames: dict[str, pd.DataFrame], actuals: pd.DataFrame, positions: pd.DataFrame) -> pd.DataFrame:
+    """One row per (season, deadline, player, target gameweek): a column per member, the actual and the position
+    held at that deadline (positions: season, deadline_gw, player_code, position, one row per deadline key)."""
     wide = None
     for name, f in frames.items():
         f = f[KEYS + ["total"]].rename(columns={"total": name})
         wide = f if wide is None else wide.merge(f, on=KEYS)
+    longest = max(len(f) for f in frames.values())
+    if len(wide) < longest:
+        raise ValueError(f"member merge lost rows: {len(wide)} kept of {longest} in the largest member "
+                         f"({ {n: len(f) for n, f in frames.items()} })")
     wide = wide.merge(actuals, on=["season", "gameweek", "player_code"], how="left")
-    return wide.assign(actual=wide["actual"].fillna(0.0), position=wide["player_code"].map(positions))
+    wide = wide.merge(positions, on=["season", "deadline_gw", "player_code"], how="left")
+    if wide["position"].isna().any():
+        raise ValueError(f"{wide['position'].isna().sum()} rows have no position at their deadline")
+    return wide.assign(actual=wide["actual"].fillna(0.0))
 
 
 def deadline_weights(wide: pd.DataFrame, members: list[str], season: str, gw: int) -> dict[str, np.ndarray]:
@@ -36,11 +44,11 @@ def deadline_weights(wide: pd.DataFrame, members: list[str], season: str, gw: in
             for p in wide["position"].unique() for g in [train[train["position"] == p]]}
 
 
-def stacked_oos(frames: dict[str, pd.DataFrame], actuals: pd.DataFrame, positions: pd.Series) -> pd.DataFrame:
+def stacked_oos(frames: dict[str, pd.DataFrame], actuals: pd.DataFrame, positions: pd.DataFrame) -> pd.DataFrame:
     """Blended per-player per-gameweek totals for every deadline in `frames`.
 
     frames: member name -> columns season, deadline_gw, player_code, gameweek, total.
-    actuals: season, gameweek, player_code, actual. positions: position by player_code."""
+    actuals: season, gameweek, player_code, actual. positions: season, deadline_gw, player_code, position."""
     members, wide = list(frames), wide_table(frames, actuals, positions)
     out = []
     for (season, gw), rows in wide.groupby(["season", "deadline_gw"]):

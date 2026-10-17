@@ -358,13 +358,13 @@ def ml_minutes_totals(match_log, oos: pd.DataFrame, seasons=TEST_SEASONS, worker
     return _cached("ml_oos_ml_minutes_totals", fp, compute, data_dir, fresh)
 
 
-def stack_inputs(match_log, ml_minutes: pd.DataFrame, oos_points: dict[str, pd.DataFrame]) -> tuple:
+def stack_inputs(match_log, table, ml_minutes: pd.DataFrame, oos_points: dict[str, pd.DataFrame]) -> tuple:
     """(frames, actuals, positions) for stacked_oos: a total per member in MEMBERS, actual points, position by player."""
     frames = {"ml-minutes": ml_minutes, **{m: oos_points[m].groupby(STACK_KEYS, as_index=False)["total"].sum()
                                            for m in MEMBERS if m != "ml-minutes"}}
     actuals = (match_log.groupby(["season", "gameweek", "player_code"], as_index=False)["points"].sum()
                .rename(columns={"points": "actual"}))
-    positions = match_log.sort_values("kickoff").drop_duplicates("player_code", keep="last").set_index("player_code")["position"]
+    positions = table[["season", "deadline_gw", "player_code", "position"]].drop_duplicates(["season", "deadline_gw", "player_code"])
     return frames, actuals, positions
 
 
@@ -389,7 +389,7 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
         missing = [m for m in MEMBERS if m != "ml-minutes" and m not in oos_points]
         if missing:
             raise ValueError(f"stacked needs {missing} in --models")
-        oos_points["stacked"] = stacked_oos(*stack_inputs(match_log, ml_minutes_totals(match_log, oos, seasons, workers, data_dir),
+        oos_points["stacked"] = stacked_oos(*stack_inputs(match_log, table, ml_minutes_totals(match_log, oos, seasons, workers, data_dir),
                                                         oos_points))
     code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (
         Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
@@ -408,17 +408,17 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
     return _cached("ml_compare_per_gw", fp, compute, data_dir, fresh)
 
 
-def stacker_report(per_gw: pd.DataFrame, seasons, workers, data_dir: Path = storage.DATA_DIR) -> None:
+def stacker_report(per_gw: pd.DataFrame, kind, seasons, workers, data_dir: Path = storage.DATA_DIR) -> None:
     """Prints the weights fitted at each season's last deadline and per-season horizon-0 RMSE (the backtest summary's:
     root of the mean squared error over gameweeks, per model)."""
     match_log = storage.load_table("match_log", data_dir)
     table = storage.load_table("ml_training_table", data_dir)
-    oos = run_minutes(table, "lgbm", seasons, _minutes_params("lgbm"), workers, data_dir)
+    oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
     store = sequences(match_log, table, data_dir)
     oos_points = {m: run_gru_points(table, store, oos, seasons, _ml_params("points", m), workers, data_dir) if m == "gru"
                   else run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
                   for m in MEMBERS if m != "ml-minutes"}
-    frames, actuals, positions = stack_inputs(match_log, ml_minutes_totals(match_log, oos, seasons, workers, data_dir), oos_points)
+    frames, actuals, positions = stack_inputs(match_log, table, ml_minutes_totals(match_log, oos, seasons, workers, data_dir), oos_points)
     wide, rows = wide_table(frames, actuals, positions), []
     for season in seasons:
         gw = int(wide.loc[wide["season"] == season, "deadline_gw"].max())
@@ -453,7 +453,7 @@ def main():
                 for h in range(5):
                     print(f"\nstacked minus {other}, horizon {h} (95% bootstrap interval):")
                     print(paired_bootstrap(per_gw, "stacked", other, horizon=h).to_string())
-            stacker_report(per_gw, seasons, a.workers)
+            stacker_report(per_gw, kinds[0], seasons, a.workers)
         return
     table = storage.load_table("ml_training_table")
     if a.task == "points":

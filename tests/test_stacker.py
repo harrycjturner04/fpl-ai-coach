@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from prediction.stacker import MIN_GAMEWEEKS, fit_weights, stacked_oos
+from prediction.stacker import MIN_GAMEWEEKS, fit_weights, stacked_oos, wide_table
 
 
 def test_weights_are_non_negative_and_recover_a_blend():
@@ -24,7 +24,9 @@ def _frames():
                                              "total": y if perfect else noise()})))
         acts.append(pd.DataFrame({"season": "s", "gameweek": gw, "player_code": range(20), "actual": y}))
     frames = {n: pd.concat([f for m, f in rows if m == n], ignore_index=True) for n in ("a", "b")}
-    return frames, pd.concat(acts, ignore_index=True), pd.Series("MID", index=range(20))
+    positions = pd.DataFrame({"season": "s", "deadline_gw": np.repeat(range(1, 13), 20), "player_code": list(range(20)) * 12,
+                              "position": "MID"})
+    return frames, pd.concat(acts, ignore_index=True), positions
 
 
 def test_stacker_only_uses_gameweeks_played_before_the_deadline():
@@ -37,3 +39,19 @@ def test_stacker_only_uses_gameweeks_played_before_the_deadline():
     few = MIN_GAMEWEEKS - 1                                           # fewer than MIN_GAMEWEEKS earlier gameweeks
     a3, b3 = (frames[n][frames[n]["deadline_gw"] == few].set_index("player_code")["total"] for n in "ab")
     assert at(few).to_numpy() == pytest.approx(((a3 + b3) / 2).to_numpy())
+
+
+def test_position_is_the_one_held_at_the_deadline():
+    frames, actuals, positions = _frames()
+    positions.loc[(positions["player_code"] == 0) & (positions["deadline_gw"] >= 6), "position"] = "DEF"
+    wide = wide_table(frames, actuals, positions)
+    pos = wide[wide["player_code"] == 0].set_index("deadline_gw")["position"]
+    assert pos[5] == "MID" and pos[6] == "DEF" and pos[12] == "DEF"
+
+
+def test_member_merge_losing_rows_raises():
+    frames, actuals, positions = _frames()
+    frames["b"] = frames["b"][frames["b"]["player_code"] != 3]
+    frames["a"] = frames["a"][frames["a"]["player_code"] != 4]
+    with pytest.raises(ValueError, match="lost rows"):
+        wide_table(frames, actuals, positions)
