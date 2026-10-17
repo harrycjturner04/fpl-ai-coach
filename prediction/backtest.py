@@ -274,13 +274,17 @@ def load_params(path: str | None) -> ModelParams:
 
 
 def build_predictors(names: list[str], params_path: str | None = None,
-                     ablation: bool = False, oos_minutes: pd.DataFrame | None = None) -> dict[str, Predictor]:
+                     ablation: bool = False, oos_minutes: pd.DataFrame | None = None,
+                     oos_points: dict[str, pd.DataFrame] | None = None) -> dict[str, Predictor]:
     params = load_params(params_path)
     predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor, "form": form_predictor,
                                         "component": make_component_predictor(params)}
     if oos_minutes is not None:
         from .walkforward import make_ml_minutes_predictor  # walkforward imports this module
         predictors["ml-minutes"] = make_ml_minutes_predictor(params, oos_minutes)
+    if oos_points:
+        from .walkforward import make_table_predictor
+        predictors.update({m: make_table_predictor(d) for m, d in oos_points.items()})
     chosen = {n: predictors[n] for n in names}
     if ablation:  # the component model with one component switched off at a time
         for name in COMPONENTS:

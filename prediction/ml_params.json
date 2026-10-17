@@ -1,1 +1,2 @@
-{"minutes": {"lgbm": {"num_leaves": 15, "min_child_samples": 50}, "keras": {"hidden": [128, 64], "dropout": 0.1}}}
+{"minutes": {"lgbm": {"num_leaves": 15, "min_child_samples": 50}, "keras": {"hidden": [128, 64], "dropout": 0.1}},
+ "points": {"lgbm": {"num_leaves": 15, "min_child_samples": 50}, "keras": {"hidden": [64, 32], "dropout": 0.3}}}

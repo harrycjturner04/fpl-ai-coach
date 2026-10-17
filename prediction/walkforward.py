@@ -21,7 +21,8 @@ from prediction.backtest import (Predictor, build_predictors, load_params, paire
 from prediction.cli import SHIPPED_PARAMS_PATH
 from prediction.component_model import per_gameweek, predict
 from prediction.minutes_model import MINUTES_MODELS
-from prediction.ml_data import labelled, minutes_class
+from prediction.ml_data import labelled, minutes_class, target_points
+from prediction.ml_points import POINTS_MODELS, expected_points
 
 TEST_SEASONS = ("2023-24", "2024-25", "2025-26")
 RETRAIN_EVERY = 4
@@ -94,6 +95,64 @@ def run_minutes(table, kind: str, seasons=TEST_SEASONS, params=None, workers=6,
                            lambda: _walk(table, kind, (season,), params, workers), data_dir, fresh))
         print(f"{kind} {season} done ({time.time() - t0:.0f}s)", flush=True)
     return pd.concat(out, ignore_index=True)
+
+
+def _points_job(args) -> pd.DataFrame:
+    kind, params, train, ahead = args
+    import torch
+    torch.set_num_threads(2)
+    y = target_points(train.drop(columns="position"), ahead["season"].iloc[0]).to_numpy()
+    model = POINTS_MODELS[kind](params).fit(train[FEATURE_COLUMNS], minutes_class(train["t_minutes"]), y, train["kickoff"])
+    pts = model.predict(ahead[FEATURE_COLUMNS])
+    return ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True).assign(pts_cameo=pts[:, 0], pts_full=pts[:, 1])
+
+
+def _points_walk(table, kind, season, params, workers) -> pd.DataFrame:
+    with ProcessPoolExecutor(max_workers=workers) as pool:
+        return pd.concat(pool.map(_points_job, _jobs(table, kind, (season,), params)), ignore_index=True)
+
+
+def _with_minutes(pts: pd.DataFrame, minutes_oos: pd.DataFrame) -> pd.DataFrame:
+    m = pts.merge(minutes_oos[KEYS + ["p0", "p1", "p2"]], on=KEYS, validate="one_to_one")
+    total = expected_points(m[["p0", "p1", "p2"]].to_numpy(), m[["pts_cameo", "pts_full"]].to_numpy())
+    return m[KEYS + ["gameweek", "horizon"]].assign(total=total)
+
+
+def _points_hash(minutes_oos: pd.DataFrame) -> str:
+    """Points path only (models, features, the walk functions it uses) plus the minutes OOS it consumes."""
+    root = Path(__file__).parent
+    files = [root / f for f in ("ml_points.py", "ml_common.py", "ml_data.py")] + [root.parent / "features" / "ml_features.py"]
+    funcs = (retrain_blocks, training_rows, _jobs, _points_job, _points_walk, _with_minutes, run_points)
+    minutes = pd.util.hash_pandas_object(minutes_oos[KEYS + ["p0", "p1", "p2"]], index=False).to_numpy().tobytes()
+    return hashlib.sha256(b"".join(f.read_bytes() for f in files) + minutes
+                          + "".join(inspect.getsource(f) for f in funcs).encode()).hexdigest()
+
+
+def run_points(table, kind: str, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS, params=None, workers=6,
+               data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    table_meta, out = storage.load_json_or_none("ml_training_table_meta", data_dir), []
+    for season in seasons:
+        m = minutes_oos[minutes_oos["season"] == season]
+        fp = dict(table_meta=table_meta, rows=len(table), kind=kind, params=params, season=season,
+                  code_sha256=_points_hash(m))
+        fp = json.loads(json.dumps(fp, default=str))
+        t0 = time.time()
+        out.append(_cached(f"ml_oos_points_{kind}_{season}", fp,
+                           lambda: _with_minutes(_points_walk(table, kind, season, params, workers), m), data_dir, fresh))
+        print(f"points {kind} {season} done ({time.time() - t0:.0f}s)", flush=True)
+    return pd.concat(out, ignore_index=True)
+
+
+def make_table_predictor(oos: pd.DataFrame) -> Predictor:
+    """Serves precomputed OOS totals: per player and gameweek for the deadline, fixtures summed."""
+    by_deadline = {k: g for k, g in oos.groupby(["season", "deadline_gw"])}
+
+    def predictor(snap) -> pd.DataFrame:
+        rows = by_deadline.get((snap.season, snap.gameweek))
+        if rows is None:
+            return pd.DataFrame(columns=["player_code", "gameweek", "total"])
+        return per_gameweek(rows)
+    return predictor
 
 
 def _component_season(args) -> pd.DataFrame:
@@ -180,15 +239,35 @@ def _grid(table, kind, seasons, workers):
     return min(results, key=lambda r: r[0])[1]
 
 
+def _grid_points(table, kind, minutes_oos, season, workers):
+    """RMSE of expected points per fixture against the realised points, on the tuning season."""
+    results = []
+    for values in itertools.product(*GRIDS[kind].values()):
+        params = dict(zip(GRIDS[kind], values))
+        t0 = time.time()
+        oos = _with_minutes(_points_walk(table, kind, season, params | GRID_FIXED[kind], workers),
+                            minutes_oos[minutes_oos["season"] == season])
+        d = oos[KEYS + ["total"]].merge(table[KEYS + [c for c in table if c.startswith("t_")]], on=KEYS)
+        d = d[d["t_minutes"].notna()]
+        rmse = float(np.sqrt(np.mean((d["total"] - target_points(d, season)) ** 2)))
+        print(f"points {kind} {params} rmse={rmse:.5f} ({time.time() - t0:.0f}s)", flush=True)
+        results.append((rmse, params))
+    return min(results, key=lambda r: r[0])[1]
+
+
+def _ml_params(section, kind):
+    return json.loads(ML_PARAMS_PATH.read_text()).get(section, {}).get(kind) if ML_PARAMS_PATH.exists() else None
+
+
 def _minutes_params(kind):
-    return json.loads(ML_PARAMS_PATH.read_text())["minutes"].get(kind) if ML_PARAMS_PATH.exists() else None
+    return _ml_params("minutes", kind)
 
 
 def _compare_season(args) -> pd.DataFrame:
-    match_log, season, names, oos = args
+    match_log, season, names, oos, oos_points = args
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        predictors = build_predictors(names, str(SHIPPED_PARAMS_PATH), oos_minutes=oos)
+        predictors = build_predictors(names, str(SHIPPED_PARAMS_PATH), oos_minutes=oos, oos_points=oos_points)
         return run_backtest(match_log, [season], predictors)[0]
 
 
@@ -197,15 +276,21 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
     match_log = storage.load_table("match_log", data_dir)
     oos = run_minutes(storage.load_table("ml_training_table", data_dir), kind, seasons, _minutes_params(kind),
                       workers, data_dir)
+    table = storage.load_table("ml_training_table", data_dir)
+    oos_points = {m: run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
+                  for m in models if m in POINTS_MODELS}
     code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (
         Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
         SHIPPED_PARAMS_PATH, ML_PARAMS_PATH)) + inspect.getsource(make_ml_minutes_predictor).encode()
+        + inspect.getsource(make_table_predictor).encode()
         + _code_hash().encode()).hexdigest()
     fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons, rows=len(match_log), oos_rows=len(oos),
+                                    points=[pd.util.hash_pandas_object(d, index=False).sum() for d in oos_points.values()],
                                     code_sha256=code), default=str))
 
     def compute():
-        jobs = [(match_log, s, models, oos[oos["season"] == s]) for s in seasons]
+        jobs = [(match_log, s, models, oos[oos["season"] == s],
+                 {m: d[d["season"] == s] for m, d in oos_points.items()}) for s in seasons]
         with ProcessPoolExecutor(max_workers=workers) as pool:
             return pd.concat(pool.map(_compare_season, jobs), ignore_index=True)
     return _cached("ml_compare_per_gw", fp, compute, data_dir, fresh)
@@ -213,7 +298,7 @@ def compare(models, kind, seasons, workers, data_dir: Path = storage.DATA_DIR, f
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("task", choices=["minutes", "compare"])
+    ap.add_argument("task", choices=["minutes", "points", "compare"])
     ap.add_argument("--models", default="component,ml-minutes,form")
     ap.add_argument("--kind", default="lgbm,keras")
     ap.add_argument("--seasons", default=",".join(TEST_SEASONS))
@@ -225,11 +310,20 @@ def main():
     if a.task == "compare":
         per_gw = compare(a.models.split(","), kinds[0], seasons, a.workers, fresh=a.fresh)
         print(summary(per_gw).to_string())
-        for h in range(5):
-            print(f"\nml-minutes minus component, horizon {h} (95% bootstrap interval):")
-            print(paired_bootstrap(per_gw, "ml-minutes", "component", horizon=h).to_string())
+        for m in [m for m in a.models.split(",") if m not in ("component", "form")]:
+            for h in range(5):
+                print(f"\n{m} minus component, horizon {h} (95% bootstrap interval):")
+                print(paired_bootstrap(per_gw, m, "component", horizon=h).to_string())
         return
     table = storage.load_table("ml_training_table")
+    if a.task == "points":
+        minutes = run_minutes(table, "lgbm", seasons, _minutes_params("lgbm"), a.workers)   # cached, never fresh
+        for kind in kinds:
+            if a.grid:
+                print("best", kind, _grid_points(table, kind, minutes, seasons[0], a.workers))
+            else:
+                run_points(table, kind, minutes, seasons, _ml_params("points", kind), a.workers, fresh=a.fresh)
+        return
     if a.grid:
         for kind in kinds:
             print("best", kind, _grid(table, kind, seasons, a.workers))

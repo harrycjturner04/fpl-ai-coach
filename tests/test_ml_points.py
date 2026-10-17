@@ -1,0 +1,50 @@
+from types import SimpleNamespace
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from prediction.ml_points import POINTS_MODELS, expected_points
+from prediction.walkforward import make_table_predictor
+from tests.test_minutes_model import toy
+
+
+def test_expected_points_weights_by_minutes_class():
+    p = np.array([[0.2, 0.3, 0.5]]); pts = np.array([[1.5, 4.0]])
+    assert expected_points(p, pts)[0] == pytest.approx(0.3 * 1.5 + 0.5 * 4.0)
+
+
+@pytest.mark.parametrize("name", ["lgbm", "keras"])
+def test_points_models_separate_cameo_and_full_match(name):
+    X, _, order = toy()
+    cls = np.where(np.arange(len(X)) % 2, 2, 1)
+    y = np.where(cls == 2, 4.0, 1.0) + X["xg_pm5"].to_numpy()
+    params = {"epochs": 20, "batch_size": 64, "seeds": (0,)} if name == "keras" else {"n_estimators": 100}
+    out = POINTS_MODELS[name](params).fit(X, cls, y, order).predict(X)
+    assert out.shape == (len(X), 2) and (out[:, 1] > out[:, 0]).mean() > 0.9
+
+
+def test_points_models_ignore_rows_that_did_not_play():
+    X, _, order = toy()
+    cls = np.where(np.arange(len(X)) % 3 == 0, 0, 2)
+    y = np.where(cls == 0, 1000.0, 3.0)
+    out = POINTS_MODELS["lgbm"]({"n_estimators": 20}).fit(X, cls, y, order).predict(X)
+    assert out.max() < 10
+
+
+def test_table_predictor_sums_a_double_gameweek():
+    oos = pd.DataFrame({"season": "s", "deadline_gw": 3, "player_code": [1, 1], "fixture_id": [10, 11],
+                        "gameweek": [3, 3], "horizon": [0, 0], "total": [2.0, 3.0]})
+    snap = SimpleNamespace(season="s", gameweek=3)
+    assert make_table_predictor(oos)(snap)["total"].tolist() == [5.0]
+
+
+def test_run_points_totals_every_oos_minutes_row_and_caches(tmp_path):
+    from prediction.walkforward import run_minutes, run_points
+    from tests.test_walkforward import _table
+    table = _table()
+    mins = run_minutes(table, "lgbm", seasons=("2023-24",), params={"n_estimators": 20}, workers=1, data_dir=tmp_path)
+    out = run_points(table, "lgbm", mins, seasons=("2023-24",), params={"n_estimators": 20}, workers=1, data_dir=tmp_path)
+    assert len(out) == len(mins) and out["total"].notna().all()
+    again = run_points(table, "lgbm", mins, seasons=("2023-24",), params={"n_estimators": 20}, workers=1, data_dir=tmp_path)
+    pd.testing.assert_frame_equal(out, again)
