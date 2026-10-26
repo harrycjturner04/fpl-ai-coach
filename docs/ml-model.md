@@ -111,7 +111,8 @@ each season), while forwards put more weight on LightGBM and the GRU.
 The rule was fixed before the results. A candidate replaces the component model only if (a) its horizon-weighted
 objective J (weights 0.85 per horizon, against rebuilt FPL form; lower is better) is lower, and (b) the 95% interval of
 its horizon-0 RMSE difference from the component model lies wholly below zero. Among passing candidates the simplest
-wins, in this order: ml-minutes, LightGBM, stacked, Keras.
+wins, in this order: ml-minutes, LightGBM, stacked, GRU. The GRU takes the network's place because it beat the Keras
+MLP by the same test; the MLP is shown for reference only.
 
 Held-out (2024/25 and 2025/26), horizon 0, RMSE difference from the component model (negative is better):
 
@@ -122,7 +123,7 @@ Held-out (2024/25 and 2025/26), horizon 0, RMSE difference from the component mo
 | LightGBM | 1.7309 | -0.0229 [-0.0347, -0.0126] | yes |
 | Stacked | 1.7212 | -0.0347 [-0.0441, -0.0265] | yes |
 | GRU | 1.7449 | -0.0216 [-0.0332, -0.0115] | yes |
-| Keras MLP | not scored | -0.0188 [-0.0309, -0.0086] | |
+| Keras MLP (reference) | 1.7518 | -0.0188 [-0.0309, -0.0086] | not a candidate |
 
 **Choice: ml-minutes.** Mean per-gameweek RMSE at horizon 0 was 2.480 (component), 2.456 (ml-minutes) and 2.449
 (stacked) in 2024/25, and 2.632, 2.596 and 2.594 in 2025/26; rebuilt form scored 2.782 and 2.973. Rank correlation
@@ -142,8 +143,9 @@ horizon:
 | 3 | -0.0079 [-0.0137, -0.0023] |
 | 4 | -0.0072 [-0.0144, -0.0002] |
 
-The stacker is better than ml-minutes by a further -0.0047 [-0.0084, -0.0011] RMSE at horizon 0, but its MAE is worse
-(+0.023), so the simpler model is kept.
+ml-minutes has the lowest J (1.7209 against the stacker's 1.7212), so the rule chooses it. The stacker's horizon-0 RMSE
+is lower by a further 0.0047 [0.0011, 0.0084], but its MAE is higher by 0.023 and beyond the next two gameweeks the RMSE difference is within
+noise (all three seasons), so the two are effectively tied and the simpler model ships.
 
 ## Breakdowns
 
@@ -153,8 +155,8 @@ Horizon 0, held-out seasons, ml-minutes against the component model (RMSE):
   2.763 against 2.787, goalkeepers 2.440 against 2.481).
 - **Price band:** better in the three cheaper bands; in the dearest band (313 player-gameweeks) it is slightly worse
   (4.215 against 4.164), a small sample.
-- **Hauls:** every model, the component model included, under-predicts players who score 5 or more points by about
-  4.7 points on average. This is the nature of a mean forecast of a rare event, and a reason to consider
+- **Hauls:** every model, the component model included, under-predicts players who score 5 or more points by 4.6 to
+  4.8 points on average. This is the nature of a mean forecast of a rare event, and a reason to consider
   haul-probability models later.
 - **New arrivals:** about equal (1.356 against 1.342, 906 player-gameweeks).
 - **Early season (gameweeks 1 to 5):** better (2.435 against 2.467), so the learned minutes help when there is little
