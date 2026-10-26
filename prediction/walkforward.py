@@ -470,6 +470,7 @@ def stacker_report(per_gw: pd.DataFrame, kind, seasons, workers, data_dir: Path 
 
 # ---- live use: train on everything played, predict the coming gameweeks ----
 MODELS_FOLDER = "models"
+ALL_KINDS = ("minutes", "lgbm", "keras", "gru")
 MODEL_CLASSES = {"minutes": MINUTES_MODELS["lgbm"], **POINTS_MODELS, "gru": GruPoints}
 
 
@@ -513,11 +514,17 @@ def _latest_models(data_dir: Path) -> tuple[Path, dict] | None:
     return max(found, key=lambda fm: (fm[1]["season"], fm[1]["through_gameweek"]), default=None)
 
 
-def _load_models(data_dir: Path) -> dict:
+def _load_models(data_dir: Path, season: str) -> dict:
+    """The latest saved models, refused if they are from another season or RETRAIN_EVERY or more gameweeks old."""
     saved = _latest_models(data_dir)
     if saved is None:
         raise FileNotFoundError(f"no saved models in {data_dir / MODELS_FOLDER}: run train_live")
     folder, meta = saved
+    if meta["season"] != season:
+        raise RuntimeError(f"saved models are from season {meta['season']}, not {season}")
+    through, _ = _last_finished(storage.load_table("gameweeks", data_dir), storage.load_table("match_log", data_dir), season)
+    if through - meta["through_gameweek"] >= RETRAIN_EVERY:
+        raise RuntimeError(f"saved models are too old (through GW{meta['through_gameweek']}, now GW{through})")
     return {name: _load(MODEL_CLASSES[name], folder, name) for name in meta["models"]}
 
 
@@ -536,22 +543,26 @@ def _live_table(match_log: pd.DataFrame, season: str, data_dir: Path) -> pd.Data
     past = set(match_log["season"]) - {season}
     if base is None or not past <= set(base["season"]):
         raise RuntimeError("The training table lacks past seasons: run python -m prediction.ml_data first.")
+    if match_log["season"].ne(season).all():     # first gameweek of the season: nothing played yet
+        return base[base["season"] != season]
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         current = _season_rows((match_log, season, 1, load_params(str(SHIPPED_PARAMS_PATH)).team))
     return pd.concat([base[base["season"] != season], current], ignore_index=True)
 
 
-def _fit_models(match_log: pd.DataFrame, season: str, data_dir: Path, now: pd.Timestamp) -> dict:
-    """The LightGBM minutes model (required) and each points model (skipped with a warning if it fails)."""
+def _fit_models(match_log: pd.DataFrame, season: str, data_dir: Path, now: pd.Timestamp, kinds=ALL_KINDS) -> dict:
+    """The requested models: the minutes model (a failure raises) and points models (skipped with a warning if they fail)."""
     table = _live_table(match_log, season, data_dir)
     train = labelled(table, now)
     X, order = train[FEATURE_COLUMNS], train["kickoff"]
     cls, y = minutes_class(train["t_minutes"]), target_points(train, season).to_numpy()
-    t0 = time.time()
-    models = {"minutes": MINUTES_MODELS["lgbm"](_minutes_params("lgbm")).fit(X, cls, order)}
-    print(f"trained minutes ({time.time() - t0:.0f}s)", flush=True)
-    for kind in ("lgbm", "keras", "gru"):
+    models = {}
+    if "minutes" in kinds:
+        t0 = time.time()
+        models["minutes"] = MINUTES_MODELS["lgbm"](_minutes_params("lgbm")).fit(X, cls, order)
+        print(f"trained minutes ({time.time() - t0:.0f}s)", flush=True)
+    for kind in [k for k in kinds if k != "minutes"]:
         t0 = time.time()
         try:
             if kind == "gru":
@@ -577,14 +588,20 @@ def train_live(data_dir: Path = storage.DATA_DIR, now: pd.Timestamp | None = Non
     through, date = _last_finished(gameweeks, match_log, season)
     saved = _latest_models(data_dir)
     if saved and saved[1]["season"] == season and through - saved[1]["through_gameweek"] < RETRAIN_EVERY:
-        return saved[0]
-    models = _fit_models(match_log, season, data_dir, now)
-    folder = data_dir / MODELS_FOLDER / str(date.date())
+        folder, meta = saved
+        kinds = [k for k in ALL_KINDS if k not in meta["models"]]    # a model that failed last time is retried now
+        if not kinds:
+            return folder
+    else:
+        kinds = ALL_KINDS
+        folder = data_dir / MODELS_FOLDER / str(date.date())
+        meta = {"season": season, "through_gameweek": through, "models": []}
+    models = _fit_models(match_log, season, data_dir, now, kinds)
     folder.mkdir(parents=True, exist_ok=True)
     for name, model in models.items():
         _save(model, folder, name)
-    (folder / "meta.json").write_text(json.dumps({"season": season, "through_gameweek": through,
-                                                  "models": list(models), "trained_at": str(now)}))
+    meta = meta | {"models": meta["models"] + list(models), "trained_at": str(now)}
+    (folder / "meta.json").write_text(json.dumps(meta))
     print(f"live models saved to {folder} (through GW{through}): {', '.join(models)}", flush=True)
     return folder
 
@@ -597,7 +614,7 @@ def _shared(inputs: dict, key, compute):
 
 
 def _live_models(inputs: dict, data_dir: Path) -> dict:
-    return _shared(inputs, "models", lambda: _load_models(data_dir))
+    return _shared(inputs, "models", lambda: _load_models(data_dir, inputs["season"]))
 
 
 def _live_minutes(inputs: dict, data_dir: Path) -> pd.DataFrame:

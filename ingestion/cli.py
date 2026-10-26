@@ -69,6 +69,8 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     if (stored_history is not None and set(transform.MARKET_COLUMNS) <= set(stored_history.columns)
             and not current_rows.empty):  # a history table saved before these columns existed is skipped
         current_rows = transform.fill_market_from_history(current_rows, stored_history, tables["players"])
+    if gaps := market_gaps(current_rows, tables["gameweeks"]):
+        print(f"  warning: ownership and transfer values missing for gameweek(s) {gaps}: run with --history")
     storage.save_table(current_rows, "current_season_rows", data_dir)
     archive = storage.load_table_or_none("archive_match_log", data_dir)
     if archive is None:
@@ -139,6 +141,13 @@ def _record_market(tables: dict, data_dir: Path, now: pd.Timestamp, total_player
     log = log.sort_values("recorded_at").drop_duplicates(["season", "gameweek", "player_code"], keep="last")
     storage.save_table(log.reset_index(drop=True), "market_log", data_dir)
     return log
+
+
+def market_gaps(rows: pd.DataFrame, gameweeks: pd.DataFrame, share: float = 0.2) -> list[int]:
+    """Finished gameweeks in which more than `share` of the rows still lack market values."""
+    finished = rows[rows["gameweek"].isin(gameweeks.loc[gameweeks["finished"], "id"])]
+    missing = finished["selected"].isna().groupby(finished["gameweek"]).mean()
+    return [int(g) for g in missing[missing > share].index]
 
 
 def _gameweek_is_covered(cached: pd.DataFrame | None, fixtures: pd.DataFrame, gameweek: int) -> bool:

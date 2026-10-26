@@ -84,3 +84,11 @@ def test_cache_missing_a_new_column_is_refetched(tmp_path):
     client = FakeClient()
     _update_current_season(client, _tables(fixtures, gameweeks), tmp_path)
     assert client.calls == [1]
+
+
+def test_market_gaps_name_finished_gameweeks_with_many_missing_values():
+    from ingestion.cli import market_gaps
+    rows = pd.DataFrame({"gameweek": [1] * 4 + [2] * 4 + [3] * 4,
+                         "selected": [1.0] * 4 + [None, None, None, 1.0] + [None] * 4})
+    gws = pd.DataFrame({"id": [1, 2, 3], "finished": [True, True, False]})
+    assert market_gaps(rows, gws) == [2]          # gameweek 3 is not finished; gameweek 1 has no gaps

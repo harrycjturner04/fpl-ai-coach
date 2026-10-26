@@ -216,6 +216,7 @@ def test_a_training_failure_does_not_stop_the_component_model(tmp_path, monkeypa
     monkeypatch.setattr(walkforward, "train_live", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no torch")))
     pred = cli.run(data_dir=tmp_path, now=pd.Timestamp("2023-10-06T12:00Z"), model="component")
     assert len(pred) > 0 and "ML models not trained" in capsys.readouterr().out
+    assert set(storage.load_table("prediction_log", tmp_path).model) == {"component"}   # no ML candidate from old models
     with pytest.raises(RuntimeError, match="no torch"):
         cli.run(data_dir=tmp_path, now=pd.Timestamp("2023-10-06T12:00Z"), model="ml-minutes")
 

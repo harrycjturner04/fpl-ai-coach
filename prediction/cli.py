@@ -112,7 +112,8 @@ def _predict_candidates(names: list[str], chosen: str, x: dict, data_dir: Path) 
         except Exception as err:   # noqa: BLE001
             if chosen != "component":
                 raise
-            print(f"  warning: ML models not trained ({type(err).__name__}: {err})")
+            print(f"  warning: ML models not trained ({type(err).__name__}: {err}); ML candidates skipped")
+            names = ["component"]   # never predict from models that are out of date
     out = {}
     for name in names:
         try:
