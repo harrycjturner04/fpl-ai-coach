@@ -19,7 +19,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 - [x] Stage 3a: Component prediction model (appearance, goals, assists, clean sheets, bonus, etc.), live and feeding the optimiser by default
 - [x] Stage 3b: Multi-week optimiser (five-week plan, chips as what-ifs), tested by replaying four past seasons
 - ~~Stage 4: Screenshot parsing~~ (dropped: the manager ID gives the same information more reliably)
-- [ ] Stage 5: ML prediction model
+- [x] Stage 5: ML prediction models (LightGBM, Keras, GRU, stacker), compared walk-forward; the component model with LightGBM minutes (`ml-minutes`) is the default
 - [ ] Stage 6: LLM reasoning layer
 - [ ] Stage 7: Presentation
 
@@ -36,6 +36,8 @@ python -m ingestion.archive              # past-season archive for training/back
 python -m prediction.cli                     # expected points for the next 5 gameweeks
 python -m prediction.backtest                # walk-forward backtest of the component model vs. benchmarks
 python -m prediction.tune                    # coordinate-descent tuning on the tuning seasons
+python -m prediction.cli --model stacked     # any candidate: component, ml-minutes (default), lgbm, keras, gru, stacked
+python -m optimisation.cli --entry 1234567 --model lgbm   # plan with that model's predictions
 
 # The optimiser re-pulls data automatically if it's over 24h old or a deadline has passed.
 python -m optimisation.cli                   # best squad from scratch (£100m), scored by the component model
@@ -164,6 +166,16 @@ Reproduce the holdout with the Stage 3a parameters: `git show 04a8f0e:prediction
 then `python -m prediction.backtest --seasons 2025-26 --models naive,form,component --params params_3a.json`
 (`--models` defaults to `naive,form`; add `component` explicitly to include it). The current parameters, shipped and
 re-tuned alike, were tuned with 2025/26 included, so using them here would leak the holdout season.
+
+## ML prediction results
+
+Stage 5 added machine-learned minutes and points models (new dependencies `lightgbm`, `keras`, `torch`; Keras runs on
+PyTorch), tested walk-forward on 2023/24 to 2025/26 and retrained every 4 gameweeks. By a selection rule fixed in
+advance, the winner is `ml-minutes`: the component model with LightGBM minutes probabilities. On the held-out seasons
+(2024/25 and 2025/26) its next-gameweek RMSE is 0.030 lower than the component model's (95% interval -0.040 to -0.021),
+better at every horizon from 0 to 4; the heavier models add little. The gain is small and 2023/24 is in-sample for the ML
+settings. Every candidate is logged before each live deadline for the 2026/27 forward test. See
+[docs/ml-model.md](docs/ml-model.md).
 
 ## How this project is built
 

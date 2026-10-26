@@ -17,6 +17,7 @@ import os
 import time
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
+from functools import cache
 from pathlib import Path
 
 import numpy as np
@@ -24,7 +25,7 @@ import pandas as pd
 
 from ingestion import storage
 from optimisation.settings import PlanSettings
-from prediction.backtest import WARM_UP_GAMEWEEKS, _clean_gameweeks, load_params, make_component_predictor, snapshot
+from prediction.backtest import WARM_UP_GAMEWEEKS, _clean_gameweeks, build_predictors, load_params, make_component_predictor, snapshot
 from prediction.cli import SHIPPED_PARAMS_PATH
 
 from .leftover import fixed_point
@@ -82,10 +83,21 @@ def replayed_gameweeks(log: pd.DataFrame, season: str) -> list[int]:
 
 # ---- worker side (module level so Windows spawn can import it) ----
 
-def _predict_season(task: tuple[str, Path, int | None]) -> pd.DataFrame:
-    season, data_dir, limit = task
+@cache
+def _ml_predictor(model: str, data_dir: Path):
+    """The model's walk-forward predictor, served from the cached out-of-sample predictions (never recomputed here)."""
+    from prediction.stacker import MEMBERS
+    from prediction.walkforward import TEST_SEASONS, _compare_inputs
+    models = [*MEMBERS, "stacked"] if model == "stacked" else [model]
+    _, oos, oos_points, _ = _compare_inputs(models, "lgbm", TEST_SEASONS, 1, data_dir)
+    return build_predictors([model], str(SHIPPED_PARAMS_PATH), oos_minutes=oos, oos_points=oos_points)[model]
+
+
+def _predict_season(task: tuple[str, Path, int | None, str]) -> pd.DataFrame:
+    season, data_dir, limit, model = task
     log = storage.load_table("archive_match_log", data_dir)
-    predictor = make_component_predictor(load_params(str(SHIPPED_PARAMS_PATH)))
+    predictor = (make_component_predictor(load_params(str(SHIPPED_PARAMS_PATH))) if model == "component"
+                 else _ml_predictor(model, data_dir))
     frames = [predictor(snapshot(log, season, gw, 5)).assign(season=season, made_at=gw)
               for gw in replayed_gameweeks(log, season)[:limit]]
     return pd.concat(frames, ignore_index=True)[["season", "made_at", "player_code", "gameweek", "total"]]
@@ -113,9 +125,9 @@ def run_replay(job: tuple[PlanSettings, str, bool, int | None]) -> pd.DataFrame:
 
 # ---- orchestration side ----
 
-def fingerprint(seasons: list[str], data_dir: Path) -> dict:
-    """What a saved file depends on: the shipped prediction parameters, the archive size and the seasons."""
-    return dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
+def fingerprint(seasons: list[str], data_dir: Path, model: str = "component") -> dict:
+    """What a saved file depends on: the shipped prediction parameters, the archive size, the seasons and the model."""
+    return dict(model=model, params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
                 archive_rows=len(storage.load_table("archive_match_log", data_dir)), seasons=sorted(seasons))
 
 
@@ -137,12 +149,14 @@ def _saved_leftover(name: str, data_dir: Path, fp: dict) -> dict | None:
 
 
 def precompute_predictions(seasons: list[str], workers: int, data_dir: Path, limit: int | None = None, *,
-                           name: str = "replay_predictions", fresh: bool = False) -> pd.DataFrame:
-    fp = fingerprint(seasons, data_dir)
+                           name: str = "replay_predictions", fresh: bool = False,
+                           model: str = "component") -> pd.DataFrame:
+    fp = fingerprint(seasons, data_dir, model)
     if not fresh and _meta_matches(name, data_dir, fp):
         return storage.load_table(name, data_dir)
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        preds = pd.concat(pool.map(_predict_season, [(s, data_dir, limit) for s in seasons]), ignore_index=True)
+    # an ML predictor holds the whole feature table, so one worker process (it keeps the predictor between seasons)
+    with ProcessPoolExecutor(max_workers=workers if model == "component" else 1) as pool:
+        preds = pd.concat(pool.map(_predict_season, [(s, data_dir, limit, model) for s in seasons]), ignore_index=True)
     storage.save_table(preds, name, data_dir)
     storage.save_json(fp, f"{name}_meta", data_dir)
     return preds
@@ -199,6 +213,8 @@ def main(argv=None) -> None:
     ap = argparse.ArgumentParser(prog="python -m evaluation.tune", description=__doc__)
     ap.add_argument("--workers", type=int, default=12)
     ap.add_argument("--every-state", type=int, default=4, help="measure leftover values on every n-th replayed gameweek")
+    ap.add_argument("--model", default="component", help="prediction model: component (default) or an ML model "
+                    "(ml-minutes, lgbm, keras, gru, stacked), replayed on the seasons with walk-forward predictions")
     ap.add_argument("--fresh", action="store_true", help="ignore saved predictions and results")
     ap.add_argument("--smoke", action="store_true", help="one season, 6 gameweeks, tiny grid; plan_params is not saved")
     args = ap.parse_args(argv)
@@ -207,6 +223,10 @@ def main(argv=None) -> None:
     seasons, limit, grid, every, passes, suffix = SEASONS, None, GRID, args.every_state, 3, ""
     if args.smoke:
         seasons, limit, grid, every, passes, suffix = ["2023-24"], 6, {"discount": [0.9, 1.0]}, 2, 1, "_smoke"
+    if args.model != "component":
+        from prediction.walkforward import TEST_SEASONS
+        seasons = [s for s in TEST_SEASONS if s in seasons] or seasons
+        suffix += f"_{args.model}"
     pred_name, res_name = f"replay_predictions{suffix}", f"replay_results{suffix}"
 
     def say(msg: str) -> None:
@@ -216,10 +236,11 @@ def main(argv=None) -> None:
     if args.fresh:
         _delete_saved([pred_name, res_name, left_name], data_dir)
     say("predictions")
-    precompute_predictions(seasons, args.workers, data_dir, limit, name=pred_name, fresh=args.fresh)
+    precompute_predictions(seasons, args.workers, data_dir, limit, name=pred_name, fresh=args.fresh,
+                           model=args.model)
 
     results: dict = {}
-    fp = fingerprint(seasons, data_dir)
+    fp = fingerprint(seasons, data_dir, args.model)
     if not args.fresh and _meta_matches(res_name, data_dir, fp):
         results = load_results(res_name, data_dir)
 
@@ -327,8 +348,8 @@ def main(argv=None) -> None:
     print(text, flush=True)
     (data_dir / "processed" / f"replay_report{suffix}.txt").write_text(text, encoding="utf-8")
     if not args.smoke:
-        storage.save_json(best.to_dict(), "plan_params", data_dir)
-        say("saved plan_params")
+        storage.save_json(best.to_dict(), f"plan_params{suffix}", data_dir)
+        say(f"saved plan_params{suffix}")
 
 
 if __name__ == "__main__":

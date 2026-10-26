@@ -184,3 +184,21 @@ def test_saved_leftover_table_is_reused_only_for_the_same_sampling(tmp_path):
     assert tune._saved_leftover("left", tmp_path, fp)["base_table"] == [1.0]
     assert tune._saved_leftover("left", tmp_path, {**fp, "every_state": 2}) is None
     assert tune._saved_leftover("missing", tmp_path, fp) is None
+
+
+def test_fingerprint_includes_the_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(tune.storage, "load_table", lambda name, data_dir: pd.DataFrame({"a": [1, 2]}))
+    a = tune.fingerprint(["s"], tmp_path, "component")
+    b = tune.fingerprint(["s"], tmp_path, "lgbm")
+    assert a != b and b["model"] == "lgbm"
+
+
+def test_ml_model_predictions_come_from_the_oos_cache(tmp_path, monkeypatch):
+    log = pd.DataFrame(dict(season="2023-24", gameweek=[6, 7]))
+    monkeypatch.setattr(tune.storage, "load_table", lambda name, data_dir: log)
+    monkeypatch.setattr(tune, "snapshot", lambda log, season, gw, h: gw)
+    monkeypatch.setattr(tune, "make_component_predictor", lambda p: pytest.fail("component predictor ran"))
+    served = pd.DataFrame(dict(player_code=[1], gameweek=[3], total=[2.5]))
+    monkeypatch.setattr(tune, "_ml_predictor", lambda model, data_dir: lambda snap: served)
+    out = tune._predict_season(("2023-24", tmp_path, None, "lgbm"))
+    assert list(out["made_at"]) == [6, 7] and set(out["total"]) == {2.5}

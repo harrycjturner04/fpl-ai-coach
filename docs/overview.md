@@ -7,6 +7,7 @@ before the next begins.
 This page describes the system as a whole. The other methodology pages go into each part:
 
 - [Prediction model](prediction-model.md): expected points per player for the next five gameweeks.
+- [Machine-learning models](ml-model.md): the learned minutes and points models and how they were chosen.
 - [Optimiser](optimiser.md): the integer program that plans transfers, team and captain over five gameweeks.
 - [Validation](validation.md): how the predictions and the plans were tested on past seasons, and what the tests
   can and cannot show.
@@ -21,8 +22,10 @@ next, so each layer can be tested on its own.
 2. **Feature engineering** turns match history into inputs for the model: attack and defence ratings for every
    team, and each player's chance of playing and per-90-minute rates. Every feature is computed from matches before
    a cutoff time only, so a past gameweek can be replayed using only data from before its deadline.
-3. **Prediction** turns those features into expected FPL points per player for each of the next five gameweeks,
-   through FPL's own scoring rules.
+3. **Prediction** turns those features into expected FPL points per player for each of the next five gameweeks.
+   The default is the component model (FPL's own scoring rules applied to estimated goals, assists, clean sheets and
+   so on) with a learned LightGBM estimate of each player's minutes; LightGBM, Keras, GRU and stacked models are
+   available alongside and logged for comparison.
 4. **Optimisation** chooses the squad, transfers, starting XI and captain that maximise expected points over the
    next five gameweeks, subject to every FPL rule (budget, squad shape, club limit, formation, free transfers and
    hits). It knows nothing about how the predictions were made: it receives a table of numbers.
@@ -35,8 +38,8 @@ next, so each layer can be tested on its own.
 flowchart TD
     subgraph Layers
         I["1. Ingestion<br/>FPL API, manager state, past-season archive"]
-        F["2. Features<br/>team ratings, minutes, per-90 rates"]
-        P["3. Prediction<br/>expected points, next 5 gameweeks"]
+        F["2. Features<br/>team ratings, minutes, per-90 rates, ML feature table"]
+        P["3. Prediction<br/>component model + ML minutes (or LightGBM, Keras, stacked)<br/>expected points, next 5 gameweeks"]
         O["4. Optimisation<br/>5-week integer program"]
         R["5. Reasoning (planned)<br/>news, review, chips, write-up"]
         I --> F --> P --> O --> R
@@ -64,7 +67,7 @@ week before his team plays twice. The whole plan is solved again the following w
 | 3a. Prediction model | Built | Component model of expected points, walk-forward backtest, tuned parameters |
 | 3b. Multi-week optimiser | Built | Five-week plan, chips as what-ifs, season replay and tuned planning settings |
 | 4. Screenshot parsing | Dropped | Not needed: the team ID already gives squad, bank, free transfers and chips |
-| 5. Machine-learning prediction | Planned | Gradient-boosted model, validated walk-forward against the component model |
+| 5. Machine-learning prediction | Built | LightGBM minutes model (shipped default), LightGBM, Keras, GRU and stacked points models, validated walk-forward against the component model |
 | 6. Reasoning layer | Planned | News to risk flags, plan review, chip timing, written recommendation |
 | 7. Presentation | Planned | Dashboard |
 
