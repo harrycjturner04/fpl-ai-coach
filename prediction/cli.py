@@ -1,6 +1,6 @@
 """Live expected points for the next five gameweeks.
 
-    python -m prediction.cli [--position MID] [--top 20]
+    python -m prediction.cli [--model NAME] [--position MID] [--top 20]
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ from .component_model import ModelParams, predict
 
 PARAMS_FILE = "model_params"
 SHIPPED_PARAMS_PATH = Path(__file__).parent / "model_params.json"
+CANDIDATES = ("component", "ml-minutes", "lgbm", "keras", "gru", "stacked")
+SHIPPED_MODEL = "ml-minutes"   # chosen at Stage 5 checkpoint 3 (component model with LightGBM minutes)
 
 
 def load_live_params(data_dir: Path) -> ModelParams:
@@ -87,28 +89,70 @@ def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = Non
     }
 
 
-def run(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp | None = None) -> pd.DataFrame:
-    x = live_inputs(data_dir, horizon, now)
-    pred = predict(x["history"], x["players_now"], x["fixtures_ahead"], x["cutoff"], x["season"],
+def _component(x: dict, data_dir: Path) -> pd.DataFrame:
+    return predict(x["history"], x["players_now"], x["fixtures_ahead"], x["cutoff"], x["season"],
                    x["teams_in_season"], load_live_params(data_dir))
-    pred.insert(0, "player_id", pred["player_code"].map(x["code_to_id"]))
-    storage.save_table(pred, "predictions", data_dir)
-    _record_predictions(pred, storage.load_table("gameweeks", data_dir), x["season"], data_dir, x["cutoff"])
-    return pred
 
 
-def _record_predictions(pred: pd.DataFrame, gameweeks: pd.DataFrame, season: str, data_dir: Path,
-                        now: pd.Timestamp) -> pd.DataFrame | None:
-    """Save the per-gameweek predictions made for the next gameweek, keeping the latest record
-    before its deadline: the forward test of the model as the season is played."""
+def _before_deadline(gameweeks: pd.DataFrame, now: pd.Timestamp) -> int | None:
+    """The upcoming gameweek if its deadline has not passed, else None."""
     upcoming = gameweeks[gameweeks["is_next"]]
     if upcoming.empty or now >= upcoming["deadline_time"].iloc[0]:
         return None
+    return int(upcoming["id"].iloc[0])
+
+
+def _predict_candidates(names: list[str], chosen: str, x: dict, data_dir: Path) -> dict[str, pd.DataFrame]:
+    """Predictions per model. A failure in the chosen model stops the run; any other candidate is skipped with a warning."""
+    ml = [n for n in names if n != "component"]
+    if ml:
+        from . import walkforward   # imports Keras and LightGBM: only when an ML model is wanted
+        try:
+            walkforward.train_live(data_dir, x["cutoff"])
+        except Exception as err:   # noqa: BLE001
+            if chosen != "component":
+                raise
+            print(f"  warning: ML models not trained ({type(err).__name__}: {err})")
+    out = {}
+    for name in names:
+        try:
+            out[name] = _component(x, data_dir) if name == "component" else walkforward.predict_live(name, x, data_dir)
+        except Exception as err:   # noqa: BLE001
+            if name == chosen:
+                raise
+            print(f"  warning: {name} predictions skipped ({type(err).__name__}: {err})")
+    return out
+
+
+def run(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp | None = None,
+        model: str = SHIPPED_MODEL) -> pd.DataFrame:
+    """Predictions from `model`. Before the deadline every candidate is also logged for the forward test."""
+    x = live_inputs(data_dir, horizon, now)
+    gameweeks = storage.load_table("gameweeks", data_dir)
+    names = list(CANDIDATES) if _before_deadline(gameweeks, x["cutoff"]) else [model]
+    preds = _predict_candidates(names, model, x, data_dir)
+    for name, p in preds.items():
+        _record_predictions(p, name, gameweeks, x["season"], data_dir, x["cutoff"])
+    pred = preds[model].copy()
+    pred.insert(0, "player_id", pred["player_code"].map(x["code_to_id"]))
+    storage.save_table(pred, "predictions", data_dir)
+    return pred
+
+
+def _record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, season: str, data_dir: Path,
+                        now: pd.Timestamp) -> pd.DataFrame | None:
+    """Save the per-gameweek predictions of `model` made for the next gameweek, keeping the latest record
+    before its deadline: the forward test of the models as the season is played."""
+    made_for = _before_deadline(gameweeks, now)
+    if made_for is None:
+        return None
     totals = pred.groupby(["gameweek", "player_code"], as_index=False)["total"].sum()
-    new = totals.assign(season=season, made_for_gameweek=int(upcoming["id"].iloc[0]), recorded_at=now)
+    new = totals.assign(season=season, made_for_gameweek=made_for, recorded_at=now, model=model)
     old = storage.load_table_or_none("prediction_log", data_dir)
+    if old is not None and "model" not in old:
+        old = old.assign(model="component")   # rows logged before the model column existed
     log = new if old is None else pd.concat([old, new], ignore_index=True)
-    key = ["season", "made_for_gameweek", "gameweek", "player_code"]
+    key = ["season", "made_for_gameweek", "gameweek", "player_code", "model"]
     log = log.sort_values("recorded_at").drop_duplicates(key, keep="last")
     log = log[key + ["total", "recorded_at"]].reset_index(drop=True)
     storage.save_table(log, "prediction_log", data_dir)
@@ -128,14 +172,20 @@ def prediction_table(pred: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
     return info.join(table).join(nearest[["p60", "no_history"]])
 
 
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Expected points for the next five gameweeks.")
+    parser.add_argument("--model", choices=CANDIDATES, default=SHIPPED_MODEL,
+                        help=f"prediction model (default {SHIPPED_MODEL})")
+    parser.add_argument("--position", choices=["GKP", "DEF", "MID", "FWD"])
+    parser.add_argument("--top", type=int, default=20)
+    return parser
+
+
 def main(argv: list[str] | None = None) -> None:
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
-    parser = argparse.ArgumentParser(description="Expected points for the next five gameweeks.")
-    parser.add_argument("--position", choices=["GKP", "DEF", "MID", "FWD"])
-    parser.add_argument("--top", type=int, default=20)
-    args = parser.parse_args(argv)
-    pred = run()
+    args = _parser().parse_args(argv)
+    pred = run(model=args.model)
     players = storage.load_table("players").set_index("id")
     table = prediction_table(pred, players)
     if args.position:

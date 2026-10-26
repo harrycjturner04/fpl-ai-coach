@@ -408,3 +408,31 @@ def test_plan_is_not_logged_without_entry_or_with_placeholder(tmp_path, monkeypa
     _plan_run(tmp_path, monkeypatch, "2026-09-26T10:00Z")
     _plan_run(tmp_path, monkeypatch, "2026-09-26T10:00Z", entry_id=42, scorer="placeholder")
     assert storage.load_table_or_none("plan_log", tmp_path) is None
+
+
+def test_model_option_reaches_the_prediction_run(tmp_path, monkeypatch):
+    players = _write_data(tmp_path)
+    seen = {}
+
+    def fake(data_dir, **kw):
+        seen.update(kw)
+        return pd.DataFrame({"player_id": players["id"], "gameweek": 9, "total": 2.0})
+    monkeypatch.setattr("prediction.cli.run", fake)
+    cli.run(data_dir=tmp_path, scorer="component", model="lgbm")
+    assert seen["model"] == "lgbm"
+    cli.run(data_dir=tmp_path, scorer="component")
+    assert seen["model"] == "ml-minutes"                        # the shipped model is the default
+
+
+def test_main_accepts_the_model_choices_and_passes_the_choice_on(monkeypatch, capsys):
+    captured = {}
+    monkeypatch.setattr(cli, "ensure_fresh_data", lambda entry: "fresh")
+    monkeypatch.setattr(cli, "run", lambda *a, **kw: captured.update(kw) or (None, None))
+    monkeypatch.setattr(cli, "format_solution", lambda *a: "plan")
+    for name in ("component", "ml-minutes", "lgbm", "keras", "gru", "stacked"):
+        cli.main(["--model", name])
+        assert captured["model"] == name
+    cli.main([])
+    assert captured["model"] == "ml-minutes"
+    with pytest.raises(SystemExit):
+        cli.main(["--model", "nonsense"])

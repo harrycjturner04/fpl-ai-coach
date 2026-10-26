@@ -330,6 +330,21 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
     return pd.DataFrame(rows, columns=MATCH_COLUMNS)
 
 
+MARKET_COLUMNS = ["selected", "transfers_in", "transfers_out"]
+
+
+def fill_market_from_history(rows: pd.DataFrame, history: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+    """Fill the NaN market columns of live match rows (`event/{gw}/live` has none) from element-summary
+    history, matched on (player_code, fixture_id). Values already present are kept."""
+    h = history.assign(player_code=history["player_id"].map(players.set_index("id")["code"]))
+    h = h.drop_duplicates(["player_code", "fixture"]).set_index(["player_code", "fixture"])[MARKET_COLUMNS]
+    found = h.reindex(pd.MultiIndex.from_frame(rows[["player_code", "fixture_id"]]))
+    out = rows.copy()
+    for col in MARKET_COLUMNS:
+        out[col] = rows[col].fillna(pd.Series(found[col].to_numpy(), index=rows.index))
+    return out
+
+
 def current_gameweek(gw: pd.DataFrame) -> int | None:
     current = gw.loc[gw["is_current"], "id"]
     return int(current.iloc[0]) if not current.empty else None

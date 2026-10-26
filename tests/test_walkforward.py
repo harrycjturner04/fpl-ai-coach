@@ -90,3 +90,108 @@ def test_a_later_deadline_oos_row_does_not_change_an_earlier_snapshot():
 def test_training_table_keys_are_unique():
     table = _table()
     assert not table.duplicated(["season", "deadline_gw", "player_code", "fixture_id"]).any()
+
+
+# ---- live use ----
+from prediction import walkforward as wf
+
+
+class _Fake:
+    def __init__(self, v=1):
+        self.v = v
+
+
+def _live_files(tmp_path, through, n_gw=8):
+    from ingestion import storage
+    log = synthetic_log(n_gw=n_gw)
+    log = log[(log["season"] == "2023-24") & (log["gameweek"] <= through)]
+    first = log.groupby("gameweek")["kickoff"].min()
+    gws = pd.DataFrame({"id": range(1, n_gw + 1),
+                        "deadline_time": [pd.Timestamp("2023-08-12", tz="UTC") + pd.Timedelta(days=7 * g) for g in range(1, n_gw + 1)],
+                        "finished": [g <= through for g in range(1, n_gw + 1)]})
+    storage.save_table(log, "match_log", tmp_path)
+    storage.save_table(gws, "gameweeks", tmp_path)
+    return first
+
+
+def test_train_live_trains_when_nothing_is_saved_then_only_every_retrain_every_gameweeks(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(wf, "_fit_models", lambda *a: calls.append(1) or {"minutes": _Fake(3)})
+    first = _live_files(tmp_path, through=4)
+    folder = wf.train_live(tmp_path, pd.Timestamp("2023-10-01", tz="UTC"))
+    assert calls == [1] and folder.parent == tmp_path / "models" and folder.name == str(first[4].date())
+    assert (folder / "meta.json").exists() and wf._load_models(tmp_path)["minutes"].v == 3
+    _live_files(tmp_path, through=4 + wf.RETRAIN_EVERY - 1)         # one gameweek short of the cadence
+    assert wf.train_live(tmp_path, pd.Timestamp("2023-10-01", tz="UTC")) == folder and calls == [1]
+    first = _live_files(tmp_path, through=4 + wf.RETRAIN_EVERY)
+    new = wf.train_live(tmp_path, pd.Timestamp("2023-12-01", tz="UTC"))
+    assert calls == [1, 1] and new != folder and new.name == str(first[8].date())
+    assert wf._load_models(tmp_path) is not None and (folder / "meta.json").exists()   # the older folder is kept
+
+
+def test_saved_models_predict_the_same_after_a_reload(tmp_path):
+    from features.ml_features import FEATURE_COLUMNS
+    from prediction.minutes_model import LgbmMinutes
+    from prediction.ml_gru import GruPoints
+    from prediction.ml_points import KerasPoints, LgbmPoints
+    t = _table().reset_index(drop=True)
+    X, cls, order = t[FEATURE_COLUMNS], np.arange(len(t)) % 3, t["kickoff"]
+    y = np.random.default_rng(0).normal(3, 2, len(t))
+    seq = np.random.default_rng(1).normal(size=(len(t), 10, 11)).astype(np.float32)
+    seq[..., -1] = 1
+    small = dict(epochs=2, seeds=(0,))
+    fitted = {"minutes": LgbmMinutes({"n_estimators": 20}).fit(X, cls, order),
+              "lgbm": LgbmPoints({"n_estimators": 20}).fit(X, cls, y, order),
+              "keras": KerasPoints(small).fit(X, cls, y, order),
+              "gru": GruPoints(small | {"units": 4}).fit(X, seq, cls, y, order)}
+    folder = tmp_path / "m"
+    folder.mkdir()
+    for name, model in fitted.items():
+        wf._save(model, folder, name)
+    for name, model in fitted.items():
+        loaded = wf._load(type(model), folder, name)
+        args = (X, seq) if name == "gru" else (X,)
+        pred = model.predict_proba(X) if name == "minutes" else model.predict(*args)
+        again = loaded.predict_proba(X) if name == "minutes" else loaded.predict(*args)
+        np.testing.assert_allclose(again, pred, rtol=1e-4, atol=1e-4)
+
+
+class _FakeMinutes:
+    def predict_proba(self, X):
+        return np.tile([0.1, 0.2, 0.7], (len(X), 1))
+
+
+class _FakePoints:
+    def predict(self, X, seq=None):
+        return np.tile([1.0, 5.0], (len(X), 1))
+
+
+def _live_inputs(flagged_chance):
+    from prediction.backtest import snapshot
+    snap = snapshot(synthetic_log(), "2023-24", 3)
+    players = snap.players_now.assign(chance=np.where(snap.players_now["player_code"] == 100, flagged_chance, np.nan))
+    return {"history": snap.history, "players_now": players, "fixtures_ahead": snap.fixtures_ahead,
+            "cutoff": snap.cutoff - pd.Timedelta(days=1), "season": "2023-24",
+            "teams_in_season": snap.teams_in_season}
+
+
+@pytest.mark.parametrize("model", ["component", "ml-minutes", "lgbm", "keras", "gru", "stacked"])
+def test_a_player_with_zero_chance_scores_zero_next_gameweek_in_every_model(model, tmp_path, monkeypatch):
+    monkeypatch.setattr(wf, "_load_models", lambda d: {"minutes": _FakeMinutes(), "lgbm": _FakePoints(),
+                                                       "keras": _FakePoints(), "gru": _FakePoints()})
+    monkeypatch.setattr(wf, "_stack_weights", lambda inputs, d: {p: np.array([0.5, 0.3, 0.2]) for p in ("GKP", "DEF", "MID", "FWD")})
+    x = _live_inputs(flagged_chance=0)
+    pred = wf.predict_live(model, x, tmp_path)
+    first = pred["gameweek"].min()
+    now = pred[pred["gameweek"] == first]
+    assert now.loc[now.player_code == 100, "total"].abs().max() < 1e-9
+    assert (now.loc[now.player_code != 100, "total"] > 0).all()
+    later = pred[(pred["gameweek"] > first) & (pred.player_code == 100)]
+    assert (later["total"] > 0).all()                                  # the flag fades with the horizon
+    assert {"player_code", "gameweek", "fixture_id", "total", "p60", "no_history"} <= set(pred.columns)
+
+
+def test_ml_points_total_is_the_minutes_mixture_of_the_two_point_values(tmp_path, monkeypatch):
+    monkeypatch.setattr(wf, "_load_models", lambda d: {"minutes": _FakeMinutes(), "lgbm": _FakePoints()})
+    pred = wf.predict_live("lgbm", _live_inputs(flagged_chance=np.nan), tmp_path)
+    assert pred["total"].to_numpy() == pytest.approx(0.2 * 1.0 + 0.7 * 5.0)

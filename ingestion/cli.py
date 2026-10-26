@@ -63,6 +63,12 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     _record_market(tables, data_dir, pd.Timestamp(metadata["pulled_at"]), bootstrap["total_players"])
 
     current_rows = _update_current_season(client, tables, data_dir)
+    stored_history = tables.get("player_history")
+    if stored_history is None:
+        stored_history = storage.load_table_or_none("player_history", data_dir)
+    if (stored_history is not None and set(transform.MARKET_COLUMNS) <= set(stored_history.columns)
+            and not current_rows.empty):  # a history table saved before these columns existed is skipped
+        current_rows = transform.fill_market_from_history(current_rows, stored_history, tables["players"])
     storage.save_table(current_rows, "current_season_rows", data_dir)
     archive = storage.load_table_or_none("archive_match_log", data_dir)
     if archive is None:

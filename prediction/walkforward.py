@@ -8,23 +8,26 @@ import io
 import inspect
 import itertools
 import json
+import pickle
 import time
 import warnings
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
+import lightgbm as lgb
 import numpy as np
 import pandas as pd
 
-from features.ml_features import FEATURE_COLUMNS
-from features.ml_sequences import deadline_sequences, row_sequences
-from ingestion import storage
+from features.ml_features import FEATURE_COLUMNS, build_features
+from features.ml_sequences import deadline_sequences, row_sequences, sequence_features
+from ingestion import storage, transform
+from prediction import backtest
 from prediction.backtest import Predictor, build_predictors, load_params, run_backtest, snapshot
-from prediction.cli import SHIPPED_PARAMS_PATH
+from prediction.cli import SHIPPED_PARAMS_PATH, _component, load_live_params
 from prediction.component_model import per_gameweek, predict
 from prediction.ml_report import build_report
 from prediction.minutes_model import MINUTES_MODELS
-from prediction.ml_data import labelled, minutes_class, target_points
+from prediction.ml_data import _season_rows, labelled, minutes_class, target_points
 from prediction.ml_gru import GruPoints
 from prediction.ml_points import POINTS_MODELS, expected_points
 from prediction.stacker import KEYS as STACK_KEYS, MEMBERS, deadline_weights, stacked_oos, wide_table
@@ -149,6 +152,12 @@ def run_points(table, kind: str, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS
     return pd.concat(out, ignore_index=True)
 
 
+def _read_sequences(path: Path) -> dict:
+    with np.load(path) as z:
+        return {(k.split("|")[0], int(k.split("|")[1])): (z[k + "|codes"], z[k + "|seq"])
+                for k in {k.rsplit("|", 1)[0] for k in z.files}}
+
+
 def sequences(match_log, table, data_dir: Path = storage.DATA_DIR, fresh: bool = False):
     """Per-deadline player sequences, cached as one npz keyed by (season, deadline_gw)."""
     path, fp = data_dir / "processed" / "ml_sequences.npz", dict(
@@ -156,9 +165,7 @@ def sequences(match_log, table, data_dir: Path = storage.DATA_DIR, fresh: bool =
         code_sha256=hashlib.sha256((Path(__file__).parent.parent / "features" / "ml_sequences.py").read_bytes()).hexdigest())
     fp = json.loads(json.dumps(fp, default=str))
     if not fresh and path.exists() and storage.load_json_or_none("ml_sequences_meta", data_dir) == fp:
-        with np.load(path) as z:
-            return {(k.split("|")[0], int(k.split("|")[1])): (z[k + "|codes"], z[k + "|seq"])
-                    for k in {k.rsplit("|", 1)[0] for k in z.files}}
+        return _read_sequences(path)
     store = deadline_sequences(match_log, table)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(path, **{f"{s}|{g}|{part}": a for (s, g), (c, q) in store.items() for part, a in (("codes", c), ("seq", q))})
@@ -459,6 +466,234 @@ def stacker_report(per_gw: pd.DataFrame, kind, seasons, workers, data_dir: Path 
     h0 = per_gw[per_gw["horizon"] == 0]
     print("\nhorizon-0 RMSE per season (mean over gameweeks of the per-gameweek RMSE):")
     print(h0.groupby(["model", "season"])["rmse"].mean().unstack().round(3).to_string())
+
+
+# ---- live use: train on everything played, predict the coming gameweeks ----
+MODELS_FOLDER = "models"
+MODEL_CLASSES = {"minutes": MINUTES_MODELS["lgbm"], **POINTS_MODELS, "gru": GruPoints}
+
+
+class _Booster:
+    """A saved LightGBM booster behind the predict calls the model classes make."""
+    def __init__(self, path: Path):
+        self.booster = lgb.Booster(model_file=str(path))
+
+    def predict_proba(self, X):
+        return self.booster.predict(X)
+
+    def predict(self, X):
+        return self.booster.predict(X)
+
+
+def _save(model, folder: Path, name: str) -> None:
+    """LightGBM booster as text, Keras models as .keras, everything else (categories, preprocessors) pickled."""
+    state = {k: v for k, v in vars(model).items() if k not in ("model", "models")}
+    (folder / f"{name}.pkl").write_bytes(pickle.dumps(state))
+    if hasattr(model, "model"):
+        model.model.booster_.save_model(str(folder / f"{name}.txt"))
+    for i, m in enumerate(getattr(model, "models", [])):
+        m.save(folder / f"{name}_{i}.keras")
+
+
+def _load(cls, folder: Path, name: str):
+    import keras
+    model = cls.__new__(cls)
+    vars(model).update(pickle.loads((folder / f"{name}.pkl").read_bytes()))
+    if (folder / f"{name}.txt").exists():
+        model.model = _Booster(folder / f"{name}.txt")
+    nets = sorted(folder.glob(f"{name}_*.keras"))
+    if nets:
+        model.models = [keras.saving.load_model(p) for p in nets]
+    return model
+
+
+def _latest_models(data_dir: Path) -> tuple[Path, dict] | None:
+    """(folder, meta) of the saved models covering the most gameweeks."""
+    found = [(m.parent, json.loads(m.read_text())) for m in (data_dir / MODELS_FOLDER).glob("*/meta.json")]
+    return max(found, key=lambda fm: (fm[1]["season"], fm[1]["through_gameweek"]), default=None)
+
+
+def _load_models(data_dir: Path) -> dict:
+    saved = _latest_models(data_dir)
+    if saved is None:
+        raise FileNotFoundError(f"no saved models in {data_dir / MODELS_FOLDER}: run train_live")
+    folder, meta = saved
+    return {name: _load(MODEL_CLASSES[name], folder, name) for name in meta["models"]}
+
+
+def _last_finished(gameweeks: pd.DataFrame, match_log: pd.DataFrame, season: str) -> tuple[int, pd.Timestamp]:
+    """(last finished gameweek, kickoff of its first match); (0, latest kickoff) before any has finished."""
+    done = gameweeks.loc[gameweeks["finished"], "id"]
+    if done.empty:
+        return 0, match_log["kickoff"].max()
+    through = int(done.max())
+    return through, match_log.loc[(match_log["season"] == season) & (match_log["gameweek"] == through), "kickoff"].min()
+
+
+def _live_table(match_log: pd.DataFrame, season: str, data_dir: Path) -> pd.DataFrame:
+    """Training table: the cached past seasons (their features never change) plus this season rebuilt, in memory only."""
+    base = storage.load_table_or_none("ml_training_table", data_dir)
+    past = set(match_log["season"]) - {season}
+    if base is None or not past <= set(base["season"]):
+        raise RuntimeError("The training table lacks past seasons: run python -m prediction.ml_data first.")
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        current = _season_rows((match_log, season, 1, load_params(str(SHIPPED_PARAMS_PATH)).team))
+    return pd.concat([base[base["season"] != season], current], ignore_index=True)
+
+
+def _fit_models(match_log: pd.DataFrame, season: str, data_dir: Path, now: pd.Timestamp) -> dict:
+    """The LightGBM minutes model (required) and each points model (skipped with a warning if it fails)."""
+    table = _live_table(match_log, season, data_dir)
+    train = labelled(table, now)
+    X, order = train[FEATURE_COLUMNS], train["kickoff"]
+    cls, y = minutes_class(train["t_minutes"]), target_points(train, season).to_numpy()
+    t0 = time.time()
+    models = {"minutes": MINUTES_MODELS["lgbm"](_minutes_params("lgbm")).fit(X, cls, order)}
+    print(f"trained minutes ({time.time() - t0:.0f}s)", flush=True)
+    for kind in ("lgbm", "keras", "gru"):
+        t0 = time.time()
+        try:
+            if kind == "gru":
+                past = _read_sequences(data_dir / "processed" / "ml_sequences.npz")
+                store = {k: v for k, v in past.items() if k[0] != season} | deadline_sequences(
+                    match_log, table[table["season"] == season])
+                models[kind] = GruPoints(_ml_params("points", kind)).fit(X, row_sequences(train, store), cls, y, order)
+            else:
+                models[kind] = POINTS_MODELS[kind](_ml_params("points", kind)).fit(X, cls, y, order)
+        except Exception as err:   # noqa: BLE001
+            print(f"  warning: {kind} points model not trained ({type(err).__name__}: {err})")
+        else:
+            print(f"trained {kind} ({time.time() - t0:.0f}s)", flush=True)
+    return models
+
+
+def train_live(data_dir: Path = storage.DATA_DIR, now: pd.Timestamp | None = None) -> Path:
+    """Fit the live models on every labelled row before `now` and save them under models/<date of the last
+    finished gameweek's first match>/. Existing models are reused until RETRAIN_EVERY more gameweeks have finished."""
+    now = now or pd.Timestamp.now(tz="UTC")
+    match_log, gameweeks = storage.load_table("match_log", data_dir), storage.load_table("gameweeks", data_dir)
+    season = transform.season_label(gameweeks)
+    through, date = _last_finished(gameweeks, match_log, season)
+    saved = _latest_models(data_dir)
+    if saved and saved[1]["season"] == season and through - saved[1]["through_gameweek"] < RETRAIN_EVERY:
+        return saved[0]
+    models = _fit_models(match_log, season, data_dir, now)
+    folder = data_dir / MODELS_FOLDER / str(date.date())
+    folder.mkdir(parents=True, exist_ok=True)
+    for name, model in models.items():
+        _save(model, folder, name)
+    (folder / "meta.json").write_text(json.dumps({"season": season, "through_gameweek": through,
+                                                  "models": list(models), "trained_at": str(now)}))
+    print(f"live models saved to {folder} (through GW{through}): {', '.join(models)}", flush=True)
+    return folder
+
+
+def _shared(inputs: dict, key, compute):
+    cache = inputs.setdefault("_cache", {})
+    if key not in cache:
+        cache[key] = compute()
+    return cache[key]
+
+
+def _live_models(inputs: dict, data_dir: Path) -> dict:
+    return _shared(inputs, "models", lambda: _load_models(data_dir))
+
+
+def _live_minutes(inputs: dict, data_dir: Path) -> pd.DataFrame:
+    """Features for every player and fixture ahead, with the unflagged minutes-class probabilities p0, p1, p2."""
+    def compute():
+        fx, history = inputs["fixtures_ahead"], inputs["history"]
+        first = fx.loc[fx["gameweek"] == fx["gameweek"].min(), "kickoff"].min()
+        cutoff = first if pd.notna(first) else inputs["cutoff"]       # as in training: the gameweek's first kickoff
+        snap = backtest.Snapshot(inputs["season"], int(fx["gameweek"].min()), cutoff,
+                                 history[history["kickoff"] < cutoff], inputs["players_now"], fx,
+                                 inputs["teams_in_season"], pd.Series(dtype=float))
+        feats = build_features(snap, load_params(str(SHIPPED_PARAMS_PATH)).team)
+        p = _live_models(inputs, data_dir)["minutes"].predict_proba(feats[FEATURE_COLUMNS])
+        return feats.assign(p0=p[:, 0], p1=p[:, 1], p2=p[:, 2], cutoff=cutoff)
+    return _shared(inputs, "minutes", compute)
+
+
+def _live_points(kind: str, inputs: dict, data_dir: Path) -> pd.DataFrame:
+    m = _live_minutes(inputs, data_dir)
+    model, X = _live_models(inputs, data_dir)[kind], m[FEATURE_COLUMNS]
+    if kind == "gru":
+        gw, codes = int(inputs["fixtures_ahead"]["gameweek"].min()), np.sort(m["player_code"].unique())
+        store = {(inputs["season"], gw): (codes, sequence_features(inputs["history"], codes, m["cutoff"].iloc[0]))}
+        pts = model.predict(X, row_sequences(m.assign(season=inputs["season"], deadline_gw=gw), store))
+    else:
+        pts = model.predict(X)
+    chance = m["player_code"].map(inputs["players_now"].set_index("player_code")["chance"]).fillna(100) / 100
+    available = 1 - (1 - chance) * load_live_params(data_dir).flag_fade ** m["horizon"]
+    p = m[["p0", "p1", "p2"]].to_numpy().copy()
+    p[:, 1:] *= available.to_numpy()[:, None]
+    p[:, 0] = 1 - p[:, 1:].sum(axis=1)
+    return m[["player_code", "gameweek", "fixture_id", "horizon"]].assign(
+        p60=p[:, 2], psub=p[:, 1], no_history=m["new_to_league"] > 0, total=expected_points(p, pts))
+
+
+def _live_wide(match_log: pd.DataFrame, season: str, data_dir: Path) -> pd.DataFrame | None:
+    """Logged live member predictions for finished gameweeks, scored against the realised points."""
+    log = storage.load_table_or_none("prediction_log", data_dir)
+    if log is None or "model" not in log:
+        return None
+    through, _ = _last_finished(storage.load_table("gameweeks", data_dir), match_log, season)
+    log = log[(log["season"] == season) & log["model"].isin(MEMBERS) & (log["gameweek"] <= through)]
+    wide = log.pivot_table(index=["season", "made_for_gameweek", "gameweek", "player_code"], columns="model", values="total")
+    if not set(MEMBERS) <= set(wide.columns):
+        return None
+    wide = wide.dropna().reset_index().rename(columns={"made_for_gameweek": "deadline_gw"}).rename_axis(columns=None)
+    cur = match_log[match_log["season"] == season]
+    actual = cur.groupby(["gameweek", "player_code"], as_index=False)["points"].sum().rename(columns={"points": "actual"})
+    position = cur.sort_values("kickoff").drop_duplicates("player_code", keep="last")[["player_code", "position"]]
+    wide = wide.merge(actual, on=["gameweek", "player_code"], how="left").merge(position, on="player_code")
+    return wide.assign(actual=wide["actual"].fillna(0.0))
+
+
+def _stack_weights(inputs: dict, data_dir: Path) -> dict[str, np.ndarray]:
+    """Per-position stacker weights from every cached out-of-sample row plus the scored live log rows."""
+    match_log, season = inputs["history"], inputs["season"]
+    table = pd.read_parquet(data_dir / "processed" / "ml_training_table.parquet",
+                            columns=["season", "deadline_gw", "player_code", "position"])
+    oos_points = {m: pd.concat([storage.load_table(f"ml_oos_points_{m}_{s}", data_dir) for s in TEST_SEASONS],
+                               ignore_index=True) for m in MEMBERS if m != "ml-minutes"}
+    frames, actuals, positions = stack_inputs(match_log, table, storage.load_table("ml_oos_ml_minutes_totals", data_dir),
+                                              oos_points)
+    wide = [wide_table(frames, actuals, positions), _live_wide(match_log, season, data_dir)]
+    return deadline_weights(pd.concat([w for w in wide if w is not None], ignore_index=True), list(MEMBERS), season,
+                            int(inputs["fixtures_ahead"]["gameweek"].min()))
+
+
+def _live_stacked(inputs: dict, data_dir: Path) -> pd.DataFrame:
+    keys = ["player_code", "gameweek", "fixture_id"]
+    out = predict_live("ml-minutes", inputs, data_dir)[keys + ["horizon", "p60", "psub", "no_history"]]
+    for member in MEMBERS:
+        out = out.merge(predict_live(member, inputs, data_dir)[keys + ["total"]].rename(columns={"total": member}),
+                        on=keys, how="left", validate="one_to_one")
+    if out[list(MEMBERS)].isna().any(axis=None):
+        raise ValueError("a stacked member has no prediction for some player and fixture")
+    weights = _stack_weights(inputs, data_dir)
+    position = out["player_code"].map(inputs["players_now"].set_index("player_code")["position"])
+    w = np.vstack([weights[p] for p in position])
+    return out.assign(total=(out[list(MEMBERS)].to_numpy() * w).sum(axis=1)).drop(columns=list(MEMBERS))
+
+
+def predict_live(model: str, inputs: dict, data_dir: Path = storage.DATA_DIR) -> pd.DataFrame:
+    """Per-fixture predictions in the component model's output shape. `inputs` is prediction.cli.live_inputs;
+    work shared between models is cached in it."""
+    def compute():
+        if model == "component":
+            return _component(inputs, data_dir)
+        if model == "ml-minutes":
+            m = _live_minutes(inputs, data_dir)
+            sup = m[["player_code", "fixture_id"]].assign(p60=m["p2"], psub=m["p1"])
+            return predict(inputs["history"], inputs["players_now"], inputs["fixtures_ahead"], inputs["cutoff"],
+                           inputs["season"], inputs["teams_in_season"], load_live_params(data_dir), minutes=sup)
+        if model == "stacked":
+            return _live_stacked(inputs, data_dir)
+        return _live_points(model, inputs, data_dir)
+    return _shared(inputs, ("pred", model), compute)
 
 
 def main():

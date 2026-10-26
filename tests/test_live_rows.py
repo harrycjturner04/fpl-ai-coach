@@ -120,3 +120,18 @@ def test_single_fixture_row_has_bps_ict_and_nan_market_columns():
     row = live_match_rows(live, 6, fixtures, PLAYERS, TEAMS, "2026-27").set_index("player_code").loc[100]
     assert row["bps"] == 20 and row["influence"] == 31.2
     assert np.isnan(row["selected"]) and np.isnan(row["transfers_in"]) and np.isnan(row["transfers_out"])
+
+
+def test_market_columns_are_filled_from_player_history_without_overwriting():
+    from ingestion.transform import fill_market_from_history
+    rows = pd.DataFrame({"player_code": [100, 100, 200, 300], "fixture_id": [1, 2, 1, 1],
+                         "selected": [np.nan, 7.0, np.nan, np.nan],
+                         "transfers_in": [np.nan, 1.0, np.nan, np.nan],
+                         "transfers_out": [np.nan, 2.0, np.nan, np.nan]})
+    history = pd.DataFrame({"player_id": [10, 10, 20], "fixture": [1, 2, 1], "selected": [500, 600, 900],
+                            "transfers_in": [5, 6, 9], "transfers_out": [1, 2, 3]})
+    players = pd.DataFrame({"id": [10, 20], "code": [100, 200]})
+    out = fill_market_from_history(rows, history, players)
+    assert out["selected"].tolist()[:3] == [500, 7, 900]            # an existing value is kept
+    assert out["transfers_in"].tolist()[:3] == [5, 1, 9] and out["transfers_out"].tolist()[:3] == [1, 2, 3]
+    assert out.loc[3, ["selected", "transfers_in", "transfers_out"]].isna().all()   # no history row: stays NaN
