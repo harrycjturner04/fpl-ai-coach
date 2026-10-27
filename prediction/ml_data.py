@@ -10,9 +10,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from features import ml_features
+from features import ml_features, team_ratings
 from features.ml_features import build_features
 from ingestion import storage
+from prediction import backtest
 from prediction.backtest import WARM_UP_GAMEWEEKS, load_params, snapshot
 from prediction.cli import SHIPPED_PARAMS_PATH
 from prediction.scoring import points_from_stats, rules_for_season
@@ -40,6 +41,14 @@ def deadline_rows(match_log: pd.DataFrame, season: str, gw: int, team_params) ->
             .assign(season=season, deadline_gw=gw, cutoff=snap.cutoff))
 
 
+def content_sha256(df: pd.DataFrame, keys: list[str]) -> str:
+    """sha256 of the rows (sorted by `keys`, columns by name, numbers as float64 so that a dtype widening, such as
+    integers becoming floats when another season brings NaN, is not a change)."""
+    d = df[sorted(df.columns)].sort_values(keys)
+    d = d.astype(dict.fromkeys(d.select_dtypes("number").columns, "float64"))
+    return hashlib.sha256(pd.util.hash_pandas_object(d, index=False).to_numpy().tobytes()).hexdigest()
+
+
 def _season_rows(args) -> pd.DataFrame:
     match_log, season, first_gw, team_params = args
     gws = sorted(match_log.loc[match_log["season"] == season, "gameweek"].unique())
@@ -50,9 +59,9 @@ def _season_rows(args) -> pd.DataFrame:
 
 
 def _code_hash() -> str:
-    """Hash of the feature code and this file, so the cache is rebuilt when either changes."""
+    """Hash of the code the table is built with: features, team ratings, snapshot and market (backtest) and this file."""
     h = hashlib.sha256()
-    for f in (ml_features.__file__, __file__):
+    for f in (ml_features.__file__, team_ratings.__file__, backtest.__file__, __file__):
         h.update(Path(f).read_bytes())
     return h.hexdigest()
 
@@ -60,7 +69,7 @@ def _code_hash() -> str:
 def training_table(match_log: pd.DataFrame, seasons: list[str], workers: int = 8,
                    data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
     fp = dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
-              match_log_rows=len(match_log), code_sha256=_code_hash(), seasons=sorted(seasons), feature_version=FEATURE_VERSION)
+              match_log_sha256=content_sha256(match_log, ["season", "player_code", "fixture_id"]), code_sha256=_code_hash(), seasons=sorted(seasons), feature_version=FEATURE_VERSION)
     if not fresh and storage.load_json_or_none(f"{NAME}_meta", data_dir) == fp:
         return storage.load_table(NAME, data_dir)
     team_params = load_params(str(SHIPPED_PARAMS_PATH)).team
@@ -86,5 +95,6 @@ def labelled(table: pd.DataFrame, cutoff) -> pd.DataFrame:
 if __name__ == "__main__":
     import time
     t0 = time.time()
-    t = training_table(storage.load_table("match_log"), ["2022-23", "2023-24", "2024-25", "2025-26", "2026-27"])
+    log = storage.load_table("match_log")
+    t = training_table(log, sorted(log["season"].unique()))
     print(t.shape, t.memory_usage().sum() / 1e6, "MB", round(time.time() - t0), "s")

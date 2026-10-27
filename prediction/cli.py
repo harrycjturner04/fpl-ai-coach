@@ -72,13 +72,17 @@ def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = Non
     ahead = fixtures[(fixtures["event"] >= next_gw) & (fixtures["event"] < next_gw + horizon)]
     selectable = players[players["can_select"].fillna(True).astype(bool)]
     season = transform.season_label(gameweeks)
+    players_now = pd.DataFrame({
+        "player_code": selectable["code"], "team_code": selectable["team"].map(code_of),
+        "position": selectable["position"], "price": selectable["price"],
+        "chance": selectable["chance_of_playing_next_round"]}).reset_index(drop=True).merge(
+        _live_market(selectable, next_gw, season, data_dir), on="player_code", how="left")
+    if players_now["net_transfers"].isna().all():
+        print("  warning: net transfers unknown for every player (no market_log row for this season): "
+              "run python -m ingestion.cli before the deadline")
     return {
         "history": history,
-        "players_now": pd.DataFrame({
-            "player_code": selectable["code"], "team_code": selectable["team"].map(code_of),
-            "position": selectable["position"], "price": selectable["price"],
-            "chance": selectable["chance_of_playing_next_round"]}).reset_index(drop=True)
-        .merge(_live_market(selectable, next_gw, season, data_dir), on="player_code", how="left"),
+        "players_now": players_now,
         "fixtures_ahead": pd.DataFrame({
             "gameweek": ahead["event"].astype(int), "fixture_id": ahead["id"], "kickoff": ahead["kickoff_time"],
             "home_code": ahead["team_h"].map(code_of), "away_code": ahead["team_a"].map(code_of)}),
@@ -111,7 +115,8 @@ def _predict_candidates(names: list[str], chosen: str, x: dict, data_dir: Path) 
             walkforward.train_live(data_dir, x["cutoff"])
         except Exception as err:   # noqa: BLE001
             if chosen != "component":
-                raise
+                raise RuntimeError(f"ML models not trained ({type(err).__name__}: {err}); "
+                                   "rerun with --model component to use the component model") from err
             print(f"  warning: ML models not trained ({type(err).__name__}: {err}); ML candidates skipped")
             names = ["component"]   # never predict from models that are out of date
     out = {}
@@ -119,8 +124,11 @@ def _predict_candidates(names: list[str], chosen: str, x: dict, data_dir: Path) 
         try:
             out[name] = _component(x, data_dir) if name == "component" else walkforward.predict_live(name, x, data_dir)
         except Exception as err:   # noqa: BLE001
-            if name == chosen:
+            if name == chosen == "component":
                 raise
+            if name == chosen:
+                raise RuntimeError(f"{name} predictions failed ({type(err).__name__}: {err}); "
+                                   "rerun with --model component to use the component model") from err
             print(f"  warning: {name} predictions skipped ({type(err).__name__}: {err})")
     return out
 

@@ -26,6 +26,12 @@ held-out prediction result (2025/26, from Stage 3a) are on the [prediction model
 page. In short: across all four seasons the model beats form at every horizon from one to five gameweeks ahead, on
 both error and ranking, but those figures are in-sample because the same seasons were used to tune it.
 
+One caveat applies to every model and benchmark alike: at a past deadline, the gameweeks two to five ahead
+(horizons 1 to 4) use the fixtures as they were finally played, so postponements and rescheduled double and blank
+gameweeks are already known. Accuracy at those horizons, and the horizon-weighted objective J, are therefore slightly
+optimistic; the next gameweek (horizon 0) is essentially unaffected. The machine-learning models are compared the same
+way on the [machine-learning models](ml-model.md) page.
+
 ## Season replay (planning)
 
 The replay plays each past season as a simulated manager would:

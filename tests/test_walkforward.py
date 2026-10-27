@@ -198,23 +198,6 @@ def test_ml_points_total_is_the_minutes_mixture_of_the_two_point_values(tmp_path
     assert pred["total"].to_numpy() == pytest.approx(0.2 * 1.0 + 0.7 * 5.0)
 
 
-def test_missing_kinds_are_retrained_on_the_next_run_without_waiting(tmp_path, monkeypatch):
-    asked = []
-
-    def fit(match_log, season, data_dir, now, kinds):
-        asked.append(list(kinds))
-        return {k: _Fake(1) for k in kinds if k != "gru" or len(asked) > 1}      # gru fails the first time
-    monkeypatch.setattr(wf, "_fit_models", fit)
-    _live_files(tmp_path, through=4)
-    now = pd.Timestamp("2023-10-01", tz="UTC")
-    folder = wf.train_live(tmp_path, now)
-    assert asked == [list(wf.ALL_KINDS)] and "gru" not in json.loads((folder / "meta.json").read_text())["models"]
-    assert wf.train_live(tmp_path, now) == folder and asked[1] == ["gru"]
-    assert json.loads((folder / "meta.json").read_text())["models"].count("gru") == 1
-    wf.train_live(tmp_path, now)
-    assert len(asked) == 2                                             # complete: nothing left to retrain
-
-
 def test_models_from_another_season_or_too_old_are_refused(tmp_path, monkeypatch):
     monkeypatch.setattr(wf, "_fit_models", lambda *a: {k: _Fake(1) for k in wf.ALL_KINDS})
     _live_files(tmp_path, through=2)
@@ -302,3 +285,99 @@ def test_stack_weights_add_the_scored_live_rows_to_the_oos_rows(tmp_path, monkey
     _stack_files(tmp_path, monkeypatch, with_live=True)
     with_live = wf._stack_weights(x, tmp_path)
     assert all(w[1] < 0.95 for w in with_live.values())          # lgbm over-predicted live: its weight falls
+
+
+# ---- stale or partial caches ----
+def _built(log, season):
+    from prediction.ml_data import _season_rows
+    return _season_rows((log, season, 6 if season == log["season"].min() else 1, TeamParams()))
+
+
+def _sorted(t):
+    return t[sorted(t.columns)].sort_values(wf.KEYS).reset_index(drop=True)
+
+
+def test_live_table_rebuilds_a_past_season_whose_cached_tail_is_missing(tmp_path, monkeypatch):
+    from ingestion import storage
+    log = synthetic_log(n_gw=8)
+    early = log[(log["season"] == "2022-23") | (log["gameweek"] <= 4)]          # cached when 2023-24 was at GW4
+    storage.save_table(pd.concat([_built(log, "2022-23"), _built(early, "2023-24")], ignore_index=True),
+                       "ml_training_table", tmp_path)
+    monkeypatch.setattr(wf, "load_params", lambda path: type("P", (), {"team": TeamParams()})())
+    table = wf._live_table(log, "2024-25", tmp_path)
+    got = table[table["season"] == "2023-24"]
+    assert set(got["deadline_gw"]) == set(range(1, 9))
+    pd.testing.assert_frame_equal(_sorted(got), _sorted(_built(log, "2023-24")), check_dtype=False)
+    pd.testing.assert_frame_equal(_sorted(table[table["season"] == "2022-23"]), _sorted(_built(log, "2022-23")),
+                                  check_dtype=False)
+
+
+def test_live_sequences_rebuild_a_past_season_missing_deadlines(tmp_path):
+    log = synthetic_log(n_gw=8)
+    table = pd.concat([_built(log, "2022-23"), _built(log, "2023-24")], ignore_index=True)
+    wf.sequences(log, table[(table["season"] == "2022-23") | (table["deadline_gw"] <= 4)], tmp_path)   # partial cache
+    store = wf._live_sequences(log, table, "2024-25", tmp_path)
+    assert set(store) == set(zip(table["season"], table["deadline_gw"]))
+    rows = wf.row_sequences(table, store)                        # every row finds its player's sequence
+    assert rows.shape[0] == len(table)
+    full = wf.deadline_sequences(log, table)
+    assert all(np.array_equal(store[k][1], full[k][1]) for k in full)
+
+
+def test_growth_of_a_later_season_keeps_an_oos_cache_but_a_past_change_does_not(tmp_path, monkeypatch):
+    table = _table()
+    run_minutes(table, "lgbm", seasons=("2023-24",), params={"n_estimators": 5}, workers=1, data_dir=tmp_path)
+    later = table[table["season"] == "2023-24"].assign(season="2024-25")
+    monkeypatch.setattr(wf, "ProcessPoolExecutor", lambda **k: pytest.fail("recomputed"))   # not part of the code hash
+    run_minutes(pd.concat([table, later], ignore_index=True), "lgbm", seasons=("2023-24",),
+                params={"n_estimators": 5}, workers=1, data_dir=tmp_path)            # served from the cache
+    changed = table.copy()
+    changed.loc[changed["season"] == "2022-23", "t_minutes"] = 0
+    with pytest.raises(pytest.fail.Exception, match="recomputed"):
+        run_minutes(changed, "lgbm", seasons=("2023-24",), params={"n_estimators": 5}, workers=1, data_dir=tmp_path)
+
+
+def test_content_hash_ignores_row_order_column_order_and_integer_widening():
+    from prediction.ml_data import content_sha256
+    a = pd.DataFrame({"season": ["s", "s"], "k": [1, 2], "v": [3, 4]})
+    b = a.iloc[::-1][["v", "k", "season"]].astype({"v": float})
+    assert content_sha256(a, ["season", "k"]) == content_sha256(b, ["season", "k"])
+    assert content_sha256(a, ["season", "k"]) != content_sha256(a.assign(v=[3, 5]), ["season", "k"])
+
+
+def test_cached_only_mode_raises_with_the_command_instead_of_computing(tmp_path, monkeypatch):
+    monkeypatch.setattr(wf, "CACHED_ONLY", True)
+    with pytest.raises(RuntimeError, match="prediction.walkforward compare"):
+        run_minutes(_table(), "lgbm", seasons=("2023-24",), params={"n_estimators": 5}, workers=1, data_dir=tmp_path)
+
+
+def test_a_failed_kind_is_recorded_and_retried_only_with_the_next_retrain(tmp_path, monkeypatch):
+    asked = []
+
+    def fit(match_log, season, data_dir, now, kinds):
+        asked.append(list(kinds))
+        return {k: _Fake(1) for k in kinds if k != "gru" or len(asked) > 1}      # gru fails the first time
+    monkeypatch.setattr(wf, "_fit_models", fit)
+    _live_files(tmp_path, through=4)
+    now = pd.Timestamp("2023-10-01", tz="UTC")
+    folder = wf.train_live(tmp_path, now)
+    meta = json.loads((folder / "meta.json").read_text())
+    assert "gru" not in meta["models"] and meta["failed"] == {"gru": 4}
+    _live_files(tmp_path, through=4 + wf.RETRAIN_EVERY - 1)
+    assert wf.train_live(tmp_path, now) == folder and len(asked) == 1         # not retried before the next retrain
+    _live_files(tmp_path, through=4 + wf.RETRAIN_EVERY)
+    new = wf.train_live(tmp_path, now)
+    assert asked[1] == list(wf.ALL_KINDS) and json.loads((new / "meta.json").read_text())["failed"] == {}
+
+
+def test_a_kind_missing_without_a_failure_record_is_trained_and_records_its_own_gameweek(tmp_path, monkeypatch):
+    monkeypatch.setattr(wf, "_fit_models", lambda m, s, d, n, kinds: {k: _Fake(1) for k in kinds})
+    _live_files(tmp_path, through=4)
+    folder = wf.train_live(tmp_path, pd.Timestamp("2023-10-01", tz="UTC"))
+    meta = json.loads((folder / "meta.json").read_text())
+    meta["models"].remove("gru")                                                 # saved by an older version
+    (folder / "meta.json").write_text(json.dumps({k: v for k, v in meta.items() if k != "failed"}))
+    _live_files(tmp_path, through=5)
+    wf.train_live(tmp_path, pd.Timestamp("2023-10-01", tz="UTC"))
+    meta = json.loads((folder / "meta.json").read_text())
+    assert "gru" in meta["models"] and meta["through_gameweek"] == 4 and meta["trained_through"]["gru"] == 5

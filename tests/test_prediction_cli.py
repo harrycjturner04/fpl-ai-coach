@@ -235,3 +235,17 @@ def test_prediction_log_keeps_one_row_per_model_and_migrates_old_rows(tmp_path):
     comp = log[(log.model == "component") & (log.gameweek == 9)].set_index("player_code")["total"]
     assert comp[100] == pytest.approx(14.0)                           # the old row (9.0) was replaced, as component
     assert comp[200] == pytest.approx(7.0) and len(log[log.model == "lgbm"]) == 3
+
+
+def test_a_warning_when_no_player_has_net_transfers(tmp_path, monkeypatch, capsys):
+    write_live_tables(tmp_path)
+    monkeypatch.setattr(backtest, "MARKET_LAG", 0)
+    cli.live_inputs(tmp_path)
+    assert "net transfers unknown for every player" in capsys.readouterr().out
+
+
+def test_a_failing_chosen_ml_model_names_the_component_fallback(tmp_path, monkeypatch):
+    write_live_tables(tmp_path)
+    _fake_walkforward(monkeypatch, fail=("lgbm",))
+    with pytest.raises(RuntimeError, match="--model component"):
+        cli.run(data_dir=tmp_path, now=pd.Timestamp("2023-10-06T12:00Z"), model="lgbm")

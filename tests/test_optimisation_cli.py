@@ -436,3 +436,13 @@ def test_main_accepts_the_model_choices_and_passes_the_choice_on(monkeypatch, ca
     assert captured["model"] == "ml-minutes"
     with pytest.raises(SystemExit):
         cli.main(["--model", "nonsense"])
+
+
+def test_model_option_with_the_placeholder_scorer_is_reported_as_ignored(monkeypatch, capsys):
+    monkeypatch.setattr(cli, "ensure_fresh_data", lambda entry: "fresh")
+    monkeypatch.setattr(cli, "run", lambda *a, **kw: (None, {}))
+    monkeypatch.setattr(cli, "format_solution", lambda r, c: "")
+    cli.main(["--scorer", "placeholder", "--model", "lgbm"])
+    assert "--model is ignored" in capsys.readouterr().out
+    cli.main(["--scorer", "placeholder"])
+    assert "--model is ignored" not in capsys.readouterr().out

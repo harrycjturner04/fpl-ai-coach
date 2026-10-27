@@ -134,3 +134,13 @@ def test_supplied_minutes_replace_the_components_own_and_flags_still_apply():
     other = out[out.player_code != 100].set_index(["player_code", "fixture_id"]).p60
     same = base[base.player_code != 100].set_index(["player_code", "fixture_id"]).p60
     assert other.to_numpy() == pytest.approx(same.reindex(other.index).to_numpy())
+
+
+def test_duplicate_rows_in_supplied_minutes_raise():
+    from prediction.backtest import snapshot
+    snap = snapshot(synthetic_log(), "2023-24", 3)
+    args = (snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, "2023-24", snap.teams_in_season, ModelParams())
+    fx = snap.fixtures_ahead["fixture_id"].iloc[0]
+    sup = pd.DataFrame({"player_code": [100, 100], "fixture_id": [fx, fx], "p60": [0.5, 0.6], "psub": [0.1, 0.1]})
+    with pytest.raises(pd.errors.MergeError):
+        predict(*args, minutes=sup)

@@ -8,7 +8,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 
 1. **Ingestion**: official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks, from which the squad, bank, free transfers and chips are reconstructed), later injury/news sources.
 2. **Feature engineering**: rolling form, per-90 rates, fixture difficulty, minutes reliability, set-piece duty, team strength.
-3. **Prediction**: expected points per player for the next 1–5 gameweeks, built component-by-component from team attack/defence ratings, player minutes/start probability and per-90 rates, combined through FPL's own scoring rules; next, gradient-boosted trees validated walk-forward by gameweek. Minutes/start probability is modelled separately.
+3. **Prediction**: expected points per player for the next 1–5 gameweeks, built component-by-component from team attack/defence ratings, player minutes/start probability and per-90 rates, combined through FPL's own scoring rules. The default takes its minutes/start probabilities from a LightGBM model; LightGBM, Keras, GRU and stacked points models are compared walk-forward by gameweek and logged alongside.
 4. **Optimisation**: a PuLP integer linear program that plans five gameweeks at once, covering budget, 2/5/5/3 squad, max 3 per club, valid formation, captaincy, free transfers and the −4 transfer hit.
 5. **Reasoning**: an LLM that turns news into structured risk flags, reviews the optimiser's output, plans chip timing, and writes the recommendation, calling the optimiser as a tool to test scenarios.
 
@@ -40,7 +40,7 @@ python -m prediction.cli --model stacked     # any candidate: component, ml-minu
 python -m optimisation.cli --entry 1234567 --model lgbm   # plan with that model's predictions
 
 # The optimiser re-pulls data automatically if it's over 24h old or a deadline has passed.
-python -m optimisation.cli                   # best squad from scratch (£100m), scored by the component model
+python -m optimisation.cli                   # best squad from scratch (£100m), scored by the default model (ml-minutes)
 python -m optimisation.cli --entry 1234567   # this week's transfers for your team, plus a provisional 5-week plan
 python -m optimisation.cli --entry 1234567 --horizon 3 --discount 0.9   # override the shipped settings
 python -m optimisation.cli --entry 1234567 --chip bboost:12             # what-if: a chip in a gameweek
@@ -93,7 +93,8 @@ the proven optimum. Greedy, knapsack DP, genetic algorithms and RL were consider
 to these constraints, or need a season simulator).
 
 Settings (discount 0.7, bench weight 0.1, the leftover-transfer values) were tuned by replaying past seasons and ship in
-`optimisation/plan_params.json`. Players are scored by the component prediction model; pass `--scorer placeholder` to
+`optimisation/plan_params.json`. Players are scored by the default prediction model, ml-minutes (the component model
+with LightGBM minutes; `--model` picks another candidate); pass `--scorer placeholder` to
 fall back to the Stage 2 ep_next/form blend (one week only). Full method: [docs/optimiser.md](docs/optimiser.md).
 
 ## Planning results
@@ -177,6 +178,31 @@ better at every horizon from 0 to 4; the heavier models add little. The gain is 
 settings. Every candidate is logged before each live deadline for the 2026/27 forward test. See
 [docs/ml-model.md](docs/ml-model.md).
 
+### Setting up the ML models on a fresh clone
+
+```bash
+python -m ingestion.archive          # past seasons
+python -m ingestion.cli --history    # this season, with ownership and transfers per gameweek
+python -m prediction.ml_data         # the training table (data/processed/ml_training_table.parquet)
+python -m prediction.cli             # trains the live models on first use (about 16 minutes), then predicts
+```
+
+That is all the default model (ml-minutes) and the lgbm, keras and gru candidates need: the live models are trained
+from the training table and retrained every 4 gameweeks. The stacked model also needs the walk-forward
+out-of-sample predictions its weights are fitted on, and so does the planner re-tune on ML predictions
+(`python -m evaluation.tune --model ml-minutes`). Build them, and the comparison report, with
+
+```bash
+python -m prediction.walkforward compare --models form,component,ml-minutes,lgbm,keras,gru,stacked --kind lgbm
+```
+
+which takes many hours the first time and is cached afterwards (`data/processed/ml_oos_*`, `ml_sequences.npz`,
+`ml_compare_*`); growth of the live season does not invalidate the cache.
+
+Market features (ownership and net transfers) need `python -m ingestion.cli --history` before each deadline: the
+optimiser's automatic refresh runs `ingestion.cli` without `--history`, and without it this season's played gameweeks
+have no ownership or transfer values for the models to train and predict from (`ingestion.cli` prints a warning).
+
 ## How this project is built
 
 I use [Claude Code](https://claude.com/claude-code) as a development tool, in the same way I'd use any tool that makes me faster: it writes much of the implementation and tests, and runs an automated review pass. The thinking behind the project is mine. I set the vision and architecture, decide the approach for each problem, and choose between alternatives after weighing them up. The reasoning behind the key decisions, such as why the optimiser is an integer linear program and how free transfers are valued, is documented in the sections above.
@@ -194,11 +220,11 @@ data/processed/current_season_rows.parquet  this season's match-log rows, refres
 data/processed/match_log.parquet      archive + current-season rows combined (deduplicated by season):
                                       the prediction model's input
 data/processed/ep_next_log.parquet    FPL's own ep_next forecast, snapshotted before each deadline
-data/processed/predictions.parquet    the component model's latest live output (prediction/cli.py)
+data/processed/predictions.parquet    the chosen model's latest live output (prediction/cli.py)
 data/processed/model_params.json      tuned parameters from a local re-tune (prediction/tune.py); takes
                                       priority over the copy shipped at prediction/model_params.json
 data/processed/tuning_log.parquet     one row per coordinate-descent step (prediction/tune.py)
-data/processed/prediction_log.parquet the model's own predictions, recorded before each deadline (forward test)
+data/processed/prediction_log.parquet every candidate model's predictions, recorded before each deadline (forward test)
 data/processed/plan_log.parquet       the optimiser's recommendation for a team, recorded before each deadline
                                       (latest per season, gameweek and team)
 data/processed/replay_predictions.parquet  predictions for every replayed gameweek (evaluation/tune.py)
@@ -207,6 +233,10 @@ data/processed/replay_report.txt      the replay's season totals, leave-one-seas
 data/processed/leftover_table.json    measured value of leftover free transfers, every fixed-point pass
 data/processed/plan_params.json       optimiser settings from a local re-tune (evaluation/tune.py); takes
                                       priority over the copy shipped at optimisation/plan_params.json
+data/processed/ml_training_table.parquet  ML training table, one row per deadline, player and fixture ahead
+data/processed/ml_oos_*.parquet       walk-forward out-of-sample ML predictions, cached (prediction/walkforward.py)
+data/processed/ml_report.txt          the ML model comparison report
+data/models/<date>/                   the live ML models and their meta.json (trained gameweek, failed kinds)
 data/processed/game_rules.json        budget, squad composition, club cap, FT cap, sell-on fee
 data/processed/metadata.json          when data and each team were last pulled (drives auto-refresh)
 data/processed/manager_state_<id>.json

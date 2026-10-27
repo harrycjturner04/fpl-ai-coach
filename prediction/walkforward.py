@@ -9,6 +9,7 @@ import inspect
 import itertools
 import json
 import pickle
+import sys
 import time
 import warnings
 from concurrent.futures import ProcessPoolExecutor
@@ -19,15 +20,15 @@ import numpy as np
 import pandas as pd
 
 from features.ml_features import FEATURE_COLUMNS, build_features
-from features.ml_sequences import deadline_sequences, row_sequences, sequence_features
+from features.ml_sequences import SEQ_STATS, deadline_sequences, row_sequences, sequence_features
 from ingestion import storage, transform
 from prediction import backtest
-from prediction.backtest import Predictor, build_predictors, load_params, run_backtest, snapshot
+from prediction.backtest import WARM_UP_GAMEWEEKS, Predictor, build_predictors, load_params, run_backtest, snapshot
 from prediction.cli import SHIPPED_PARAMS_PATH, _component, load_live_params
 from prediction.component_model import per_gameweek, predict
 from prediction.ml_report import build_report
 from prediction.minutes_model import MINUTES_MODELS
-from prediction.ml_data import _season_rows, labelled, minutes_class, target_points
+from prediction.ml_data import _season_rows, content_sha256, labelled, minutes_class, target_points
 from prediction.ml_gru import GruPoints
 from prediction.ml_points import POINTS_MODELS, expected_points
 from prediction.stacker import KEYS as STACK_KEYS, MEMBERS, deadline_weights, stacked_oos, wide_table
@@ -40,6 +41,10 @@ GRIDS = {"lgbm": {"num_leaves": [15, 31, 63], "min_child_samples": [50, 200]},
          "keras": {"hidden": [(64, 32), (128, 64)], "dropout": [0.1, 0.3]},
          "gru": {"units": [16, 32], "epochs": [16, 32]}}
 GRID_FIXED = {"lgbm": {}, "keras": {"seeds": (0,)}, "gru": {"seeds": (0,)}}   # one seed per grid config
+MATCH_KEYS = ["season", "player_code", "fixture_id"]
+FEATURES_DIR = Path(__file__).parent.parent / "features"
+COMPARE_COMMAND = "python -m prediction.walkforward compare --models form,component,ml-minutes,lgbm,keras,gru,stacked --kind lgbm"
+CACHED_ONLY = False   # set by the planner re-tune: a missing or stale cache raises instead of being computed
 
 
 def retrain_blocks(table: pd.DataFrame, season: str) -> list[tuple[int, list[int]]]:
@@ -77,10 +82,28 @@ def _walk(table, kind, seasons, params, workers) -> pd.DataFrame:
 def _cached(name, fp, compute, data_dir, fresh) -> pd.DataFrame:
     if not fresh and storage.load_json_or_none(f"{name}_meta", data_dir) == fp:
         return storage.load_table(name, data_dir)
+    if CACHED_ONLY:
+        raise RuntimeError(f"{name} is missing or out of date: run {COMPARE_COMMAND}")
     out = compute()
     storage.save_table(out, name, data_dir)
     storage.save_json(fp, f"{name}_meta", data_dir)
     return out
+
+
+_HASHED: dict[int, tuple[pd.DataFrame, dict]] = {}
+
+
+def _upto_sha256(df: pd.DataFrame, season: str, keys: list[str]) -> str:
+    """content_sha256 of the rows of seasons up to `season`, memoised per frame (the frame is held, so its id is
+    not reused; frames are never modified in place here)."""
+    _, memo = _HASHED.setdefault(id(df), (df, {}))
+    if season not in memo:
+        memo[season] = content_sha256(df[df["season"] <= season], keys)
+    return memo[season]
+
+
+def _files_sha256(*paths) -> str:
+    return hashlib.sha256(b"".join(Path(p).read_bytes() for p in paths)).hexdigest()
 
 
 def _code_hash() -> str:
@@ -94,15 +117,14 @@ def _code_hash() -> str:
 
 def run_minutes(table, kind: str, seasons=TEST_SEASONS, params=None, workers=6,
                 data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    table_meta, code = storage.load_json_or_none("ml_training_table_meta", data_dir), _code_hash()
-    out = []
+    code, out = _code_hash(), []
     for season in seasons:
-        fp = dict(table_meta=table_meta, rows=len(table), kind=kind, params=params, season=season, code_sha256=code)
+        fp = dict(table_sha256=_upto_sha256(table, season, KEYS), kind=kind, params=params, season=season, code_sha256=code)
         fp = json.loads(json.dumps(fp, default=str))  # as it will read back from disk
         t0 = time.time()
         out.append(_cached(f"ml_oos_minutes_{kind}_{season}", fp,
                            lambda: _walk(table, kind, (season,), params, workers), data_dir, fresh))
-        print(f"{kind} {season} done ({time.time() - t0:.0f}s)", flush=True)
+        print(f"{kind} {season} done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     return pd.concat(out, ignore_index=True)
 
 
@@ -139,16 +161,16 @@ def _points_hash(minutes_oos: pd.DataFrame) -> str:
 
 def run_points(table, kind: str, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS, params=None, workers=6,
                data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    table_meta, out = storage.load_json_or_none("ml_training_table_meta", data_dir), []
+    out = []
     for season in seasons:
         m = minutes_oos[minutes_oos["season"] == season]
-        fp = dict(table_meta=table_meta, rows=len(table), kind=kind, params=params, season=season,
+        fp = dict(table_sha256=_upto_sha256(table, season, KEYS), kind=kind, params=params, season=season,
                   code_sha256=_points_hash(m))
         fp = json.loads(json.dumps(fp, default=str))
         t0 = time.time()
         out.append(_cached(f"ml_oos_points_{kind}_{season}", fp,
                            lambda: _with_minutes(_points_walk(table, kind, season, params, workers), m), data_dir, fresh))
-        print(f"points {kind} {season} done ({time.time() - t0:.0f}s)", flush=True)
+        print(f"points {kind} {season} done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     return pd.concat(out, ignore_index=True)
 
 
@@ -158,14 +180,22 @@ def _read_sequences(path: Path) -> dict:
                 for k in {k.rsplit("|", 1)[0] for k in z.files}}
 
 
+def _sequences_fp(match_log, table) -> dict:
+    """What the sequences depend on: the deadlines and players of `table`, and the matches before its last cutoff."""
+    used = match_log.loc[match_log["kickoff"] < table["cutoff"].max(), ["player_code", "kickoff", *SEQ_STATS]]
+    keys = table[["season", "deadline_gw", "player_code", "cutoff"]].drop_duplicates()
+    return dict(match_log_sha256=content_sha256(used, ["player_code", "kickoff"]),
+                table_sha256=content_sha256(keys, ["season", "deadline_gw", "player_code"]),
+                code_sha256=_files_sha256(FEATURES_DIR / "ml_sequences.py"))
+
+
 def sequences(match_log, table, data_dir: Path = storage.DATA_DIR, fresh: bool = False):
     """Per-deadline player sequences, cached as one npz keyed by (season, deadline_gw)."""
-    path, fp = data_dir / "processed" / "ml_sequences.npz", dict(
-        table_meta=storage.load_json_or_none("ml_training_table_meta", data_dir), rows=len(match_log),
-        code_sha256=hashlib.sha256((Path(__file__).parent.parent / "features" / "ml_sequences.py").read_bytes()).hexdigest())
-    fp = json.loads(json.dumps(fp, default=str))
+    path, fp = data_dir / "processed" / "ml_sequences.npz", _sequences_fp(match_log, table)
     if not fresh and path.exists() and storage.load_json_or_none("ml_sequences_meta", data_dir) == fp:
         return _read_sequences(path)
+    if CACHED_ONLY:
+        raise RuntimeError(f"ml_sequences is missing or out of date: run {COMPARE_COMMAND}")
     store = deadline_sequences(match_log, table)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(path, **{f"{s}|{g}|{part}": a for (s, g), (c, q) in store.items() for part, a in (("codes", c), ("seq", q))})
@@ -202,15 +232,18 @@ def _gru_hash(minutes_oos: pd.DataFrame) -> str:
 
 def run_gru_points(table, store, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS, params=None, workers=6,
                    data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    table_meta, out = storage.load_json_or_none("ml_training_table_meta", data_dir), []
+    out = []
     for season in seasons:
         m = minutes_oos[minutes_oos["season"] == season]
-        fp = dict(table_meta=table_meta, rows=len(table), kind="gru", params=params, season=season, code_sha256=_gru_hash(m))
+        seq = hashlib.sha256(b"".join(store[k][0].tobytes() + store[k][1].tobytes()
+                                      for k in sorted(store) if k[0] <= season)).hexdigest()
+        fp = dict(table_sha256=_upto_sha256(table, season, KEYS), sequences_sha256=seq, kind="gru", params=params,
+                  season=season, code_sha256=_gru_hash(m))
         fp = json.loads(json.dumps(fp, default=str))
         t0 = time.time()
         out.append(_cached(f"ml_oos_points_gru_{season}", fp,
                            lambda: _with_minutes(_gru_walk(table, "gru", season, params, workers, store), m), data_dir, fresh))
-        print(f"points gru {season} done ({time.time() - t0:.0f}s)", flush=True)
+        print(f"points gru {season} done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     return pd.concat(out, ignore_index=True)
 
 
@@ -241,8 +274,12 @@ def _component_season(args) -> pd.DataFrame:
 def component_minutes(match_log, seasons=TEST_SEASONS, workers=6,
                       data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
     params = load_params(str(SHIPPED_PARAMS_PATH))
+    root = Path(__file__).parent
     fp = dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
-              match_log_rows=len(match_log), seasons=list(seasons))
+              match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS), seasons=list(seasons),
+              code_sha256=_files_sha256(root / "backtest.py", root / "component_model.py", FEATURES_DIR / "player_rates.py",
+                                        FEATURES_DIR / "team_ratings.py")
+              + hashlib.sha256(inspect.getsource(_component_season).encode()).hexdigest())
 
     def compute():
         with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -355,7 +392,9 @@ def ml_minutes_totals(match_log, oos: pd.DataFrame, seasons=TEST_SEASONS, worker
     code = hashlib.sha256(b"".join((root / f).read_bytes() for f in ("backtest.py", "component_model.py"))
                           + Path(SHIPPED_PARAMS_PATH).read_bytes() + inspect.getsource(make_ml_minutes_predictor).encode()
                           + inspect.getsource(_ml_minutes_season).encode()).hexdigest()
-    fp = json.loads(json.dumps(dict(code_sha256=code, match_log_rows=len(match_log), seasons=list(seasons),
+    code += _files_sha256(FEATURES_DIR / "player_rates.py", FEATURES_DIR / "team_ratings.py")
+    fp = json.loads(json.dumps(dict(code_sha256=code, match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS),
+                                    seasons=list(seasons),
                                     oos=int(pd.util.hash_pandas_object(oos[KEYS + ["p1", "p2"]], index=False).sum())),
                                default=str))
     params = load_params(str(SHIPPED_PARAMS_PATH))
@@ -404,8 +443,9 @@ def _compare_inputs(models, kind, seasons, workers, data_dir):
         Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
         SHIPPED_PARAMS_PATH, ML_PARAMS_PATH)) + inspect.getsource(make_ml_minutes_predictor).encode()
         + inspect.getsource(make_table_predictor).encode() + Path(__file__).with_name("stacker.py").read_bytes()
-        + _code_hash().encode()).hexdigest()
-    fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons, rows=len(match_log), oos_rows=len(oos),
+        + _code_hash().encode()).hexdigest() + _files_sha256(FEATURES_DIR / "player_rates.py", FEATURES_DIR / "team_ratings.py")
+    fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons,
+                                    match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS), oos_rows=len(oos),
                                     points=[pd.util.hash_pandas_object(d, index=False).sum() for d in oos_points.values()],
                                     code_sha256=code), default=str))
     return match_log, oos, oos_points, fp
@@ -537,18 +577,44 @@ def _last_finished(gameweeks: pd.DataFrame, match_log: pd.DataFrame, season: str
     return through, match_log.loc[(match_log["season"] == season) & (match_log["gameweek"] == through), "kickoff"].min()
 
 
+def _expected_pairs(match_log: pd.DataFrame, season: str) -> set[tuple[int, int]]:
+    """(deadline_gw, gameweek) pairs the training table has for `season` when built from this match log."""
+    gws = sorted(match_log.loc[match_log["season"] == season, "gameweek"].unique())
+    first = WARM_UP_GAMEWEEKS + 1 if season == match_log["season"].min() else 1
+    return {(int(d), int(g)) for d in gws if d >= first for g in gws if d <= g < d + 5}
+
+
 def _live_table(match_log: pd.DataFrame, season: str, data_dir: Path) -> pd.DataFrame:
-    """Training table: the cached past seasons (their features never change) plus this season rebuilt, in memory only."""
+    """Training table: the cached past seasons plus, rebuilt in memory only, this season and any past season the cache
+    has missing or incomplete (cached before that season finished)."""
     base = storage.load_table_or_none("ml_training_table", data_dir)
-    past = set(match_log["season"]) - {season}
-    if base is None or not past <= set(base["season"]):
-        raise RuntimeError("The training table lacks past seasons: run python -m prediction.ml_data first.")
-    if match_log["season"].ne(season).all():     # first gameweek of the season: nothing played yet
-        return base[base["season"] != season]
+    if base is None:
+        raise RuntimeError("No training table: run python -m prediction.ml_data first.")
+    base = base[base["season"] != season]
+    rebuild = [s for s in sorted(set(match_log["season"])) if s == season or _expected_pairs(match_log, s)
+               != set(zip(base.loc[base["season"] == s, "deadline_gw"], base.loc[base["season"] == s, "gameweek"]))]
+    if not rebuild:
+        return base
+    team = load_params(str(SHIPPED_PARAMS_PATH)).team
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        current = _season_rows((match_log, season, 1, load_params(str(SHIPPED_PARAMS_PATH)).team))
-    return pd.concat([base[base["season"] != season], current], ignore_index=True)
+        fresh = [_season_rows((match_log, s, 1 if s != match_log["season"].min() else WARM_UP_GAMEWEEKS + 1, team))
+                 for s in rebuild]
+    return pd.concat([base[~base["season"].isin(rebuild)], *fresh], ignore_index=True)
+
+
+def _live_sequences(match_log: pd.DataFrame, table: pd.DataFrame, season: str, data_dir: Path) -> dict:
+    """GRU sequences for every deadline of the live table: cached past seasons whose deadlines and players match the
+    table, every other season (this one included) rebuilt in memory."""
+    path = data_dir / "processed" / "ml_sequences.npz"
+    past = _read_sequences(path) if path.exists() else {}
+    keep = {}
+    for s, g in table[table["season"] != season].groupby("season"):
+        cached = {k: v for k, v in past.items() if k[0] == s}
+        codes = {(s, int(gw)): np.sort(d["player_code"].unique()) for gw, d in g.groupby("deadline_gw")}
+        if cached.keys() == codes.keys() and all(np.array_equal(cached[k][0], c) for k, c in codes.items()):
+            keep |= cached
+    return keep | deadline_sequences(match_log, table[~table["season"].isin({k[0] for k in keep})])
 
 
 def _fit_models(match_log: pd.DataFrame, season: str, data_dir: Path, now: pd.Timestamp, kinds=ALL_KINDS) -> dict:
@@ -566,9 +632,7 @@ def _fit_models(match_log: pd.DataFrame, season: str, data_dir: Path, now: pd.Ti
         t0 = time.time()
         try:
             if kind == "gru":
-                past = _read_sequences(data_dir / "processed" / "ml_sequences.npz")
-                store = {k: v for k, v in past.items() if k[0] != season} | deadline_sequences(
-                    match_log, table[table["season"] == season])
+                store = _live_sequences(match_log, table, season, data_dir)
                 models[kind] = GruPoints(_ml_params("points", kind)).fit(X, row_sequences(train, store), cls, y, order)
             else:
                 models[kind] = POINTS_MODELS[kind](_ml_params("points", kind)).fit(X, cls, y, order)
@@ -581,7 +645,9 @@ def _fit_models(match_log: pd.DataFrame, season: str, data_dir: Path, now: pd.Ti
 
 def train_live(data_dir: Path = storage.DATA_DIR, now: pd.Timestamp | None = None) -> Path:
     """Fit the live models on every labelled row before `now` and save them under models/<date of the last
-    finished gameweek's first match>/. Existing models are reused until RETRAIN_EVERY more gameweeks have finished."""
+    finished gameweek's first match>/. Existing models are reused until RETRAIN_EVERY more gameweeks have finished.
+    A kind that fails is recorded in meta.json ("failed": gameweek) and retried only after RETRAIN_EVERY gameweeks;
+    "trained_through" holds the gameweek each kind was trained through."""
     now = now or pd.Timestamp.now(tz="UTC")
     match_log, gameweeks = storage.load_table("match_log", data_dir), storage.load_table("gameweeks", data_dir)
     season = transform.season_label(gameweeks)
@@ -589,7 +655,8 @@ def train_live(data_dir: Path = storage.DATA_DIR, now: pd.Timestamp | None = Non
     saved = _latest_models(data_dir)
     if saved and saved[1]["season"] == season and through - saved[1]["through_gameweek"] < RETRAIN_EVERY:
         folder, meta = saved
-        kinds = [k for k in ALL_KINDS if k not in meta["models"]]    # a model that failed last time is retried now
+        failed = meta.get("failed", {})
+        kinds = [k for k in ALL_KINDS if k not in meta["models"] and (k not in failed or through - failed[k] >= RETRAIN_EVERY)]
         if not kinds:
             return folder
     else:
@@ -600,7 +667,9 @@ def train_live(data_dir: Path = storage.DATA_DIR, now: pd.Timestamp | None = Non
     folder.mkdir(parents=True, exist_ok=True)
     for name, model in models.items():
         _save(model, folder, name)
-    meta = meta | {"models": meta["models"] + list(models), "trained_at": str(now)}
+    failed = {k: g for k, g in meta.get("failed", {}).items() if k not in models} | {k: through for k in kinds if k not in models}
+    meta = meta | {"models": meta["models"] + list(models), "trained_at": str(now), "failed": failed,
+                   "trained_through": meta.get("trained_through", {}) | {k: through for k in models}}
     (folder / "meta.json").write_text(json.dumps(meta))
     print(f"live models saved to {folder} (through GW{through}): {', '.join(models)}", flush=True)
     return folder

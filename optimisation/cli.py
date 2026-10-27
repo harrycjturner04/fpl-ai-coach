@@ -251,13 +251,15 @@ def main(argv: list[str] | None = None) -> None:
                              "placeholder scorer only)")
     parser.add_argument("--scorer", choices=["component", "placeholder"], default="component",
                         help="component model (default) or the Stage 2 ep_next/form placeholder")
-    parser.add_argument("--model", choices=CANDIDATES, default=SHIPPED_MODEL,
+    parser.add_argument("--model", choices=CANDIDATES,
                         help=f"prediction model (default {SHIPPED_MODEL}; component scorer only)")
     args = parser.parse_args(argv)
+    if args.model and args.scorer == "placeholder":
+        print("--model is ignored with --scorer placeholder")
     print(ensure_fresh_data(args.entry))
     result, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget,
                           args.ft_value, scorer=args.scorer, horizon=args.horizon, discount=args.discount,
-                          chips=args.chip, model=args.model)
+                          chips=args.chip, model=args.model or SHIPPED_MODEL)
     print(format_solution(result, context))
 
 

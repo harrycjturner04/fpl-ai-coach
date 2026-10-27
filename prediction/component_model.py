@@ -103,7 +103,7 @@ def predict(history: pd.DataFrame, players_now: pd.DataFrame, fixtures_ahead: pd
         rows[col] = v * rows[col] + (1 - v) * rows[col + "_long"]
     if minutes is not None:
         sup = rows[["player_code", "fixture_id"]].merge(
-            minutes[["player_code", "fixture_id", "p60", "psub"]], how="left")
+            minutes[["player_code", "fixture_id", "p60", "psub"]], how="left", validate="many_to_one")
         has = sup["p60"].notna().to_numpy()
         rows.loc[has, "p60"] = sup.loc[has, "p60"].to_numpy()
         rows.loc[has, "psub"] = sup.loc[has, "psub"].to_numpy()

@@ -180,11 +180,26 @@ python -m optimisation.cli --entry <team ID> --model stacked
 `--model` accepts component, ml-minutes, lgbm, keras, gru and stacked; the default is ml-minutes. Live models are
 retrained when the latest finished gameweek is 4 or more past the saved models, as in the validation, inside the first
 pre-deadline run that needs it (about 16 minutes). A candidate that fails to train is skipped with a warning and never
-blocks the default. Dependencies added: `lightgbm`, `keras` and `torch`.
+blocks the default; the failure is recorded in the models' `meta.json` and that candidate is retried at the next
+scheduled retrain. Dependencies added: `lightgbm`, `keras` and `torch`.
+
+The walk-forward comparison, with this page's tables, is
+
+```
+python -m prediction.walkforward compare --models form,component,ml-minutes,lgbm,keras,gru,stacked --kind lgbm
+```
+
+It writes `data/processed/ml_report.txt`. Every step is cached (`data/processed/ml_oos_*`, `ml_sequences.npz`,
+`ml_compare_*`) under a fingerprint of the code and of the data each step used (the rows of the seasons up to the one
+predicted), so growth of the live season does not invalidate it. `prediction.backtest --models` takes only the
+non-ML models (naive, form, component); the ML models are compared through `prediction.walkforward compare`.
 
 The planner can be re-tuned on these predictions with `python -m evaluation.tune --model ml-minutes --fresh`. That
-replays only 2023/24 to 2025/26, the seasons with walk-forward predictions, and writes its settings to a separate file
-(`plan_params_ml-minutes`). It takes hours and has not been run yet.
+replays only 2023/24 to 2025/26, the seasons with walk-forward predictions, reads the cached out-of-sample predictions
+(it stops with the command above if they are missing or out of date, rather than computing them) and takes hours.
+It writes `data/processed/plan_params_ml-minutes.json` and `replay_report_ml-minutes.txt`, which nothing reads
+automatically. If the re-tuned settings are accepted, their values replace the shipped `optimisation/plan_params.json`
+in a commit; until then the planner keeps the settings tuned on the component model.
 
 ## Limits and caveats
 
@@ -199,6 +214,9 @@ replays only 2023/24 to 2025/26, the seasons with walk-forward predictions, and 
 - **No historical injury flags.** The validation had no record of what FPL's chance-of-playing flag said at each past
   deadline; live use applies the flags on top of the minutes model, so live behaviour is not exactly what was tested.
 - **No pre-Premier-League data** for new arrivals.
+- **Fixtures as finally played.** At a past deadline, horizons 1 to 4 use the fixtures as they were finally played:
+  postponements and rescheduled double and blank gameweeks are already known. Horizon 1 to 4 figures and J are
+  therefore slightly optimistic for every model, the component model included; horizon 0 is essentially unaffected.
 - **Live net transfers are partial** before the deadline, since the figures keep moving until it passes; the models
   were trained on deadline values.
 - **Small differences.** The gains are real but small, and the benchmark is rebuilt FPL form, not FPL's own forecast;

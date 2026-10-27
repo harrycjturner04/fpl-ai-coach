@@ -85,11 +85,13 @@ def replayed_gameweeks(log: pd.DataFrame, season: str) -> list[int]:
 
 @cache
 def _ml_predictor(model: str, data_dir: Path):
-    """The model's walk-forward predictor, served from the cached out-of-sample predictions (never recomputed here)."""
+    """The model's walk-forward predictor, served from the cached out-of-sample predictions: a missing or stale cache
+    raises (with the command that builds it) instead of being computed here."""
+    from prediction import walkforward
     from prediction.stacker import MEMBERS
-    from prediction.walkforward import TEST_SEASONS, _compare_inputs
+    walkforward.CACHED_ONLY = True
     models = [*MEMBERS, "stacked"] if model == "stacked" else [model]
-    _, oos, oos_points, _ = _compare_inputs(models, "lgbm", TEST_SEASONS, 1, data_dir)
+    _, oos, oos_points, _ = walkforward._compare_inputs(models, "lgbm", walkforward.TEST_SEASONS, 1, data_dir)
     return build_predictors([model], str(SHIPPED_PARAMS_PATH), oos_minutes=oos, oos_points=oos_points)[model]
 
 
@@ -125,10 +127,25 @@ def run_replay(job: tuple[PlanSettings, str, bool, int | None]) -> pd.DataFrame:
 
 # ---- orchestration side ----
 
+def _oos_sha256(model: str, data_dir: Path) -> str:
+    """Hash of the out-of-sample prediction files an ML model is served from, and of ml_params.json."""
+    from prediction.stacker import MEMBERS
+    from prediction.walkforward import COMPARE_COMMAND, ML_PARAMS_PATH, TEST_SEASONS
+    points = [m for m in ([*MEMBERS] if model == "stacked" else [model]) if m != "ml-minutes"]
+    names = ([f"ml_oos_minutes_lgbm_{s}" for s in TEST_SEASONS] + [f"ml_oos_points_{m}_{s}" for m in points for s in TEST_SEASONS]
+             + (["ml_oos_ml_minutes_totals"] if model == "stacked" else []))
+    paths = [data_dir / "processed" / f"{n}.parquet" for n in names]
+    if missing := [p.name for p in paths if not p.exists()]:
+        raise SystemExit(f"{model} needs out-of-sample predictions that are missing ({', '.join(missing)}): run {COMPARE_COMMAND}")
+    return hashlib.sha256(b"".join(p.read_bytes() for p in [*paths, ML_PARAMS_PATH])).hexdigest()
+
+
 def fingerprint(seasons: list[str], data_dir: Path, model: str = "component") -> dict:
-    """What a saved file depends on: the shipped prediction parameters, the archive size, the seasons and the model."""
-    return dict(model=model, params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
-                archive_rows=len(storage.load_table("archive_match_log", data_dir)), seasons=sorted(seasons))
+    """What a saved file depends on: the shipped prediction parameters, the archive size, the seasons and the model
+    (for an ML model, also the out-of-sample predictions it is served from and ml_params.json)."""
+    fp = dict(model=model, params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
+              archive_rows=len(storage.load_table("archive_match_log", data_dir)), seasons=sorted(seasons))
+    return fp if model == "component" else fp | {"oos_sha256": _oos_sha256(model, data_dir)}
 
 
 def _meta_matches(name: str, data_dir: Path, fp: dict) -> bool:
