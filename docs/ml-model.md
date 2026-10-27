@@ -191,7 +191,8 @@ python -m prediction.walkforward compare --models form,component,ml-minutes,lgbm
 
 It writes `data/processed/ml_report.txt`. Every step is cached (`data/processed/ml_oos_*`, `ml_sequences.npz`,
 `ml_compare_*`) under a fingerprint of the code and of the data each step used (the rows of the seasons up to the one
-predicted), so growth of the live season does not invalidate it. `prediction.backtest --models` takes only the
+predicted), so growth of the live season does not invalidate the model results; only the GRU input sequences are
+rebuilt, which takes a few minutes. `prediction.backtest --models` takes only the
 non-ML models (naive, form, component); the ML models are compared through `prediction.walkforward compare`.
 
 The planner can be re-tuned on these predictions with `python -m evaluation.tune --model ml-minutes --fresh`. That

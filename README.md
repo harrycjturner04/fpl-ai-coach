@@ -197,7 +197,8 @@ python -m prediction.walkforward compare --models form,component,ml-minutes,lgbm
 ```
 
 which takes many hours the first time and is cached afterwards (`data/processed/ml_oos_*`, `ml_sequences.npz`,
-`ml_compare_*`); growth of the live season does not invalidate the cache.
+`ml_compare_*`); growth of the live season does not invalidate the model results (`ml_oos_*`), though the GRU
+input sequences (`ml_sequences.npz`) are rebuilt, which takes a few minutes.
 
 Market features (ownership and net transfers) need `python -m ingestion.cli --history` before each deadline: the
 optimiser's automatic refresh runs `ingestion.cli` without `--history`, and without it this season's played gameweeks
