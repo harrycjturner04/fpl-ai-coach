@@ -172,6 +172,12 @@ horizon 5, discount 0.7, bench weight 0.1, the leftover table at full strength a
   strength, 8,635 at half and 8,740 at full, and three of the four held-out folds chose full strength.
 - **The true test is the live 2026/27 season.**
 
+These results used the component model's predictions. Stage 5 re-ran the replay on the shipped ml-minutes
+predictions over 2023/24 to 2025/26 (114 gameweeks). There the held-out multi-week model beat the simple look-ahead
+by 2.81 points a gameweek (interval +0.63 to +4.96) and single-week by 1.50 (-1.18 to +4.00), while the simple
+look-ahead no longer beat single-week. Its settings (discount 0.9, bench weight 0.2, a re-measured leftover table)
+replaced the ones above; details are on [the ML page](ml-model.md#how-to-use-it).
+
 ## Forward test: 2026/27
 
 The live season is untouched by any tuning. Every live run before a deadline records the model's predictions

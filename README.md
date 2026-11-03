@@ -92,8 +92,8 @@ Why an ILP: expected squad points are a sum of player expected points, so the pr
 the proven optimum. Greedy, knapsack DP, genetic algorithms and RL were considered and rejected (not exact, don't scale
 to these constraints, or need a season simulator).
 
-Settings (discount 0.7, bench weight 0.1, the leftover-transfer values) were tuned by replaying past seasons and ship in
-`optimisation/plan_params.json`. Players are scored by the default prediction model, ml-minutes (the component model
+Settings (discount 0.9, bench weight 0.2, the leftover-transfer values) were tuned by replaying past seasons with the
+default predictions and ship in `optimisation/plan_params.json`. Players are scored by the default prediction model, ml-minutes (the component model
 with LightGBM minutes; `--model` picks another candidate); pass `--scorer placeholder` to
 fall back to the Stage 2 ep_next/form blend (one week only). Full method: [docs/optimiser.md](docs/optimiser.md).
 
@@ -117,6 +117,13 @@ Held out, the multi-week model scored +2.03 points per gameweek more than single
 seasons of replay (held-out difference −1.17, interval −3.37 to +1.09). Differences between settings are within the
 replay's noise, so the shipped settings are the best estimate rather than a proven optimum. The true test is the live
 2026/27 season, scored forward against FPL's recorded `ep_next`. Details and limits: [docs/validation.md](docs/validation.md).
+
+The table above used the component model's predictions. Stage 5 re-tuned the planner on the shipped ml-minutes
+predictions, replaying 2023/24 to 2025/26 (114 gameweeks, the seasons with walk-forward ML predictions). Held out, the
+multi-week model scored 6,853 points against 6,682 for single-week and 6,533 for the simple look-ahead: +1.50 points
+per gameweek over single-week (95% interval −1.18 to +4.00) and +2.81 over the simple look-ahead (+0.63 to +4.96).
+On these predictions the full multi-week model does beat the simple look-ahead, which no longer beats single-week.
+The re-tuned settings (discount 0.9, bench weight 0.2, re-measured leftover values) now ship.
 
 ## Prediction results
 

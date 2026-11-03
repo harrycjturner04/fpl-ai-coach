@@ -199,8 +199,25 @@ The planner can be re-tuned on these predictions with `python -m evaluation.tune
 replays only 2023/24 to 2025/26, the seasons with walk-forward predictions, reads the cached out-of-sample predictions
 (it stops with the command above if they are missing or out of date, rather than computing them) and takes hours.
 It writes `data/processed/plan_params_ml-minutes.json` and `replay_report_ml-minutes.txt`, which nothing reads
-automatically. If the re-tuned settings are accepted, their values replace the shipped `optimisation/plan_params.json`
-in a commit; until then the planner keeps the settings tuned on the component model.
+automatically; accepted settings are copied into the shipped `optimisation/plan_params.json` in a commit.
+
+That re-tune was run (7.5 hours, 12 processes) and its settings were adopted: horizon 5, discount 0.9 (was 0.7),
+bench weight 0.2 (was 0.1), leftover values 3.11, 2.81, 2.22, 1.81 (was 3.35, 2.93, 2.34, 1.93), up to two hits.
+All three leave-one-season-out folds chose horizon 5, bench weight 0.2 and the re-measured table; two chose discount
+0.9 and one 1.0. Real points over 2023/24 to 2025/26 (114 gameweeks, no chips), per gameweek with 95% intervals:
+
+| Comparison | Difference | 95% interval |
+|---|---|---|
+| Held-out multi-week minus single-week | +1.50 | -1.18 to +4.00 |
+| Held-out multi-week minus simple look-ahead | +2.81 | +0.63 to +4.96 |
+| Simple look-ahead minus single-week | -1.31 | -4.10 to +1.41 |
+| Held-out multi-week minus discount 0.7, bench 0.1 (the old settings with the re-measured table) | +2.01 | -0.14 to +4.17 |
+
+Totals: held-out multi-week 6,853, single-week 6,682, simple look-ahead 6,533, re-tuned settings in-sample 6,992.
+This reverses the Stage 3b finding that the two look-ahead methods could not be told apart: on these predictions the
+full multi-week model is clearly ahead of the simple look-ahead. Neighbouring settings still vary by a few points a
+gameweek (at bench weight 0.2, discount 0.8 scored 6,663, below both 0.7's 6,792 and 0.9's 6,992), so the chosen values remain a best
+estimate within the replay's noise.
 
 ## Limits and caveats
 

@@ -132,7 +132,9 @@ the leftover term is multiplied by `gamma^H`; the table was measured at a discou
 ![Measured value of leftover free transfers](img/leftover_values.png)
 
 The values had not settled to the target tolerance of 0.05 within the three passes allowed: from pass 2 to pass 3
-they moved by up to 0.17. Pass 3 is the shipped table.
+they moved by up to 0.17. Pass 3 was the shipped table until Stage 5. Re-measured on the ml-minutes predictions
+(2023/24 to 2025/26, discount 0.9) the passes gave (3.14, 2.59, 2.03, 1.65), (3.09, 2.78, 2.19, 1.81) and
+(3.11, 2.81, 2.22, 1.81); the last now ships (see [the ML page](ml-model.md#how-to-use-it)).
 
 The table is in predicted points, which the selection bias above inflates, so the replay also tried it at half and
 zero strength. On real points over four seasons, full strength scored 8,740, half 8,635 and zero 8,443, and three
