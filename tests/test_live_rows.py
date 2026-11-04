@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from ingestion.transform import MATCH_COLUMNS, live_match_rows, season_label
@@ -22,7 +23,8 @@ def _stat(**kw):
 
 
 LIVE = {"elements": [
-    {"id": 10, "stats": _stat(minutes=150, goals_scored=1, expected_goals="0.90", total_points=9),
+    {"id": 10, "stats": _stat(minutes=150, goals_scored=1, expected_goals="0.90", total_points=9,
+                              bps=20, influence="31.2", creativity="4.0", threat="12.0"),
      "explain": [{"fixture": 1, "stats": [{"identifier": "minutes", "value": 90, "points": 2},
                                           {"identifier": "goals_scored", "value": 1, "points": 5}]},
                  {"fixture": 2, "stats": [{"identifier": "minutes", "value": 60, "points": 2}]}]},
@@ -109,3 +111,27 @@ def test_double_gameweek_with_second_fixture_in_progress_keeps_only_the_finished
     row = mid.iloc[0]
     assert row.minutes == 90 and row.goals == 1 and row.points == 7   # not the gameweek totals
     assert abs(row.xg - 0.90 * 90 / 135) < 1e-9
+
+
+def test_single_fixture_row_has_bps_ict_and_nan_market_columns():
+    live = {"elements": [{"id": 10, "stats": _stat(minutes=90, bps=20, influence="31.2",
+                                                   creativity="4.0", threat="12.0"), "explain": []}]}
+    fixtures = FIXTURES.iloc[:1]  # one finished fixture: team 1 at home to team 2
+    row = live_match_rows(live, 6, fixtures, PLAYERS, TEAMS, "2026-27").set_index("player_code").loc[100]
+    assert row["bps"] == 20 and row["influence"] == 31.2
+    assert np.isnan(row["selected"]) and np.isnan(row["transfers_in"]) and np.isnan(row["transfers_out"])
+
+
+def test_market_columns_are_filled_from_player_history_without_overwriting():
+    from ingestion.transform import fill_market_from_history
+    rows = pd.DataFrame({"player_code": [100, 100, 200, 300], "fixture_id": [1, 2, 1, 1],
+                         "selected": [np.nan, 7.0, np.nan, np.nan],
+                         "transfers_in": [np.nan, 1.0, np.nan, np.nan],
+                         "transfers_out": [np.nan, 2.0, np.nan, np.nan]})
+    history = pd.DataFrame({"player_id": [10, 10, 20], "fixture": [1, 2, 1], "selected": [500, 600, 900],
+                            "transfers_in": [5, 6, 9], "transfers_out": [1, 2, 3]})
+    players = pd.DataFrame({"id": [10, 20], "code": [100, 200]})
+    out = fill_market_from_history(rows, history, players)
+    assert out["selected"].tolist()[:3] == [500, 7, 900]            # an existing value is kept
+    assert out["transfers_in"].tolist()[:3] == [5, 1, 9] and out["transfers_out"].tolist()[:3] == [1, 2, 3]
+    assert out.loc[3, ["selected", "transfers_in", "transfers_out"]].isna().all()   # no history row: stays NaN

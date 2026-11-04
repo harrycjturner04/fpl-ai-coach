@@ -20,6 +20,7 @@ import pandas as pd
 from ingestion import cli as ingestion_cli
 from ingestion import freshness, storage, transform
 from ingestion.manager_state import chip_status
+from prediction.cli import CANDIDATES, SHIPPED_MODEL
 from prediction.current_stats import score_players
 
 from .model import Plan, Solution, SquadRules, solve, solve_plan
@@ -71,7 +72,7 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
         ft_value: float = 1.5, data_dir: Path = storage.DATA_DIR,
         scorer: str = "component", horizon: int | None = None, discount: float | None = None,
         chips: list[tuple[str, int]] | None = None,
-        now: pd.Timestamp | None = None) -> tuple[Plan | Solution, dict]:
+        now: pd.Timestamp | None = None, model: str = SHIPPED_MODEL) -> tuple[Plan | Solution, dict]:
     players = storage.load_table("players", data_dir)
     game_rules = storage.load_json("game_rules", data_dir)
     rules = SquadRules.from_data(game_rules, storage.load_table("positions", data_dir))
@@ -113,7 +114,7 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
     if settings.summed or settings.hold or not 1 <= settings.horizon <= 5:
         raise SystemExit("Optimiser settings must have summed and hold off and a horizon of 1 to 5 "
                          "(summed and hold are replay benchmarks only).")
-    pred = prediction_cli.run(data_dir=data_dir)
+    pred = prediction_cli.run(data_dir=data_dir, model=model)
     table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack().sort_index(axis=1)
     table = table.iloc[:, :horizon if horizon is not None else settings.horizon]
     plan_args: dict = {"max_hits": settings.max_hits, "chips": {gw: name for name, gw in chips}}
@@ -250,11 +251,15 @@ def main(argv: list[str] | None = None) -> None:
                              "placeholder scorer only)")
     parser.add_argument("--scorer", choices=["component", "placeholder"], default="component",
                         help="component model (default) or the Stage 2 ep_next/form placeholder")
+    parser.add_argument("--model", choices=CANDIDATES,
+                        help=f"prediction model (default {SHIPPED_MODEL}; component scorer only)")
     args = parser.parse_args(argv)
+    if args.model and args.scorer == "placeholder":
+        print("--model is ignored with --scorer placeholder")
     print(ensure_fresh_data(args.entry))
     result, context = run(args.entry, args.ep_weight, args.bench_weight, args.max_transfers, args.budget,
                           args.ft_value, scorer=args.scorer, horizon=args.horizon, discount=args.discount,
-                          chips=args.chip)
+                          chips=args.chip, model=args.model or SHIPPED_MODEL)
     print(format_solution(result, context))
 
 

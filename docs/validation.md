@@ -26,6 +26,12 @@ held-out prediction result (2025/26, from Stage 3a) are on the [prediction model
 page. In short: across all four seasons the model beats form at every horizon from one to five gameweeks ahead, on
 both error and ranking, but those figures are in-sample because the same seasons were used to tune it.
 
+One caveat applies to every model and benchmark alike: at a past deadline, the gameweeks two to five ahead
+(horizons 1 to 4) use the fixtures as they were finally played, so postponements and rescheduled double and blank
+gameweeks are already known. Accuracy at those horizons, and the horizon-weighted objective J, are therefore slightly
+optimistic; the next gameweek (horizon 0) is essentially unaffected. The machine-learning models are compared the same
+way on the [machine-learning models](ml-model.md) page.
+
 ## Season replay (planning)
 
 The replay plays each past season as a simulated manager would:
@@ -165,6 +171,12 @@ horizon 5, discount 0.7, bench weight 0.1, the leftover table at full strength a
   beat banning them (8,740 against 8,661). The leftover table scored 8,443 at zero
   strength, 8,635 at half and 8,740 at full, and three of the four held-out folds chose full strength.
 - **The true test is the live 2026/27 season.**
+
+These results used the component model's predictions. Stage 5 re-ran the replay on the shipped ml-minutes
+predictions over 2023/24 to 2025/26 (114 gameweeks). There the held-out multi-week model beat the simple look-ahead
+by 2.81 points a gameweek (interval +0.63 to +4.96) and single-week by 1.50 (-1.18 to +4.00), while the simple
+look-ahead no longer beat single-week. Its settings (discount 0.9, bench weight 0.2, a re-measured leftover table)
+replaced the ones above; details are on [the ML page](ml-model.md#how-to-use-it).
 
 ## Forward test: 2026/27
 

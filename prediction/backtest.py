@@ -26,6 +26,7 @@ STANDARD_RULES = SquadRules(
     starting_xi=11, max_per_club=3, hit_cost=4, max_free_transfers=5,
 )
 WARM_UP_GAMEWEEKS = 5
+MARKET_LAG = 0  # scripts/check_market_timing.py: same_gw > 0.9 and same_gw - next_gw > 0.3 in every season
 
 
 @dataclass
@@ -43,6 +44,17 @@ class Snapshot:
 
 
 Predictor = Callable[[Snapshot], pd.DataFrame]
+
+
+def market_at_deadline(season_rows: pd.DataFrame, gameweek: int, lag: int) -> pd.DataFrame:
+    """Ownership and net transfers per player as known at this gameweek's deadline."""
+    rows = season_rows[season_rows["gameweek"] == gameweek - lag].drop_duplicates("player_code")
+    managers = rows["selected"].sum() / 15
+    if rows.empty or not managers:
+        return pd.DataFrame(columns=["player_code", "ownership", "net_transfers"], dtype=float)
+    return pd.DataFrame({"player_code": rows["player_code"],
+                         "ownership": rows["selected"] / managers,
+                         "net_transfers": (rows["transfers_in"] - rows["transfers_out"]) / managers})
 
 
 def snapshot(match_log: pd.DataFrame, season: str, gameweek: int, horizon: int = 5) -> Snapshot:
@@ -65,6 +77,7 @@ def snapshot(match_log: pd.DataFrame, season: str, gameweek: int, horizon: int =
         season=season, gameweek=gameweek, cutoff=cutoff,
         history=match_log[match_log["kickoff"] < cutoff],
         players_now=now[["player_code", "team_code", "position", "price"]].assign(chance=np.nan)
+        .merge(market_at_deadline(s, gameweek, MARKET_LAG), on="player_code", how="left")
         .reset_index(drop=True),
         fixtures_ahead=fixtures.reset_index(drop=True),
         teams_in_season=sorted(s["team_code"].unique()),
@@ -261,10 +274,17 @@ def load_params(path: str | None) -> ModelParams:
 
 
 def build_predictors(names: list[str], params_path: str | None = None,
-                     ablation: bool = False) -> dict[str, Predictor]:
+                     ablation: bool = False, oos_minutes: pd.DataFrame | None = None,
+                     oos_points: dict[str, pd.DataFrame] | None = None) -> dict[str, Predictor]:
     params = load_params(params_path)
     predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor, "form": form_predictor,
                                         "component": make_component_predictor(params)}
+    if oos_minutes is not None:
+        from .walkforward import make_ml_minutes_predictor  # walkforward imports this module
+        predictors["ml-minutes"] = make_ml_minutes_predictor(params, oos_minutes)
+    if oos_points:
+        from .walkforward import make_table_predictor
+        predictors.update({m: make_table_predictor(d) for m, d in oos_points.items()})
     chosen = {n: predictors[n] for n in names}
     if ablation:  # the component model with one component switched off at a time
         for name in COMPONENTS:

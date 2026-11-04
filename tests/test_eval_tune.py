@@ -184,3 +184,59 @@ def test_saved_leftover_table_is_reused_only_for_the_same_sampling(tmp_path):
     assert tune._saved_leftover("left", tmp_path, fp)["base_table"] == [1.0]
     assert tune._saved_leftover("left", tmp_path, {**fp, "every_state": 2}) is None
     assert tune._saved_leftover("missing", tmp_path, fp) is None
+
+
+def test_fingerprint_includes_the_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(tune.storage, "load_table", lambda name, data_dir: pd.DataFrame({"a": [1, 2]}))
+    from prediction.walkforward import TEST_SEASONS
+    _oos_files(tmp_path, [f"ml_oos_{k}_lgbm_{s}" for k in ("minutes", "points") for s in TEST_SEASONS])
+    a = tune.fingerprint(["s"], tmp_path, "component")
+    b = tune.fingerprint(["s"], tmp_path, "lgbm")
+    assert a != b and b["model"] == "lgbm"
+
+
+def test_ml_model_predictions_come_from_the_oos_cache(tmp_path, monkeypatch):
+    log = pd.DataFrame(dict(season="2023-24", gameweek=[6, 7]))
+    monkeypatch.setattr(tune.storage, "load_table", lambda name, data_dir: log)
+    monkeypatch.setattr(tune, "snapshot", lambda log, season, gw, h: gw)
+    monkeypatch.setattr(tune, "make_component_predictor", lambda p: pytest.fail("component predictor ran"))
+    served = pd.DataFrame(dict(player_code=[1], gameweek=[3], total=[2.5]))
+    monkeypatch.setattr(tune, "_ml_predictor", lambda model, data_dir: lambda snap: served)
+    out = tune._predict_season(("2023-24", tmp_path, None, "lgbm"))
+    assert list(out["made_at"]) == [6, 7] and set(out["total"]) == {2.5}
+
+
+def _oos_files(tmp_path, names):
+    from ingestion import storage
+    for n in names:
+        storage.save_table(pd.DataFrame({"total": [1.0]}), n, tmp_path)
+
+
+def test_ml_fingerprint_changes_with_the_oos_predictions_it_reads(tmp_path, monkeypatch):
+    from prediction.walkforward import TEST_SEASONS
+    monkeypatch.setattr(tune.storage, "load_table", lambda name, data_dir: pd.DataFrame({"a": [1, 2]}))
+    names = [f"ml_oos_minutes_lgbm_{s}" for s in TEST_SEASONS] + [f"ml_oos_points_lgbm_{s}" for s in TEST_SEASONS]
+    _oos_files(tmp_path, names)
+    a = tune.fingerprint(["s"], tmp_path, "lgbm")
+    assert tune.fingerprint(["s"], tmp_path, "lgbm") == a and "oos_sha256" in a
+    (tmp_path / "processed" / f"{names[-1]}.parquet").write_bytes(b"changed")
+    assert tune.fingerprint(["s"], tmp_path, "lgbm") != a
+    assert "oos_sha256" not in tune.fingerprint(["s"], tmp_path, "component")
+
+
+def test_ml_fingerprint_without_the_oos_cache_names_the_command(tmp_path, monkeypatch):
+    monkeypatch.setattr(tune.storage, "load_table", lambda name, data_dir: pd.DataFrame({"a": [1, 2]}))
+    with pytest.raises(SystemExit, match="prediction.walkforward compare"):
+        tune.fingerprint(["s"], tmp_path, "ml-minutes")
+
+
+def test_ml_predictor_never_computes_a_missing_cache(tmp_path, monkeypatch):
+    from ingestion import storage
+    from prediction import walkforward
+    monkeypatch.setattr(walkforward, "CACHED_ONLY", False)        # restored after the test
+    from tests.test_backtest import synthetic_log
+    from tests.test_walkforward import _table
+    storage.save_table(synthetic_log(), "match_log", tmp_path)
+    storage.save_table(_table(), "ml_training_table", tmp_path)
+    with pytest.raises(RuntimeError, match="prediction.walkforward compare"):
+        tune._ml_predictor.__wrapped__("ml-minutes", tmp_path)

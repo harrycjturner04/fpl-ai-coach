@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from prediction import backtest
+
 from ingestion.transform import MATCH_COLUMNS
 from prediction.backtest import (actual_points, calibration, decision_points, eligible_players,
                                  naive_predictor, run_backtest, score_metrics, snapshot, split_report, xp_predictor)
@@ -30,6 +32,22 @@ def synthetic_log(n_gw=8, seed=0):
                             "price": 5.0 + k, "xp": float(rng.uniform(1, 5)),
                         })
     return pd.DataFrame(rows)
+
+
+def test_snapshot_market_columns_use_the_lagged_gameweek(monkeypatch):
+    log = synthetic_log()
+    log["selected"] = log["gameweek"] * 15.0
+    log["transfers_in"], log["transfers_out"] = 3.0, 1.0
+    monkeypatch.setattr(backtest, "MARKET_LAG", 1)
+    snap = snapshot(log, "2023-24", 3)
+    assert snap.players_now["ownership"].notna().all()
+    assert snapshot(log, "2023-24", 1).players_now["ownership"].isna().all()   # no gameweek 0
+    before = snap.players_now[["ownership", "net_transfers"]]
+    changed = log.copy()
+    changed.loc[(changed["season"] == "2023-24") & (changed["gameweek"] == 3) & (changed["player_code"] == 100), "selected"] = 999.0
+    pd.testing.assert_frame_equal(snapshot(changed, "2023-24", 3).players_now[["ownership", "net_transfers"]], before)
+    monkeypatch.setattr(backtest, "MARKET_LAG", 0)
+    assert not snapshot(changed, "2023-24", 3).players_now[["ownership"]].equals(before[["ownership"]])
 
 
 def test_snapshot_hides_the_future():

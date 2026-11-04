@@ -60,8 +60,17 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     )
     storage.save_json(metadata, "metadata", data_dir)
     _record_ep_next(tables, data_dir, pd.Timestamp(metadata["pulled_at"]))
+    _record_market(tables, data_dir, pd.Timestamp(metadata["pulled_at"]), bootstrap["total_players"])
 
     current_rows = _update_current_season(client, tables, data_dir)
+    stored_history = tables.get("player_history")
+    if stored_history is None:
+        stored_history = storage.load_table_or_none("player_history", data_dir)
+    if (stored_history is not None and set(transform.MARKET_COLUMNS) <= set(stored_history.columns)
+            and not current_rows.empty):  # a history table saved before these columns existed is skipped
+        current_rows = transform.fill_market_from_history(current_rows, stored_history, tables["players"])
+    if gaps := market_gaps(current_rows, tables["gameweeks"]):
+        print(f"  warning: ownership and transfer values missing for gameweek(s) {gaps}: run with --history")
     storage.save_table(current_rows, "current_season_rows", data_dir)
     archive = storage.load_table_or_none("archive_match_log", data_dir)
     if archive is None:
@@ -111,6 +120,36 @@ def _record_ep_next(tables: dict, data_dir: Path, now: pd.Timestamp) -> pd.DataF
     return log
 
 
+def _record_market(tables: dict, data_dir: Path, now: pd.Timestamp, total_players: int) -> pd.DataFrame | None:
+    """Save ownership and transfer counts for the next gameweek, keeping the latest record before its deadline."""
+    gws = tables["gameweeks"]
+    upcoming = gws[gws["is_next"]]
+    if upcoming.empty:
+        return None
+    gameweek, deadline = int(upcoming["id"].iloc[0]), upcoming["deadline_time"].iloc[0]
+    if now >= deadline:
+        return None
+    players = tables["players"]
+    new = pd.DataFrame({"season": transform.season_label(gws), "gameweek": gameweek,
+                        "player_code": players["code"].to_numpy(),
+                        "selected_by_percent": pd.to_numeric(players["selected_by_percent"]).to_numpy(),
+                        "transfers_in_event": players["transfers_in_event"].to_numpy(),
+                        "transfers_out_event": players["transfers_out_event"].to_numpy(),
+                        "total_players": total_players, "recorded_at": now})
+    old = storage.load_table_or_none("market_log", data_dir)
+    log = new if old is None else pd.concat([old, new], ignore_index=True)
+    log = log.sort_values("recorded_at").drop_duplicates(["season", "gameweek", "player_code"], keep="last")
+    storage.save_table(log.reset_index(drop=True), "market_log", data_dir)
+    return log
+
+
+def market_gaps(rows: pd.DataFrame, gameweeks: pd.DataFrame, share: float = 0.2) -> list[int]:
+    """Finished gameweeks in which more than `share` of the rows still lack market values."""
+    finished = rows[rows["gameweek"].isin(gameweeks.loc[gameweeks["finished"], "id"])]
+    missing = finished["selected"].isna().groupby(finished["gameweek"]).mean()
+    return [int(g) for g in missing[missing > share].index]
+
+
 def _gameweek_is_covered(cached: pd.DataFrame | None, fixtures: pd.DataFrame, gameweek: int) -> bool:
     """True if every fixture of this gameweek (fixtures with no event yet are ignored) has a
     cached row. A gameweek fetched while some fixtures hadn't finished yet is covered once its
@@ -132,6 +171,8 @@ def _update_current_season(client: FPLClient, tables: dict, data_dir: Path) -> p
     gws = tables["gameweeks"]
     season = transform.season_label(gws)
     cached = storage.load_table_or_none("current_season_rows", data_dir)
+    if cached is not None and not set(transform.MATCH_COLUMNS) <= set(cached.columns):
+        cached = None  # rows saved before new columns were added: refetch the season
     if cached is not None:
         cached = cached[cached["season"] == season]
     todo = [int(g.id) for g in gws[gws["finished"] | gws["is_current"]].itertuples()

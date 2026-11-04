@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from ingestion.manager_state import selling_price
-from optimisation.model import solve_plan
+from optimisation.model import InfeasibleError, solve_plan
 from optimisation.settings import PlanSettings
 from optimisation.validate import check_plan
 from prediction.backtest import STANDARD_RULES, WARM_UP_GAMEWEEKS, Predictor, snapshot
@@ -13,7 +13,7 @@ from prediction.backtest import STANDARD_RULES, WARM_UP_GAMEWEEKS, Predictor, sn
 from .scoring import score_gameweek
 
 SINGLE_WEEK = PlanSettings(horizon=1)              # today's optimiser
-HOLD = PlanSettings(horizon=1, hold=True)          # never transfers after the first gameweek
+HOLD = PlanSettings(horizon=1, hold=True)          # no transfers after the first gameweek unless a club move makes the squad illegal
 SUMMED = PlanSettings(horizon=5, summed=True, discount=0.85)   # one-week solve on discounted five-week totals
 
 
@@ -68,7 +68,13 @@ def replay_season(match_log: pd.DataFrame, season: str, predictor: Predictor, se
                            free_transfers=free, max_transfers=0 if settings.hold else None)
         else:
             kwargs |= dict(budget=100.0)
-        plan = solve_plan(players, scores, rules, **kwargs)
+        try:
+            plan = solve_plan(players, scores, rules, **kwargs)
+        except InfeasibleError:   # hold only: a club move left the held squad over the club cap, so transfer as needed
+            if kwargs.get("max_transfers") != 0:
+                raise
+            kwargs["max_transfers"] = None
+            plan = solve_plan(players, scores, rules, **kwargs)
         check_args = {k: kwargs[k] for k in ("budget", "current_squad", "bank", "free_transfers", "max_hits") if k in kwargs}
         problems = check_plan(plan, players, rules, **check_args)
         if problems:

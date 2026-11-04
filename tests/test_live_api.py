@@ -82,3 +82,8 @@ def test_archive_schema_and_scoring_reconstruction():
     for season, rows in log.groupby("season"):
         exact = (points_from_stats(rows, rules_for_season(season)) == rows["points"]).mean()
         assert exact == 1.0, f"{season}: only {exact:.2%} of rows reconstruct exactly"
+
+
+def test_event_live_stats_include_bps_and_ict(client):
+    live = client.event_live(1)
+    assert {"bps", "influence", "creativity", "threat"} <= set(live["elements"][0]["stats"])

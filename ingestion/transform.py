@@ -16,6 +16,7 @@ MATCH_COLUMNS = [
     "was_home", "position", "minutes", "starts", "goals", "assists", "xg", "xa", "xgc",
     "clean_sheets", "goals_conceded", "own_goals", "penalties_saved", "penalties_missed", "saves",
     "bonus", "defensive_contribution", "yellow_cards", "red_cards", "points", "price", "xp",
+    "bps", "influence", "creativity", "threat", "selected", "transfers_in", "transfers_out",
 ]
 
 # FPL serves these stats as strings ("4.5"); make them numeric.
@@ -235,7 +236,8 @@ _LIVE_STATS = {
     "goals_conceded": "goals_conceded", "own_goals": "own_goals", "penalties_saved": "penalties_saved",
     "penalties_missed": "penalties_missed", "saves": "saves", "bonus": "bonus",
     "defensive_contribution": "defensive_contribution", "yellow_cards": "yellow_cards",
-    "red_cards": "red_cards",
+    "red_cards": "red_cards", "bps": "bps", "influence": "influence", "creativity": "creativity",
+    "threat": "threat",
 }
 
 
@@ -317,6 +319,7 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
                 "team_code": int(code_of[p.team]),
                 "opponent_code": int(code_of[fx.team_a if home else fx.team_h]),
                 "was_home": bool(home), "position": p.position, "price": float(p.price), "xp": float("nan"),
+                "selected": float("nan"), "transfers_in": float("nan"), "transfers_out": float("nan"),
                 "minutes": float(stats.get("minutes", 0)) if single else float(mins[fx.id]),
                 "points": float(stats.get("total_points", 0)) if single
                 else float(sum(s["points"] for s in explain.get(fx.id, {}).values())),
@@ -325,6 +328,21 @@ def live_match_rows(live: dict, gameweek: int, fixtures: pd.DataFrame, players: 
                 row[col] = float(stats.get(key, 0) or 0) if single else splits[col][fx.id]
             rows.append(row)
     return pd.DataFrame(rows, columns=MATCH_COLUMNS)
+
+
+MARKET_COLUMNS = ["selected", "transfers_in", "transfers_out"]
+
+
+def fill_market_from_history(rows: pd.DataFrame, history: pd.DataFrame, players: pd.DataFrame) -> pd.DataFrame:
+    """Fill the NaN market columns of live match rows (`event/{gw}/live` has none) from element-summary
+    history, matched on (player_code, fixture_id). Values already present are kept."""
+    h = history.assign(player_code=history["player_id"].map(players.set_index("id")["code"]))
+    h = h.drop_duplicates(["player_code", "fixture"]).set_index(["player_code", "fixture"])[MARKET_COLUMNS]
+    found = h.reindex(pd.MultiIndex.from_frame(rows[["player_code", "fixture_id"]]))
+    out = rows.copy()
+    for col in MARKET_COLUMNS:
+        out[col] = rows[col].fillna(pd.Series(found[col].to_numpy(), index=rows.index))
+    return out
 
 
 def current_gameweek(gw: pd.DataFrame) -> int | None:

@@ -2,6 +2,7 @@ import pandas as pd
 
 from ingestion import storage
 from ingestion.cli import _update_current_season
+from ingestion.transform import MATCH_COLUMNS
 
 
 class FakeClient:
@@ -58,9 +59,36 @@ def test_fully_covered_finished_data_checked_gameweek_is_not_refetched(tmp_path)
     ])
     # Cached rows for GW1 cover both of its fixtures.
     cached = pd.DataFrame({"season": ["2026-27", "2026-27"], "gameweek": [1, 1], "fixture_id": [1, 2],
-                           "player_code": [100, 200]})
+                           "player_code": [100, 200]}).reindex(columns=MATCH_COLUMNS)
     storage.save_table(cached, "current_season_rows", tmp_path)
 
     client = FakeClient()
     _update_current_season(client, _tables(fixtures, gameweeks), tmp_path)
     assert client.calls == []
+
+
+def test_cache_missing_a_new_column_is_refetched(tmp_path):
+    fixtures = pd.DataFrame({
+        "id": [1, 2], "event": [1, 1],
+        "finished_provisional": [True, True], "team_h": [1, 3], "team_a": [2, 4],
+        "kickoff_time": pd.to_datetime(["2026-08-22T14:00Z"] * 2, utc=True),
+    })
+    gameweeks = _gameweeks([
+        {"id": 1, "deadline_time": "2026-08-21T17:30:00Z", "finished": True,
+         "data_checked": True, "is_current": False},
+    ])
+    cached = pd.DataFrame({"season": ["2026-27", "2026-27"], "gameweek": [1, 1], "fixture_id": [1, 2],
+                           "player_code": [100, 200]}).reindex(columns=MATCH_COLUMNS).drop(columns="bps")
+    storage.save_table(cached, "current_season_rows", tmp_path)
+
+    client = FakeClient()
+    _update_current_season(client, _tables(fixtures, gameweeks), tmp_path)
+    assert client.calls == [1]
+
+
+def test_market_gaps_name_finished_gameweeks_with_many_missing_values():
+    from ingestion.cli import market_gaps
+    rows = pd.DataFrame({"gameweek": [1] * 4 + [2] * 4 + [3] * 4,
+                         "selected": [1.0] * 4 + [None, None, None, 1.0] + [None] * 4})
+    gws = pd.DataFrame({"id": [1, 2, 3], "finished": [True, True, False]})
+    assert market_gaps(rows, gws) == [2]          # gameweek 3 is not finished; gameweek 1 has no gaps

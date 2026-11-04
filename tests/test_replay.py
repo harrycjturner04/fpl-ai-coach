@@ -134,7 +134,7 @@ def test_predictor_never_sees_the_future():
 
     def checked(snap):
         assert snap.history["kickoff"].max() < snap.cutoff
-        assert list(snap.players_now.columns) == ["player_code", "team_code", "position", "price", "chance"]
+        assert list(snap.players_now.columns) == ["player_code", "team_code", "position", "price", "chance", "ownership", "net_transfers"]
         calls.append(snap.gameweek)
         return naive_predictor(snap)
 
@@ -239,3 +239,14 @@ def test_load_settings_empty_dir(tmp_path):
         assert load_settings(tmp_path) == PlanSettings.from_dict(json.loads(shipped.read_text()))
     else:
         assert load_settings(tmp_path) == PlanSettings()
+
+
+def test_hold_makes_the_forced_transfer_when_a_club_move_leaves_the_squad_illegal(monkeypatch):
+    real = replay_module.solve_plan
+
+    def infeasible_without_transfers(*args, **kw):
+        if kw.get("max_transfers") == 0:
+            raise replay_module.InfeasibleError("held squad is illegal")
+        return real(*args, **kw)
+    monkeypatch.setattr(replay_module, "solve_plan", infeasible_without_transfers)
+    assert len(run(HOLD)) == len(run(SINGLE_WEEK))

@@ -5,6 +5,7 @@ import pytest
 def bootstrap():
     """Minimal bootstrap-static payload mirroring the live API's shape."""
     return {
+        "total_players": 10_000_000,
         "chips": [
             {"id": 1, "name": "wildcard", "number": 1, "start_event": 2, "stop_event": 19, "chip_type": "transfer"},
             {"id": 2, "name": "wildcard", "number": 1, "start_event": 20, "stop_event": 38, "chip_type": "transfer"},
