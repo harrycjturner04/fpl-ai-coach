@@ -12,10 +12,12 @@ from ingestion.congestion import near
 from optimisation.model import Plan
 
 from .client import LLM, Tool, Usage, resolve_player
-from .flags import FLAG_SCHEMA, Flag, parse_flags
+from .flags import FLAG_SCHEMA, Flag, _date, parse_flags
 
 PROMPT = Path(__file__).parent / "prompts" / "news.md"
-FOLLOW_UP = "You have not called submit_flags. Call it now with your flags (an empty list if there is no new news)."
+FOLLOW_UP = ("You have not called submit_flags. Call it now with your flags (an empty list if there is no new "
+             "news) and one sources row per listed club.")
+NO_SEARCH = "Web search is off: use only the FPL fields shown."
 CAPTAIN_OPTIONS = 5
 
 _ITEM = copy.deepcopy(FLAG_SCHEMA)
@@ -23,15 +25,23 @@ _ITEM["required"].append("player_name")
 _ITEM["properties"]["player_name"] = {"type": ["string", "null"]}
 SUBMIT_FLAGS = Tool(
     "submit_flags", "Submit all news flags, once, at the end. An empty list means no new news.",
-    {"type": "object", "additionalProperties": False, "required": ["flags"],
-     "properties": {"flags": {"type": "array", "items": _ITEM}}})
+    {"type": "object", "additionalProperties": False, "required": ["flags", "sources"],
+     "properties": {
+         "flags": {"type": "array", "items": _ITEM},
+         "sources": {"type": "array", "description": "one row per listed club checked", "items": {
+             "type": "object", "additionalProperties": False, "required": ["team", "source_date", "url"],
+             "properties": {
+                 "team": {"type": "string", "description": "club short name as listed, e.g. ARS"},
+                 "source_date": {"type": ["string", "null"],
+                                 "description": "newest team-news source found, YYYY-MM-DD; null if none"},
+                 "url": {"type": ["string", "null"]}}}}}})
 
 
 @dataclass
 class NewsResult:
     flags: list[Flag]
     warnings: list[str]
-    newest_source: dict[int, date | None]  # FPL team id -> newest dated source (flag or FPL news_added)
+    newest_source: dict[int, date | None]  # FPL team id -> newest dated source (sources row, flag or FPL news_added)
     usage: Usage
 
 
@@ -112,13 +122,13 @@ def gather_flags(llm: LLM, ids, players, congestion, fixtures, next_gw, *, teams
                  search: bool = True) -> NewsResult:
     """One news run: web search (unless `search` is False) plus the strict submit_flags tool. If Claude
     never calls submit_flags, one follow-up asks for it. LLMUnavailable propagates to the caller."""
-    submitted: list[list[dict]] = []
+    submitted: list[dict] = []
 
     def submit(inp: dict) -> dict:
-        submitted.append(inp["flags"])
+        submitted.append(inp)
         return {"received": len(inp["flags"])}
 
-    system = PROMPT.read_text(encoding="utf-8")
+    system = PROMPT.read_text(encoding="utf-8") + ("" if search else NO_SEARCH + "\n")
     messages = [{"role": "user", "content": news_context(ids, players, congestion, fixtures, next_gw, teams=teams)}]
     server = [llm.settings.web_search_tool()] if search else []
     usage = llm.run(system, messages, [SUBMIT_FLAGS], {"submit_flags": submit}, server).usage
@@ -126,13 +136,21 @@ def gather_flags(llm: LLM, ids, players, congestion, fixtures, next_gw, *, teams
         messages.append({"role": "user", "content": FOLLOW_UP})
         usage += llm.run(system, messages, [SUBMIT_FLAGS], {"submit_flags": submit}, server).usage
     warnings = [] if submitted else ["news: submit_flags was never called, even after a reminder; no news flags"]
-    flags, w = _flags(submitted[-1] if submitted else [], ids, players)
+    final = submitted[-1] if submitted else {"flags": [], "sources": []}
+    flags, w = _flags(final["flags"], ids, players)
 
     pool = players[players["id"].isin(ids)]
     team_of = pool.set_index("id")["team"]
     newest: dict[int, date | None] = {int(t): None for t in pool["team"].unique()}
     dated = [(t, pd.Timestamp(d).date()) for t, d in zip(pool["team"], pool["news_added"]) if pd.notna(d)]
     dated += [(team_of[f.player_id], f.source_date) for f in flags if f.source_date is not None]
+    by_short = {str(k).casefold(): v for k, v in teams.set_index("short_name")["id"].items()}
+    for row in final["sources"]:
+        t = by_short.get(row["team"].casefold())
+        if t is None or int(t) not in newest:
+            w.append(f"sources row for {row['team']!r} ignored: not a listed club")
+        elif (d := _date(row["source_date"])) is not None:
+            dated.append((t, d))
     for t, d in dated:
         newest[int(t)] = max(filter(None, (newest[int(t)], d)))
     return NewsResult(flags, warnings + w, newest, usage)

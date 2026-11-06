@@ -47,6 +47,13 @@
        "source_kind": "official",
        "summary": "unknown"
       }
+     ],
+     "sources": [
+      {
+       "team": "XYZ",
+       "source_date": "2026-11-05",
+       "url": "https://www.example.com/x"
+      }
      ]
     }
    }

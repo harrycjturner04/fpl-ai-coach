@@ -49,6 +49,13 @@
        "source_kind": "predicted_lineup",
        "summary": "Predicted lineup rests Haaland after 90 minutes in the CL against Real Madrid"
       }
+     ],
+     "sources": [
+      {
+       "team": "MCI",
+       "source_date": "2026-11-06",
+       "url": "https://www.example-fpl-site.com/man-city-predicted-xi"
+      }
      ]
     }
    }

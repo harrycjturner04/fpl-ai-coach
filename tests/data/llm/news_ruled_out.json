@@ -53,6 +53,23 @@
        "source_kind": "official",
        "summary": "Arteta: hamstring, out for GW11 and GW12, back for GW13"
       }
+     ],
+     "sources": [
+      {
+       "team": "ARS",
+       "source_date": "2026-11-06",
+       "url": "https://www.arsenal.com/news/arteta-press-conference-saka-update"
+      },
+      {
+       "team": "CHE",
+       "source_date": "2026-11-05",
+       "url": "https://www.chelseafc.com/news/maresca-press-conference"
+      },
+      {
+       "team": "MCI",
+       "source_date": null,
+       "url": null
+      }
      ]
     }
    }
