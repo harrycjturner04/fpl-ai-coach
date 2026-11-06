@@ -20,7 +20,7 @@ Prices are handled in integer tenths (£0.1m) so budget checks are exact.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -111,6 +111,9 @@ def solve_plan(
     leftover_values: Sequence[float] = (),
     hit_margin: float = 0.0,
     chips: dict[int, str] | None = None,
+    banned: Collection[int] = (),
+    forced: Collection[int] = (),
+    gap: float = 0.0,
     solver=None,
 ) -> Plan:
     """Optimal squads, XIs, captains and transfers for every gameweek of `scores`.
@@ -121,6 +124,8 @@ def solve_plan(
     past the horizon. `max_transfers` caps week one only; `max_hits` every week.
     `free_transfers=None` (before gameweek 1): week one's transfers are unlimited and free,
     as in from-scratch mode, so `max_transfers` is ignored and `max_hits` applies from week two.
+    `banned` players are in no squad in any week (owned ones are sold in week one, or after a
+    leading Free Hit); `forced` players are in week one's squad. `gap` is HiGHS's relative MIP gap.
     """
     chips = chips or {}
     left = list(leftover_values)
@@ -136,11 +141,18 @@ def solve_plan(
         raise ValueError(f"Owned players {unknown} are missing from the player table; "
                          "the team and player data are probably from different pulls.")
 
+    banned, forced = set(banned), set(forced)
+    if banned & forced:
+        raise ValueError(f"players {sorted(banned & forced)} are both banned and forced")
+    unknown = sorted(forced - set(players["id"]))
+    if unknown:
+        raise ValueError(f"Forced players {unknown} are missing from the player table.")
+
     scratch = not owned
     unlimited = scratch or free_transfers is None   # week one's transfers are free and uncapped
 
     # Pool: scored players plus anything already owned (it may be kept or sold).
-    pool = players[players["id"].isin(set(scores.index) | set(owned))].set_index("id")
+    pool = players[players["id"].isin(set(scores.index) | set(owned) | forced)].set_index("id")
     ids = pool.index.tolist()
     weeks = list(scores.columns)
     H = len(weeks)
@@ -246,11 +258,21 @@ def solve_plan(
             prob += n_in <= max_transfers
     for i in owned:
         prob += pulp.lpSum(sv[i, t] for t in T) <= 1
+    for i in banned & set(ids):
+        for t in T:
+            prob += squad_var(i, t) == 0
+            if chip_at[t] != "freehit":   # a Free Hit week cannot sell, so the regular squad waits
+                prob += x[i, t] == 0
+    for i in forced:
+        prob += squad_var(i, 0) == 1
     prob += pulp.lpSum(z.values()) <= f[H] - 1
 
-    status = prob.solve(solver or pulp.HiGHS(msg=False, gapRel=0, gapAbs=0, threads=1))
+    status = prob.solve(solver or pulp.HiGHS(msg=False, gapRel=gap, gapAbs=0 if gap == 0 else None, threads=1))
     if pulp.LpStatus[status] != "Optimal":
-        raise InfeasibleError(f"No legal squad found (solver status: {pulp.LpStatus[status]}).")
+        msg = f"No legal squad found (solver status: {pulp.LpStatus[status]})."
+        if forced:
+            msg += f" Forced players: {sorted(forced)}."
+        raise InfeasibleError(msg)
 
     out: list[Solution] = []
     prev, ft, total = list(owned), free_transfers, 0.0

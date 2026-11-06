@@ -97,11 +97,13 @@ def brute_force(players, scores, rules, budget, bench_weight=0.1,
 
 def brute_force_plan(players, scores, rules, *, budget=None, bench_weight=0.1, current_squad=None, bank=0.0,
                      free_transfers=1, max_hits=None, discount=1.0, leftover_values=(), hit_margin=0.0,
-                     chips=None):
+                     chips=None, banned=(), forced=()):
     """Best plan objective by dynamic programming over (squad, owned players already sold, free transfers).
 
     Shares nothing with the ILP. Chips supported: wildcard, bboost, 3xc (not freehit).
-    `free_transfers=None`: week one's transfers are unlimited and free, then one free transfer."""
+    `free_transfers=None`: week one's transfers are unlimited and free, then one free transfer.
+    `banned` players are left out of every candidate squad; week one's squad must contain `forced`.
+    Raises ValueError (max of nothing) when no plan is legal."""
     chips = chips or {}
     weeks = list(scores.columns)
     by_pos = {pos: players.loc[players["position"] == pos, "id"].tolist() for pos in rules.composition}
@@ -114,7 +116,7 @@ def brute_force_plan(players, scores, rules, *, budget=None, bench_weight=0.1, c
     squads = []
     for combo in itertools.product(*(itertools.combinations(by_pos[p], n) for p, n in rules.composition.items())):
         squad = frozenset(i for group in combo for i in group)
-        if max(Counter(club[i] for i in squad).values()) <= rules.max_per_club:
+        if max(Counter(club[i] for i in squad).values()) <= rules.max_per_club and not squad & set(banned):
             squads.append(squad)
 
     def lineup(squad, gw):
@@ -138,6 +140,8 @@ def brute_force_plan(players, scores, rules, *, budget=None, bench_weight=0.1, c
         nxt = {}
         for (squad, sold, ft), value in states.items():
             for new in squads:
+                if t == 0 and not set(forced) <= new:
+                    continue
                 out = squad - new
                 if out & sold:  # an owned player is sold at most once
                     continue
