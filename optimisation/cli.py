@@ -23,9 +23,9 @@ from ingestion.manager_state import chip_status
 from prediction.cli import CANDIDATES, SHIPPED_MODEL
 from prediction.current_stats import score_players
 
-from .model import Plan, Solution, SquadRules, solve, solve_plan
-from .settings import load_settings
-from .validate import check_plan, check_squad
+from . import planning
+from .model import Plan, Solution, SquadRules, solve
+from .validate import check_squad
 
 POSITION_ORDER = ["GKP", "DEF", "MID", "FWD"]
 
@@ -110,30 +110,17 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
         return sol, context
 
     from prediction import cli as prediction_cli
-    settings = load_settings(data_dir)
-    if settings.summed or settings.hold or not 1 <= settings.horizon <= 5:
-        raise SystemExit("Optimiser settings must have summed and hold off and a horizon of 1 to 5 "
-                         "(summed and hold are replay benchmarks only).")
+    ctx = planning.load_context(entry_id, data_dir)
+    settings = ctx.settings
     pred = prediction_cli.run(data_dir=data_dir, model=model)
-    table = pred.groupby(["player_id", "gameweek"])["total"].sum().unstack().sort_index(axis=1)
-    table = table.iloc[:, :horizon if horizon is not None else settings.horizon]
-    plan_args: dict = {"max_hits": settings.max_hits, "chips": {gw: name for name, gw in chips}}
+    table = planning.score_table(pred, horizon if horizon is not None else settings.horizon)
     if state is not None:
-        plan_args.update(current_squad=owned, bank=state["bank"], free_transfers=free)
         context["max_transfers"] = None if free is None else free + settings.max_hits
-    else:
-        plan_args["budget"] = budget if budget is not None else game_rules["total_budget"]
     try:
-        plan = solve_plan(
-            players, table, rules, **plan_args,
-            bench_weight=bench_weight if bench_weight is not None else settings.bench_weight,
-            discount=discount if discount is not None else settings.discount,
-            leftover_values=settings.leftover_values, hit_margin=settings.hit_margin)
-    except ValueError as err:
+        plan = planning.plan(ctx, table, chips={gw: name for name, gw in chips}, budget=budget,
+                             bench_weight=bench_weight, discount=discount)
+    except (ValueError, RuntimeError) as err:
         raise SystemExit(str(err)) from err
-    problems = check_plan(plan, players, rules, **plan_args)
-    if problems:
-        raise SystemExit("Optimiser produced an illegal plan:\n  " + "\n  ".join(problems))
     context["scores"] = table.iloc[:, 0]
     context["settings"] = settings
     gameweeks = storage.load_table("gameweeks", data_dir)   # present: the predictions needed it
