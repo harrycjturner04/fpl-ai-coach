@@ -178,3 +178,22 @@ def test_parse_flags_validates():
     assert len(flags) == 1 and flags[0].source_date == date(2026, 11, 5) and len(warnings) == len(bad)
     assert set(FLAG_SCHEMA["required"]) == set(good) and FLAG_SCHEMA["additionalProperties"] is False
     assert FLAG_SCHEMA["properties"]["return_gw"]["type"] == ["integer", "null"]
+
+
+def test_flag_schema_is_strict_tool_compatible():
+    def keys(node):
+        if isinstance(node, dict):
+            yield from node
+            for v in node.values():
+                yield from keys(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from keys(v)
+    assert not {"minimum", "maximum", "multipleOf"} & set(keys(FLAG_SCHEMA))
+    assert FLAG_SCHEMA["additionalProperties"] is False
+    assert set(FLAG_SCHEMA["required"]) == set(FLAG_SCHEMA["properties"])
+
+
+def test_horizon_below_one_rejected():
+    with pytest.raises(ValueError, match="horizon"):
+        run([flag()], horizon=0)

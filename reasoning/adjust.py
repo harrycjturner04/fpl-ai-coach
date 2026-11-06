@@ -54,6 +54,8 @@ def adjust(flags: list[Flag], players: pd.DataFrame, pred: pd.DataFrame, next_gw
     Availability flags (fit/doubt/out/suspended) set availability: 0 before return_gw and the model value from it,
     or without return_gw the week-1 value fading like FPL chance. Rotation flags set week-1 start_share.
     Each change is capped at CAP unless the flag is high-confidence and official."""
+    if horizon < 1:
+        raise ValueError(f"horizon must be at least 1, got {horizon}")
     by_id = players.set_index("id")
     out: dict[tuple[int, int], dict[str, float]] = {}
     audit: list[Adjustment] = []

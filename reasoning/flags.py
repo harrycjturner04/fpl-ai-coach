@@ -29,7 +29,7 @@ FLAG_SCHEMA = {
     "properties": {
         "player_id": {"type": "integer", "description": "FPL element id"},
         "status": {"type": "string", "enum": list(STATUSES)},
-        "start_prob_next_gw": {"type": "number", "minimum": 0, "maximum": 1},
+        "start_prob_next_gw": {"type": "number", "description": "probability in [0, 1]"},
         "return_gw": {"type": ["integer", "null"], "description": "first gameweek the player is expected back"},
         "confidence": {"type": "string", "enum": list(CONFIDENCES)},
         "source_url": {"type": "string"},
