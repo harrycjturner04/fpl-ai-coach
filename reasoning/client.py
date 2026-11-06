@@ -27,7 +27,11 @@ UNAVAILABLE_ERRORS = (anthropic.AuthenticationError, anthropic.PermissionDeniedE
 
 class LLMUnavailable(Exception):
     """Claude could not be used (credentials, network, service, or a refusal after fallback);
-    callers fall back to the optimiser-only output."""
+    callers fall back to the optimiser-only output. `usage` is what the run had spent before it failed."""
+
+    def __init__(self, message: str, usage: "Usage | None" = None):
+        super().__init__(message)
+        self.usage = usage
 
 
 @dataclass(frozen=True)
@@ -63,20 +67,23 @@ class Usage:
 
     @classmethod
     def from_response(cls, response, settings: Settings, requested_model: str | None = None) -> "Usage":
-        """Usage and USD cost of one response, priced at the model that served it (a fallback may
-        differ from the requested one)."""
+        """Usage and USD cost of one response. With a fallback, `usage.iterations` is the per-attempt
+        source of truth (top-level usage covers only the attempt that produced the message), so each
+        attempt is counted and priced at its own model; otherwise the top-level usage at `response.model`."""
         u = response.usage
         stu = u.server_tool_use
-        n = dict(input=u.input_tokens or 0, output=u.output_tokens or 0, cache_read=u.cache_read_input_tokens or 0,
-                 cache_write=u.cache_creation_input_tokens or 0,
-                 searches=(stu.web_search_requests or 0) if stu else 0)
-        prices = settings.prices_per_mtok.get(response.model)
-        if prices is None:
-            log.warning("no price for model %s; costing at %s", response.model, requested_model)
-            prices = settings.prices_per_mtok[requested_model]
-        cost = sum(n[k] * prices[k] for k in ("input", "output", "cache_read", "cache_write")) / 1e6
-        cost += n["searches"] * settings.search_price_per_1000 / 1000
-        return cls(**n, cost_usd=cost)
+        searches = (stu.web_search_requests or 0) if stu else 0
+        attempts = [(it, getattr(it, "model", None) or requested_model) for it in u.iterations or []]
+        total = cls(searches=searches, cost_usd=searches * settings.search_price_per_1000 / 1000)
+        for part, model in attempts or [(u, response.model)]:
+            n = dict(input=part.input_tokens or 0, output=part.output_tokens or 0,
+                     cache_read=part.cache_read_input_tokens or 0, cache_write=part.cache_creation_input_tokens or 0)
+            prices = settings.prices_per_mtok.get(model)
+            if prices is None:
+                log.warning("no price for model %s; costing at %s", model, requested_model)
+                prices = settings.prices_per_mtok[requested_model]
+            total += cls(**n, cost_usd=sum(n[k] * prices[k] for k in n) / 1e6)
+        return total
 
     def __add__(self, other: "Usage") -> "Usage":
         return Usage(*(getattr(self, f.name) + getattr(other, f.name) for f in fields(self)))
@@ -100,6 +107,7 @@ class RunResult:
     content: list
     usage: Usage
     tool_calls: list[dict] = field(default_factory=list)
+    stop_reason: str = "end_turn"  # the final response's, or "max_turns" when the turn cap stopped the loop
 
 
 _TYPES = {"object": dict, "array": list, "string": str, "integer": int, "number": (int, float),
@@ -176,23 +184,32 @@ class LLM:
     def run(self, system: str, messages: list, tools: list[Tool], handlers: dict[str, Callable[[dict], dict]],
             server_tools=()) -> RunResult:
         """Manual tool loop. `messages` is the caller's history and is extended in place (append-only:
-        each full assistant `content`, then the tool results), so a chat can continue from it.
+        each full assistant `content`, then the tool results), so a chat can continue from it. A refused
+        turn is not appended; a max_tokens turn is appended without its tool_use blocks.
         Client tools come first in the given order, then server tools, so the cached prefix is stable."""
         tool_params = [t.to_param() for t in tools] + list(server_tools)
         schemas = {t.name: t.input_schema for t in tools}
         usage, calls = Usage(), []
+        stop = "max_turns"
         for _ in range(MAX_TURNS):
             response = self._request(system, messages, tool_params)
             usage += Usage.from_response(response, self.settings, self.model)
+            if response.stop_reason == "refusal":  # raise before appending: history stays valid
+                raise LLMUnavailable(f"refused after fallback: {response.stop_details}", usage)
+            uses = [b for b in response.content if b.type == "tool_use"]
+            if response.stop_reason == "max_tokens":
+                # tool_use blocks are cut off or unanswered; a history ending in one would 400
+                kept = [b for b in response.content if b.type != "tool_use"]
+                if kept:
+                    messages.append({"role": "assistant", "content": kept})
+                log.warning("%s: response cut off at max_tokens", self.role)
+                stop = "max_tokens"
+                break
             messages.append({"role": "assistant", "content": response.content})
-            if response.stop_reason == "refusal":
-                raise LLMUnavailable(f"refused after fallback: {response.stop_details}")
             if response.stop_reason == "pause_turn":
                 continue  # server resumes from the trailing server_tool_use; no extra user message
-            uses = [b for b in response.content if b.type == "tool_use"]
             if response.stop_reason != "tool_use" or not uses:
-                if response.stop_reason == "max_tokens":
-                    log.warning("%s: response cut off at max_tokens", self.role)
+                stop = response.stop_reason or "end_turn"
                 break
             results = []
             for block in uses:
@@ -208,7 +225,7 @@ class LLM:
         else:
             log.warning("%s: stopped after %d turns", self.role, MAX_TURNS)
         text = "".join(b.text for b in response.content if b.type == "text")
-        return RunResult(text, response.content, usage, calls)
+        return RunResult(text, response.content, usage, calls, stop)
 
 
 _UNDECOMPOSED = str.maketrans({"ø": "o", "æ": "ae", "ł": "l", "đ": "d", "ı": "i"})  # letters NFKD keeps whole

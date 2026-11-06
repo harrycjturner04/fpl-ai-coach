@@ -58,6 +58,27 @@ def test_cost_from_usage(settings):
     assert total.searches == 6 and total.cost_usd == pytest.approx(2 * u.cost_usd)
 
 
+def test_cost_sums_fallback_iterations_at_each_models_price(settings):
+    # Sonnet 5.5 declined mid-stream (billed), Sonnet 5 served; top-level usage covers only the served attempt
+    m = anthropic.types.beta.BetaMessage.model_construct(**message([], model="claude-sonnet-5", usage={
+        "input_tokens": 300, "output_tokens": 100,
+        "iterations": [
+            {"type": "message", "model": "claude-sonnet-5-5", "input_tokens": 1000, "output_tokens": 200,
+             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+            {"type": "fallback_message", "model": "claude-sonnet-5", "input_tokens": 300, "output_tokens": 100,
+             "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+        ]}))
+    settings.prices_per_mtok["claude-sonnet-5"] = {"input": 1.0, "output": 5.0, "cache_read": 0.1, "cache_write": 1.25}
+    u = Usage.from_response(m, settings, "claude-sonnet-5-5")
+    assert (u.input, u.output) == (1300, 300)
+    assert u.cost_usd == pytest.approx((1000 * 2 + 200 * 10) / 1e6 + (300 * 1 + 100 * 5) / 1e6)
+
+
+def test_shipped_prices_cover_fallback_model(settings):
+    assert settings.prices_per_mtok["claude-sonnet-5"] == {"input": 2.0, "output": 10.0, "cache_read": 0.2,
+                                                           "cache_write": 2.5}
+
+
 def test_tool_loop_executes_handler_and_returns_text(settings):
     calls = []
     llm, fake = _llm(settings, FakeClient.from_recorded("tool_loop"))
@@ -163,10 +184,32 @@ def test_missing_credentials_raise_llm_unavailable(settings, monkeypatch):
         llm.run("s", [{"role": "user", "content": "q"}], [], {})
 
 
-def test_refusal_after_fallback_raises_llm_unavailable(settings):
-    llm, _ = _llm(settings, [message([], stop_reason="refusal")])
-    with pytest.raises(LLMUnavailable):
-        llm.run("s", [{"role": "user", "content": "q"}], [], {})
+def test_refusal_after_fallback_raises_llm_unavailable_without_touching_history(settings):
+    llm, _ = _llm(settings, [message([{"type": "text", "text": "partial"}], stop_reason="refusal")])
+    history = [{"role": "user", "content": "q"}]
+    with pytest.raises(LLMUnavailable) as exc:
+        llm.run("s", history, [], {})
+    assert history == [{"role": "user", "content": "q"}]
+    assert exc.value.usage.input == 10  # the refused attempt's spend is still reported
+
+
+def test_max_tokens_drops_cut_off_tool_use_from_history(settings):
+    llm, _ = _llm(settings, [message([{"type": "text", "text": "Let me check"},
+                                      _tool_use("t1", "get_price", {"player_id": 1})], stop_reason="max_tokens")])
+    history = [{"role": "user", "content": "q"}]
+    res = llm.run("s", history, [PRICE_TOOL], {"get_price": lambda inp: {}})
+    assert res.stop_reason == "max_tokens" and res.tool_calls == []
+    assert [b.type for b in history[-1]["content"]] == ["text"]
+
+
+def test_stop_reason_reported(settings, monkeypatch):
+    llm, _ = _llm(settings, [message([{"type": "text", "text": "hi"}])])
+    assert llm.run("s", [{"role": "user", "content": "q"}], [], {}).stop_reason == "end_turn"
+    monkeypatch.setattr("reasoning.client.MAX_TURNS", 2)
+    loop = [message([_tool_use(f"t{i}", "get_price", {"player_id": 1})], stop_reason="tool_use") for i in range(2)]
+    llm, _ = _llm(settings, loop)
+    assert llm.run("s", [{"role": "user", "content": "q"}], [PRICE_TOOL],
+                   {"get_price": lambda inp: {}}).stop_reason == "max_turns"
 
 
 @pytest.fixture

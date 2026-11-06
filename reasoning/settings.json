@@ -1,6 +1,6 @@
 {
   "_sources": {
-    "prices_per_mtok": "claude-api skill (2026-11-06): Sonnet 5.5 $2/$10 per MTok, cache reads $0.20; Opus 5.5 $4/$20, cache reads $0.20, 5-minute cache writes $5. cache_write is the 5-minute TTL rate (1.25x input). Check against the pricing page before trusting costs.",
+    "prices_per_mtok": "claude-api skill (2026-11-06): Sonnet 5.5 $2/$10 per MTok, cache reads $0.20; Sonnet 5 (server-side fallback target) $2/$10, cache reads $0.20; Opus 5.5 $4/$20, cache reads $0.20, 5-minute cache writes $5. cache_write is the 5-minute TTL rate (1.25x input). Check against the pricing page before trusting costs.",
     "search_price_per_1000": "Stage 6 plan: $10 per 1000 web searches (the claude-api skill quotes the same list price). Must be checked against the pricing page.",
     "usd_to_gbp": "Fixed conversion for reporting; update by hand."
   },
@@ -15,6 +15,7 @@
   "max_searches": 10,
   "prices_per_mtok": {
     "claude-sonnet-5-5": {"input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5},
+    "claude-sonnet-5": {"input": 2.0, "output": 10.0, "cache_read": 0.2, "cache_write": 2.5},
     "claude-opus-5-5": {"input": 4.0, "output": 20.0, "cache_read": 0.2, "cache_write": 5.0}
   },
   "search_price_per_1000": 10.0,
