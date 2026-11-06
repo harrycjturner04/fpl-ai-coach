@@ -65,7 +65,7 @@ def _problem(r) -> str | None:
     return next((msg for ok, msg in checks if not ok), None)
 
 
-def _date(s: str | None) -> date | None:
+def parse_date(s: str | None) -> date | None:
     try:
         return date.fromisoformat(s[:10]) if s else None
     except ValueError:
@@ -82,5 +82,5 @@ def parse_flags(raw: list[dict]) -> tuple[list[Flag], list[str]]:
             continue
         conf = "medium" if r["source_kind"] == "predicted_lineup" and r["confidence"] == "high" else r["confidence"]
         flags.append(Flag(**{**r, "start_prob_next_gw": float(r["start_prob_next_gw"]), "confidence": conf,
-                             "source_date": _date(r["source_date"])}))
+                             "source_date": parse_date(r["source_date"])}))
     return flags, warnings

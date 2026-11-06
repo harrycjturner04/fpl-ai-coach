@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import copy
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -12,7 +12,7 @@ from ingestion.congestion import near
 from optimisation.model import Plan
 
 from .client import LLM, Tool, Usage, resolve_player
-from .flags import FLAG_SCHEMA, Flag, _date, parse_flags
+from .flags import FLAG_SCHEMA, Flag, parse_date, parse_flags
 
 PROMPT = Path(__file__).parent / "prompts" / "news.md"
 FOLLOW_UP = ("You have not called submit_flags. Call it now with your flags (an empty list if there is no new "
@@ -119,9 +119,11 @@ def _flags(raw: list[dict], ids, players: pd.DataFrame) -> tuple[list[Flag], lis
 
 
 def gather_flags(llm: LLM, ids, players, congestion, fixtures, next_gw, *, teams: pd.DataFrame,
-                 search: bool = True) -> NewsResult:
+                 search: bool = True, now: datetime | None = None) -> NewsResult:
     """One news run: web search (unless `search` is False) plus the strict submit_flags tool. If Claude
-    never calls submit_flags, one follow-up asks for it. LLMUnavailable propagates to the caller."""
+    never calls submit_flags, one follow-up asks for it. LLMUnavailable propagates to the caller.
+    Source dates more than a day after `now` (default: current UTC time) are treated as missing."""
+    latest = (now or datetime.now(timezone.utc)).date() + timedelta(days=1)
     submitted: list[dict] = []
 
     def submit(inp: dict) -> dict:
@@ -138,6 +140,10 @@ def gather_flags(llm: LLM, ids, players, congestion, fixtures, next_gw, *, teams
     warnings = [] if submitted else ["news: submit_flags was never called, even after a reminder; no news flags"]
     final = submitted[-1] if submitted else {"flags": [], "sources": []}
     flags, w = _flags(final["flags"], ids, players)
+    for i, f in enumerate(flags):
+        if f.source_date is not None and f.source_date > latest:
+            w.append(f"flag for player {f.player_id}: source_date {f.source_date} is in the future; treated as missing")
+            flags[i] = replace(f, source_date=None)
 
     pool = players[players["id"].isin(ids)]
     team_of = pool.set_index("id")["team"]
@@ -149,8 +155,11 @@ def gather_flags(llm: LLM, ids, players, congestion, fixtures, next_gw, *, teams
         t = by_short.get(row["team"].casefold())
         if t is None or int(t) not in newest:
             w.append(f"sources row for {row['team']!r} ignored: not a listed club")
-        elif (d := _date(row["source_date"])) is not None:
-            dated.append((t, d))
+        elif (d := parse_date(row["source_date"])) is not None:
+            if d > latest:
+                w.append(f"sources row for {row['team']!r}: source_date {d} is in the future; treated as missing")
+            else:
+                dated.append((t, d))
     for t, d in dated:
         newest[int(t)] = max(filter(None, (newest[int(t)], d)))
     return NewsResult(flags, warnings + w, newest, usage)

@@ -19,6 +19,7 @@ _ROWS = [
 TEAMS = pd.DataFrame({"id": [1, 2, 3, 4], "code": [3, 8, 43, 6], "name": ["Arsenal", "Chelsea", "Man City", "Spurs"],
                       "short_name": ["ARS", "CHE", "MCI", "TOT"]})
 NEXT_GW = 11
+NOW = datetime(2026, 11, 6, 12, tzinfo=timezone.utc)
 
 
 @pytest.fixture
@@ -50,6 +51,7 @@ IDS = [7, 8, 9, 20, 30]
 def _gather(players, congestion, fixtures, name=None, responses=None, **kw):
     fake = FakeClient.from_recorded(name) if name else FakeClient(responses)
     llm = LLM("news", Settings.load(_gather.tmp), client=fake)
+    kw.setdefault("now", NOW)
     return gather_flags(llm, IDS, players, congestion, fixtures, NEXT_GW, teams=TEAMS, **kw), fake
 
 
@@ -198,3 +200,29 @@ def test_stale_warning_rule():
     assert stale_warnings(src, datetime(2026, 11, 9, tzinfo=timezone.utc), now, names) == []  # > 48 h away
     assert stale_warnings(src, datetime(2026, 11, 6, tzinfo=timezone.utc), now, names) == []  # deadline passed
     assert "team 1" in stale_warnings(src, soon, now)[0]
+
+
+def _submit(flags, sources):
+    return message([{"type": "tool_use", "id": "t1", "name": "submit_flags",
+                     "input": {"flags": flags, "sources": sources}}], stop_reason="tool_use")
+
+
+def test_future_sources_row_is_ignored_and_club_still_stale(players, congestion, fixtures):
+    rows = [{"team": "MCI", "source_date": "2099-01-01", "url": "https://www.example.com/x"},
+            {"team": "ARS", "source_date": "2026-11-07", "url": "https://www.example.com/y"}]  # now + 1 day: allowed
+    res, _ = _gather(players, congestion, fixtures, responses=[_submit([], rows), message([])])
+    assert res.newest_source[3] is None and res.newest_source[1] == date(2026, 11, 7)
+    assert len(res.warnings) == 1 and "'MCI'" in res.warnings[0] and "future" in res.warnings[0]
+    w = stale_warnings(res.newest_source, datetime(2026, 11, 7, 11, tzinfo=timezone.utc), NOW, {3: "Man City"})
+    assert any("Man City" in x for x in w)
+
+
+def test_future_flag_date_kept_with_source_date_none(players, congestion, fixtures):
+    item = {"player_id": 20, "player_name": "Palmer", "status": "fit", "start_prob_next_gw": 1.0,
+            "return_gw": None, "confidence": "high", "source_url": "u", "source_date": "2099-01-01",
+            "source_kind": "official", "summary": "s"}
+    res, _ = _gather(players, congestion, fixtures, responses=[_submit([item], []), message([])])
+    [f] = res.flags
+    assert f.player_id == 20 and f.source_date is None
+    assert len(res.warnings) == 1 and "player 20" in res.warnings[0] and "future" in res.warnings[0]
+    assert res.newest_source[2] == date(2026, 11, 3)  # only FPL news_added
