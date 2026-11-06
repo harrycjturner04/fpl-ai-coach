@@ -23,6 +23,7 @@ from features.ml_features import FEATURE_COLUMNS, build_features
 from features.ml_sequences import SEQ_STATS, deadline_sequences, row_sequences, sequence_features
 from ingestion import storage, transform
 from prediction import backtest
+from prediction.availability import apply_availability
 from prediction.backtest import WARM_UP_GAMEWEEKS, Predictor, build_predictors, load_params, run_backtest, snapshot
 from prediction.cli import SHIPPED_PARAMS_PATH, _component, load_live_params
 from prediction.component_model import per_gameweek, predict
@@ -710,10 +711,11 @@ def _live_points(kind: str, inputs: dict, data_dir: Path) -> pd.DataFrame:
         pts = model.predict(X, row_sequences(m.assign(season=inputs["season"], deadline_gw=gw), store))
     else:
         pts = model.predict(X)
-    chance = m["player_code"].map(inputs["players_now"].set_index("player_code")["chance"]).fillna(100) / 100
-    available = 1 - (1 - chance) * load_live_params(data_dir).flag_fade ** m["horizon"]
+    rows = m[["player_code", "horizon"]].assign(
+        chance=m["player_code"].map(inputs["players_now"].set_index("player_code")["chance"]))
     p = m[["p0", "p1", "p2"]].to_numpy().copy()
-    p[:, 1:] *= available.to_numpy()[:, None]
+    p[:, 2], p[:, 1] = apply_availability(rows, p[:, 2], p[:, 1], load_live_params(data_dir).flag_fade,
+                                          inputs.get("news"))
     p[:, 0] = 1 - p[:, 1:].sum(axis=1)
     return m[["player_code", "gameweek", "fixture_id", "horizon"]].assign(
         p60=p[:, 2], psub=p[:, 1], no_history=m["new_to_league"] > 0, total=expected_points(p, pts))
@@ -775,7 +777,8 @@ def predict_live(model: str, inputs: dict, data_dir: Path = storage.DATA_DIR) ->
             m = _live_minutes(inputs, data_dir)
             sup = m[["player_code", "fixture_id"]].assign(p60=m["p2"], psub=m["p1"])
             return predict(inputs["history"], inputs["players_now"], inputs["fixtures_ahead"], inputs["cutoff"],
-                           inputs["season"], inputs["teams_in_season"], load_live_params(data_dir), minutes=sup)
+                           inputs["season"], inputs["teams_in_season"], load_live_params(data_dir), minutes=sup,
+                           news=inputs.get("news"))
         if model == "stacked":
             return _live_stacked(inputs, data_dir)
         return _live_points(model, inputs, data_dir)

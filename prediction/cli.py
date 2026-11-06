@@ -90,12 +90,13 @@ def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = Non
         "season": season,
         "teams_in_season": sorted(code_of.tolist()),
         "code_to_id": players.set_index("code")["id"],
+        "news": None,
     }
 
 
 def _component(x: dict, data_dir: Path) -> pd.DataFrame:
     return predict(x["history"], x["players_now"], x["fixtures_ahead"], x["cutoff"], x["season"],
-                   x["teams_in_season"], load_live_params(data_dir))
+                   x["teams_in_season"], load_live_params(data_dir), news=x.get("news"))
 
 
 def _before_deadline(gameweeks: pd.DataFrame, now: pd.Timestamp) -> int | None:
