@@ -21,13 +21,19 @@ MAX_WINDOW_DAYS = 10  # API limit on dateFrom..dateTo
 COLUMNS = ["team_code", "competition", "kickoff", "opponent"]
 # Normalised football-data name -> normalised FPL name, for names the generic rules miss.
 ALIASES = {
-    "manchester united": "man utd",
-    "manchester city": "man city",
-    "tottenham hotspur": "spurs",
-    "nottingham forest": "nottm forest",
-    "brighton and hove albion": "brighton",
-    "newcastle united": "newcastle",
-    "leeds united": "leeds",
+    "manchester united": ("man utd",),
+    "manchester city": ("man city",),
+    "tottenham hotspur": ("spurs",),
+    "nottingham forest": ("nottm forest",),
+    "brighton and hove albion": ("brighton",),
+    "newcastle united": ("newcastle",),
+    "leeds united": ("leeds",),
+    "west ham united": ("west ham",),
+    "wolverhampton wanderers": ("wolves",),
+    "leicester city": ("leicester",),
+    "sheffield united": ("sheffield utd",),
+    "luton town": ("luton",),
+    "ipswich town": ("ipswich", "ipswich town"),
 }
 
 
@@ -40,9 +46,9 @@ def _norm(name: str) -> str:
 def team_code(name: str, teams: pd.DataFrame) -> int | None:
     """FPL team code for a football-data team name, or None if not a PL club."""
     n = _norm(name)
-    n = ALIASES.get(n, n)
+    wanted = {n, *ALIASES.get(n, ())}
     for row in teams.itertuples():
-        if n in (_norm(row.name), _norm(row.short_name)):
+        if wanted & {_norm(row.name), _norm(row.short_name)}:
             return int(row.code)
     return None
 
@@ -88,20 +94,35 @@ def update(
         print("  congestion: FOOTBALL_DATA_API_KEY not set; skipping European/cup fixtures")
         return None
     today = today or date.today()
+    teams = load_table("teams", data_dir)
     try:
         matches = fetch_matches(today, today + timedelta(days=days), key, session)
     except requests.HTTPError as err:
-        status = err.response.status_code if err.response is not None else None
-        if status in (403, 429):
-            print(f"  congestion: football-data.org returned {status}; skipping")
-            return None
-        raise
-    table = congestion_table(matches, load_table("teams", data_dir))
+        status = err.response.status_code if err.response is not None else "error"
+        print(f"  congestion: football-data.org returned {status}; skipping")
+        return None
+    except requests.RequestException as err:
+        print(f"  congestion: {type(err).__name__} reaching football-data.org; skipping")
+        return None
+    except (KeyError, ValueError):
+        print("  congestion: unexpected football-data.org response; skipping")
+        return None
+    seen = {
+        team_code(m[s]["name"], teams)
+        for m in matches if m["competition"]["code"] == "PL" for s in ("homeTeam", "awayTeam")
+    }
+    missing = [n for c, n in zip(teams.code, teams.name) if c not in seen]
+    if missing:
+        print(f"  congestion: no Premier League match mapped for {', '.join(missing)} (alias gap or no fixture in window)")
+    table = congestion_table(matches, teams)
     save_table(table, "congestion", data_dir)
     return table
 
 
-def near(table: pd.DataFrame, team_code: int, kickoff: pd.Timestamp, days: int = 4) -> pd.DataFrame:
+def near(table: pd.DataFrame, club: int, kickoff: pd.Timestamp, days: int = 4) -> pd.DataFrame:
     """The club's non-PL matches within `days` days either side of `kickoff`."""
+    kickoff = pd.Timestamp(kickoff)
+    if kickoff.tzinfo is None:
+        kickoff = kickoff.tz_localize("UTC")
     d = (table.kickoff - kickoff).abs()
-    return table[(table.team_code == team_code) & (d <= pd.Timedelta(days=days))]
+    return table[(table.team_code == club) & (d <= pd.Timedelta(days=days))]

@@ -83,7 +83,7 @@ def test_missing_key_skips_with_note(monkeypatch, tmp_path, capsys):
 
 @pytest.mark.parametrize("status", [429, 403])
 def test_rate_limit_skips_with_note(monkeypatch, tmp_path, capsys, status):
-    monkeypatch.setenv("FOOTBALL_DATA_API_KEY", "secret")
+    _key_and_teams(monkeypatch, tmp_path)
     assert congestion.update(tmp_path, session=FakeSession(status)) is None
     out = capsys.readouterr().out
     assert str(status) in out and "secret" not in out
@@ -103,3 +103,64 @@ def test_update_saves_table(monkeypatch, tmp_path):
 
     t = congestion.update(tmp_path, session=S(), today=date(2026, 11, 6), days=5)
     assert not t.empty and load_table("congestion", tmp_path).equals(t)
+
+
+@pytest.mark.parametrize("fd_name,fpl", [
+    ("Wolverhampton Wanderers FC", "Wolves"), ("West Ham United FC", "West Ham"),
+    ("Leicester City FC", "Leicester"), ("Sheffield United FC", "Sheffield Utd"),
+    ("Luton Town FC", "Luton"), ("Ipswich Town FC", "Ipswich"), ("Southampton FC", "Southampton"),
+    ("Burnley FC", "Burnley"), ("Tottenham Hotspur FC", "Spurs"),
+])
+def test_historic_club_aliases(fd_name, fpl):
+    teams = pd.DataFrame([(99, fpl, fpl[:3].upper())], columns=["code", "name", "short_name"])
+    assert congestion.team_code(fd_name, teams) == 99
+
+
+def _key_and_teams(monkeypatch, tmp_path):
+    from ingestion.storage import save_table
+    monkeypatch.setenv("FOOTBALL_DATA_API_KEY", "secret")
+    save_table(TEAMS, "teams", tmp_path)
+
+
+def test_unmapped_clubs_are_named(monkeypatch, tmp_path, capsys):
+    _key_and_teams(monkeypatch, tmp_path)
+    s = FakeSession()
+    congestion.update(tmp_path, session=s, today=date(2026, 11, 6), days=2)  # one PL match only
+    assert "Chelsea" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("status", [400, 500])
+def test_other_http_errors_skip(monkeypatch, tmp_path, capsys, status):
+    _key_and_teams(monkeypatch, tmp_path)
+    assert congestion.update(tmp_path, session=FakeSession(status)) is None
+    out = capsys.readouterr().out
+    assert str(status) in out and "secret" not in out
+
+
+def test_connection_error_skips(monkeypatch, tmp_path, capsys):
+    _key_and_teams(monkeypatch, tmp_path)
+
+    class S:
+        def get(self, *a, **k):
+            raise requests.ConnectionError("boom secret")
+
+    assert congestion.update(tmp_path, session=S()) is None
+    out = capsys.readouterr().out
+    assert "ConnectionError" in out and "secret" not in out
+
+
+def test_bad_body_skips(monkeypatch, tmp_path):
+    _key_and_teams(monkeypatch, tmp_path)
+
+    class S(FakeSession):
+        def get(self, *a, **k):
+            r = super().get(*a, **k)
+            r.json = lambda: {}
+            return r
+
+    assert congestion.update(tmp_path, session=S()) is None
+
+
+def test_near_accepts_naive_kickoff():
+    t = congestion.congestion_table(MATCHES, TEAMS)
+    assert len(congestion.near(t, 6, pd.Timestamp("2026-11-28T15:00:00"))) == 1
