@@ -7,6 +7,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
+import math
+from datetime import date
+
+import numpy as np
 import pandas as pd
 
 from optimisation import planning
@@ -18,6 +22,7 @@ from reasoning.flags import Flag
 
 WHAT_IF_GAP = 0.001
 DEFAULT_TOP_N = 20
+MAX_ROWS = 50  # cap on players per get_predictions call
 POSITIONS = ["GKP", "DEF", "MID", "FWD"]
 CHIP_NAMES = ["wildcard", "freehit", "bboost", "3xc"]
 
@@ -48,7 +53,8 @@ TOOLS = [
     Tool("get_squad_state", "The manager's squad (with selling prices), bank, free transfers, available chips "
          "and the headline (exact) plan.", _obj({})),
     Tool("get_predictions", "Predicted points per gameweek (after news adjustments; raw_points shown where news "
-         "changed them), sorted by horizon total. Filters combine; top_n defaults to 20.",
+         "changed them), sorted by horizon total. Filters combine; top_n defaults to 20. At most 50 players per call "
+         "(top_n above 50 is clamped; player_ids beyond the first 50 distinct are dropped; the result says so).",
          _obj({"player_ids": {"type": ["array", "null"], "items": {"type": "integer"}},
                "position": {"type": ["string", "null"], "enum": [*POSITIONS, None]},
                "top_n": {"type": ["integer", "null"]}})),
@@ -67,6 +73,25 @@ TOOLS = [
 
 def _r(x: float) -> float:
     return round(float(x), 1)
+
+
+def _clean(x):
+    """JSON-safe copy: numpy scalars to Python, NaN/NA to None, dates to ISO strings, tuples to lists."""
+    if isinstance(x, dict):
+        return {str(k): _clean(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple, np.ndarray)):
+        return [_clean(v) for v in x]
+    if isinstance(x, np.generic):
+        x = x.item()
+    if isinstance(x, date):
+        return x.isoformat()
+    if x is pd.NA or x is pd.NaT or (isinstance(x, float) and not math.isfinite(x)):
+        return None
+    return x
+
+
+def _safe(f: Callable[[dict], dict]) -> Callable[[dict], dict]:
+    return lambda inp: _clean(f(inp))
 
 
 def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
@@ -100,38 +125,44 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
     def get_squad_state(_: dict) -> dict:
         st = session.ctx.state or {}
         return {"team_name": st.get("team_name"), "bank": st.get("bank"), "free_transfers": session.ctx.free,
-                "squad": [who(p["player_id"]) | {"position": position.get(p["player_id"]),
-                                                 "selling_price": p["selling_price"]} for p in st.get("squad", [])],
+                "squad": [who(int(p["player_id"])) | {"position": position.get(p["player_id"]),
+                                                      "selling_price": p["selling_price"]} for p in st.get("squad", [])],
                 "chips_available": [{"name": n, "gw": int(g)} for n, g in session.chips_available],
                 "headline": summary(session.headline)}
 
     def get_predictions(inp: dict) -> dict:
         table = session.table
         raw = planning.score_table(session.pred_raw, table.shape[1]).reindex(table.index)
-        ids = table.index
+        ids, notes = table.index, []
         if inp["player_ids"] is not None:
-            unknown = sorted(set(inp["player_ids"]) - set(ids))
+            wanted = list(dict.fromkeys(inp["player_ids"]))
+            if len(wanted) > MAX_ROWS:
+                notes.append(f"player_ids truncated to the first {MAX_ROWS} of {len(wanted)} distinct ids")
+                wanted = wanted[:MAX_ROWS]
+            unknown = sorted(set(wanted) - set(ids))
             if unknown:
                 raise ValueError(f"no predictions for player ids {unknown}")
-            ids = pd.Index(inp["player_ids"])
+            ids = pd.Index(wanted)
         if inp["position"] is not None:
             ids = ids[[position.get(i) == inp["position"] for i in ids]]
         top_n = DEFAULT_TOP_N if inp["top_n"] is None else inp["top_n"]
         if top_n < 1:
             raise ValueError("top_n must be at least 1")
+        if top_n > MAX_ROWS:
+            notes.append(f"top_n clamped from {top_n} to {MAX_ROWS}")
+            top_n = MAX_ROWS
         rows = []
         for i in table.loc[ids].sum(axis=1).sort_values(ascending=False).index[:top_n]:
             pts = {str(g): _r(v) for g, v in table.loc[i].fillna(0).items()}
             row = who(i) | {"position": position.get(i), "points": pts, "total": _r(sum(pts.values()))}
-            raw_pts = {str(g): _r(v) for g, v in raw.loc[i].fillna(0).items()}
+            raw_pts = {str(g): None if pd.isna(v) else _r(v) for g, v in raw.loc[i].items()}  # None: no raw prediction
             if raw_pts != pts:
                 row["raw_points"] = raw_pts
             rows.append(row)
-        return {"players": rows}
+        return {"players": rows} | ({"notes": notes} if notes else {})
 
     def get_news_flags(_: dict) -> dict:
-        flags = [who(f.player_id) | asdict(f) | {"source_date": f.source_date and f.source_date.isoformat()}
-                 for f in session.flags]
+        flags = [who(f.player_id) | asdict(f) for f in session.flags]
         adjustments = [who(a.player_id) | asdict(a) | {k: round(getattr(a, k), 3) for k in ("raw", "proposed", "applied")}
                        for a in session.adjustments]
         return {"flags": flags, "adjustments": adjustments}
@@ -155,6 +186,7 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
                "inputs": {"ban": banned, "force": forced, "chip": chip, "horizon": horizon}} | summary(plan)
         same = horizon == len(session.headline.gameweeks)  # objectives over different horizons do not compare
         out["delta_vs_headline"] = _r(plan.objective - session.headline.objective) if same else None
+        out = _clean(out)
         session.solves.append({"solve_id": solve_id, "inputs": out["inputs"], "summary": out})
         return out
 
@@ -168,6 +200,7 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
             return {"available": False, "message": "monitoring report not available yet"}
         return {"available": True, "summary": session.monitoring}
 
-    return {"get_squad_state": get_squad_state, "get_predictions": get_predictions,
-            "get_news_flags": get_news_flags, "solve": solve, "get_chip_scan": get_chip_scan,
-            "get_monitoring": get_monitoring}
+    raw = {"get_squad_state": get_squad_state, "get_predictions": get_predictions,
+           "get_news_flags": get_news_flags, "solve": solve, "get_chip_scan": get_chip_scan,
+           "get_monitoring": get_monitoring}
+    return {k: _safe(f) for k, f in raw.items()}

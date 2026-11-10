@@ -1,6 +1,8 @@
 import json
+from dataclasses import replace
 from datetime import date
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -10,7 +12,7 @@ from optimisation.settings import PlanSettings
 from reasoning.adjust import Adjustment
 from reasoning.client import schema_errors
 from reasoning.flags import Flag
-from reasoning.tools import TOOLS, Session, handlers
+from reasoning.tools import TOOLS, Session, _clean, handlers
 from tests.optimiser_helpers import FULL_RULES, full_pool, pool
 
 GWS = [10, 11]
@@ -132,3 +134,54 @@ def test_lookups_and_unavailable_tools(session):
     json.dumps([flags, state, h["get_predictions"]({"player_ids": None, "position": None, "top_n": None})])
     for name in ("get_chip_scan", "get_monitoring"):
         assert h[name]({})["available"] is False
+
+
+def _bigger(session, n=60):
+    """The session with n extra MIDs (ids 5000+) predicted 0.5 a week, for row-cap tests."""
+    extra, _ = pool([(5000 + k, "MID", 1 + k % 20, 4.5, 0.5) for k in range(n)])
+    extra = extra.assign(team_short="T", first_name="X", second_name=extra["web_name"], team_name="Team")
+    pred = pd.concat([session.pred] + [pd.DataFrame({"player_id": extra["id"], "gameweek": g, "total": 0.5})
+                                       for g in GWS], ignore_index=True)
+    ctx = replace(session.ctx, players=pd.concat([session.ctx.players, extra], ignore_index=True))
+    return replace(session, ctx=ctx, pred=pred, table=planning.score_table(pred, 2)), extra["id"].tolist()
+
+
+def test_get_predictions_caps_rows_and_dedupes(session):
+    big, ids = _bigger(session)
+    h = handlers(big)
+    out = h["get_predictions"]({"player_ids": None, "position": None, "top_n": 500})
+    assert len(out["players"]) == 50 and out["notes"] == ["top_n clamped from 500 to 50"]
+    out = h["get_predictions"]({"player_ids": ids + ids[:5], "position": None, "top_n": 50})
+    assert [p["id"] for p in out["players"]] == ids[:50]
+    assert out["notes"] == ["player_ids truncated to the first 50 of 60 distinct ids"]
+    out = h["get_predictions"]({"player_ids": [STAR, STAR], "position": None, "top_n": None})
+    assert [p["id"] for p in out["players"]] == [STAR] and "notes" not in out
+    # players missing from the raw predictions show null raw points, not 0
+    assert out["players"][0].get("raw_points") is None
+    missing = h["get_predictions"]({"player_ids": [ids[0]], "position": None, "top_n": None})["players"][0]
+    assert missing["raw_points"] == {"10": None, "11": None}
+
+
+def test_get_squad_state_with_real_state_is_json_safe(session):
+    squad = session.headline.weeks[0].squad
+    state = {"team_name": "Cechmate", "bank": np.float64(0.5), "free_transfers": 2,
+             "squad": [{"player_id": np.int64(i), "selling_price": np.float64(4.6)} for i in squad]}
+    ctx = replace(session.ctx, state=state, owned={int(i): 4.6 for i in squad}, free=np.int64(2))
+    out = handlers(replace(session, ctx=ctx))["get_squad_state"]({})
+    json.dumps(out, allow_nan=False)
+    assert out["team_name"] == "Cechmate" and out["bank"] == 0.5 and out["free_transfers"] == 2
+    assert len(out["squad"]) == 15 and out["squad"][0] == {"id": int(squad[0]), "name": f"P{squad[0]}",
+                                                           "position": "GKP", "selling_price": 4.6}
+    assert type(out["bank"]) is float and type(out["squad"][0]["id"]) is int
+
+
+def test_results_are_sanitised(session):
+    assert _clean({"a": np.int64(3), "b": np.float64(1.5), "c": float("nan"), "d": (np.bool_(True), pd.NA),
+                   "e": date(2026, 11, 5), 7: np.array([1, 2])}) == \
+        {"a": 3, "b": 1.5, "c": None, "d": [True, None], "e": "2026-11-05", "7": [1, 2]}
+    scan = pd.DataFrame({"chip": ["bboost", "3xc"], "gw": np.array([11, 12], dtype="int64"),
+                         "objective": [101.23, np.nan]})
+    out = handlers(replace(session, chip_scan=scan))["get_chip_scan"]({})
+    json.dumps(out, allow_nan=False)
+    assert out["rows"] == [{"chip": "bboost", "gw": 11, "objective": 101.2},
+                           {"chip": "3xc", "gw": 12, "objective": None}]
