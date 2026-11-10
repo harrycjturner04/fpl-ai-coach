@@ -137,19 +137,25 @@ def _predict_candidates(names: list[str], chosen: str, x: dict, data_dir: Path) 
 def run(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp | None = None,
         model: str = SHIPPED_MODEL) -> pd.DataFrame:
     """Predictions from `model`. Before the deadline every candidate is also logged for the forward test."""
+    return run_with_inputs(data_dir, horizon, now, model)[0]
+
+
+def run_with_inputs(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp | None = None,
+                    model: str = SHIPPED_MODEL) -> tuple[pd.DataFrame, dict]:
+    """`run`, also returning the live inputs (with their cache) so a caller can predict again, e.g. with news."""
     x = live_inputs(data_dir, horizon, now)
     gameweeks = storage.load_table("gameweeks", data_dir)
     names = list(CANDIDATES) if _before_deadline(gameweeks, x["cutoff"]) else [model]
     preds = _predict_candidates(names, model, x, data_dir)
     for name, p in preds.items():
-        _record_predictions(p, name, gameweeks, x["season"], data_dir, x["cutoff"])
+        record_predictions(p, name, gameweeks, x["season"], data_dir, x["cutoff"])
     pred = preds[model].copy()
     pred.insert(0, "player_id", pred["player_code"].map(x["code_to_id"]))
     storage.save_table(pred, "predictions", data_dir)
-    return pred
+    return pred, x
 
 
-def _record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, season: str, data_dir: Path,
+def record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, season: str, data_dir: Path,
                         now: pd.Timestamp) -> pd.DataFrame | None:
     """Save the per-gameweek predictions of `model` made for the next gameweek, keeping the latest record
     before its deadline: the forward test of the models as the season is played."""

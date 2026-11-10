@@ -25,7 +25,7 @@ dependencies = [
 dev = ["pytest>=8", "pytest-cov>=5", "matplotlib>=3.8"]
 
 [tool.setuptools]
-packages = ["ingestion", "prediction", "optimisation", "features", "evaluation", "reasoning"]
+packages = ["ingestion", "prediction", "optimisation", "features", "evaluation", "reasoning", "orchestration"]
 
 [tool.setuptools.package-data]
 prediction = ["model_params.json", "ml_params.json"]
