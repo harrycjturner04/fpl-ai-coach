@@ -84,6 +84,8 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     players = ctx.players
     teams, fixtures = storage.load_table("teams", data_dir), storage.load_table("fixtures", data_dir)
     gameweeks = storage.load_table("gameweeks", data_dir)
+    if not gameweeks["is_next"].any():
+        raise SystemExit("No upcoming gameweek: the season has finished.")
     lap("data")
 
     pred_raw, x = prediction_cli.run_with_inputs(data_dir, now=pd.Timestamp(now))
@@ -99,7 +101,7 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     session = None
     try:
         ids = shortlist(headline, table, players, list(ctx.owned or []))
-        cong = congestion.update(data_dir)
+        cong = congestion.update(data_dir, today=now.date())
         news = gather_flags(LLM("news", settings, client), ids, players, cong, fixtures, next_gw,
                             teams=teams, search=search, now=now)
         usages["news"] = news.usage
@@ -139,7 +141,7 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     path = data_dir / "reports" / f"{entry_id}_gw{next_gw}_{now:%Y%m%d-%H%M}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(md, encoding="utf-8")
-    print(md if report else f"{plan_text}\n\n{NO_LLM}")
+    print(md if report else "\n".join([plan_text, "", NO_LLM, *(f"- {n}" for n in notes)]))
     print(f"Report saved to {path}")
     if chat:
         print("chat not available yet")

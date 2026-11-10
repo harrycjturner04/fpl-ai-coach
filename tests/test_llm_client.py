@@ -248,3 +248,19 @@ def test_resolve_player_matches(players, caplog):
         assert resolve_player("Haaland", players) is None
         assert resolve_player(999, players) is None
     assert "Haaland" in caplog.text
+
+
+def test_search_budget_spans_the_whole_tool_loop(settings):
+    def searched(n, content, stop):
+        return message(content, stop_reason=stop,
+                       usage={"input_tokens": 10, "output_tokens": 5, "server_tool_use": {"web_search_requests": n}})
+    llm, fake = _llm(settings, [
+        searched(2, [_tool_use("t1", "get_price", {"player_id": 7})], "tool_use"),
+        searched(1, [_tool_use("t2", "get_price", {"player_id": 8})], "tool_use"),
+        searched(0, [{"type": "text", "text": "done"}], "end_turn"),
+    ])
+    res = llm.run("s", [{"role": "user", "content": "q"}], [PRICE_TOOL], {"get_price": lambda i: {"price": 5.0}},
+                  server_tools=(settings.web_search_tool(),), search_budget=3)
+    uses = [[t.get("max_uses") for t in r["tools"] if t.get("name") == "web_search"] for r in fake.requests]
+    assert uses == [[3], [1], []] and res.usage.searches == 3
+    assert [t["name"] for t in fake.requests[2]["tools"]] == ["get_price"]

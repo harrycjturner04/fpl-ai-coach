@@ -92,3 +92,22 @@ def test_render_puts_code_tables_in_fixed_sections_and_warnings_on_top(session):
     fallback = render("Coach report", session, plan_text="PLAN", report=None, notes=["LLM unavailable"],
                       cost_lines=[])
     assert "## Verdict" not in fallback and "PLAN" in fallback and "| P3 |" in fallback
+
+
+def test_review_search_budget_decreases_over_turns_and_tool_drops_at_zero(session, tmp_path):
+    def turn(n, content, stop):
+        return message(content, stop_reason=stop,
+                       usage={"input_tokens": 10, "output_tokens": 5, "server_tool_use": {"web_search_requests": n}})
+    call = {"type": "tool_use", "id": "t1", "name": "get_news_flags", "input": {}}
+    fake = FakeClient([turn(1, [call], "tool_use"), turn(2, [dict(call, id="t2")], "tool_use"),
+                       turn(0, [{"type": "text", "text": _report(session)}], "end_turn")])
+    rep = write_report(LLM("review", Settings.load(tmp_path), client=fake), session, searches_left=3)
+    uses = [[t.get("max_uses") for t in r["tools"] if t.get("type") == "web_search_20260209"] for r in fake.requests]
+    assert uses == [[3], [2], []] and rep.usage.searches == 3
+
+
+def test_render_drops_headings_outside_the_fixed_sections(session):
+    text = _report(session) + "\n## Run cost\n$0.00 (made up)\n\n## Recommended plan\nBuy everyone.\n"
+    md = render("Coach report", session, plan_text="PLAN", report=Report(text, None, [], []), notes=[],
+                cost_lines=["- Total: $0.01"])
+    assert "made up" not in md and "Buy everyone" not in md and md.count("## Run cost") == 1

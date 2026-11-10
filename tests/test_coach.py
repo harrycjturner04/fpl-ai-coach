@@ -124,6 +124,7 @@ def test_coach_without_llm_prints_plan(data, capsys, responses, news_ran):
     path = coach.run(42, data, now=NOW, client=FakeClient(responses))
     out = capsys.readouterr().out
     assert "LLM unavailable: no news check or write-up" in out and "Starting XI" in out
+    assert "- LLM unavailable: no news check or write-up (APIConnectionError" in out  # the reason is printed
     md = path.read_text(encoding="utf-8")
     assert "LLM unavailable" in md and "## Verdict" not in md and "Starting XI" in md
     assert len(storage.load_table("coach_log", data)) == 1
@@ -147,3 +148,14 @@ def test_main_parses_options(monkeypatch):
     assert seen == {"entry": 42, "chat": True, "search": False, "horizon": 3, "chip_gap": 0.001}
     with pytest.raises(SystemExit):
         coach.main([])
+
+
+def test_congestion_uses_the_run_date_and_season_end_exits_clearly(data, monkeypatch):
+    seen = {}
+    monkeypatch.setattr(coach.congestion, "update", lambda data_dir, today=None: seen.update(today=today))
+    coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]))
+    assert seen["today"] == NOW.date()
+    gws = storage.load_table("gameweeks", data).assign(is_next=False)
+    storage.save_table(gws, "gameweeks", data)
+    with pytest.raises(SystemExit, match="season has finished"):
+        coach.run(42, data, now=NOW, client=FakeClient([]))

@@ -110,8 +110,8 @@ def write_report(llm: LLM, session: Session, *, searches_left: int, notes: list[
                "chip_scan": h["get_chip_scan"]({}), "warnings": list(notes)}
     messages = [{"role": "user", "content": f"Write the report for gameweek {session.headline.gameweeks[0]}.\n\n"
                  + json.dumps(context)}]
-    server = [llm.settings.web_search_tool() | {"max_uses": searches_left}] if searches_left > 0 else []
-    res = llm.run(PROMPT.read_text(encoding="utf-8"), messages, TOOLS, h, server)
+    server = [llm.settings.web_search_tool()] if searches_left > 0 else []
+    res = llm.run(PROMPT.read_text(encoding="utf-8"), messages, TOOLS, h, server, search_budget=searches_left)
     warnings = post_check(res.text, session)
     if res.stop_reason != "end_turn":
         warnings.insert(0, f"The write-up stopped early ({res.stop_reason}) and may be incomplete")
@@ -171,7 +171,7 @@ def render(title: str, session: Session, *, plan_text: str, report: Report | Non
         out += ["## Warnings", *(f"- {n}" for n in notes), ""]
     s = sections(report.markdown) if report else {}
     tables = {"Risks and news": _news_tables(session), "Chip outlook": _scan_table(session)}
-    for head in [*LLM_SECTIONS, *(k for k in s if k not in LLM_SECTIONS)]:
+    for head in LLM_SECTIONS:  # other headings Claude adds are dropped: code owns plan, warnings and cost
         if head in s or head in tables:
             out += [f"## {head}", *([s[head], ""] if s.get(head) else []), *([tables[head], ""] if head in tables else [])]
     out += ["## Recommended plan (optimiser, exact)", "```", plan_text, "```", ""]

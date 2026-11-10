@@ -133,10 +133,12 @@ def gather_flags(llm: LLM, ids, players, congestion, fixtures, next_gw, *, teams
     system = PROMPT.read_text(encoding="utf-8") + ("" if search else NO_SEARCH + "\n")
     messages = [{"role": "user", "content": news_context(ids, players, congestion, fixtures, next_gw, teams=teams)}]
     server = [llm.settings.web_search_tool()] if search else []
-    usage = llm.run(system, messages, [SUBMIT_FLAGS], {"submit_flags": submit}, server).usage
+    budget = llm.settings.max_searches  # shared by both runs
+    usage = llm.run(system, messages, [SUBMIT_FLAGS], {"submit_flags": submit}, server, search_budget=budget).usage
     if not submitted:
         messages.append({"role": "user", "content": FOLLOW_UP})
-        usage += llm.run(system, messages, [SUBMIT_FLAGS], {"submit_flags": submit}, server).usage
+        usage += llm.run(system, messages, [SUBMIT_FLAGS], {"submit_flags": submit}, server,
+                         search_budget=budget - usage.searches).usage
     warnings = [] if submitted else ["news: submit_flags was never called, even after a reminder; no news flags"]
     final = submitted[-1] if submitted else {"flags": [], "sources": []}
     flags, w = _flags(final["flags"], ids, players)
