@@ -18,7 +18,7 @@ def _solve(args) -> tuple[Plan | None, str]:
     ctx, table, chips, banned, forced, gap = args
     try:
         return plan(ctx, table, chips=chips, banned=banned, forced=forced, gap=gap), ""
-    except (InfeasibleError, ValueError) as e:
+    except (RuntimeError, ValueError) as e:  # RuntimeError covers InfeasibleError and an illegal plan
         return None, f"{type(e).__name__}: {e}"
 
 
@@ -31,7 +31,8 @@ def chip_scan(ctx: PlanContext, table: pd.DataFrame, windows: list[tuple[str, in
               banned: Collection[int] = (), forced: Collection[int] = (), gap: float = 0.0,
               workers: int | None = None, none_plan: Plan | None = None) -> pd.DataFrame:
     """One row per window, sorted by gain over the no-chip plan (failed windows last, with a note).
-    `none_plan` reuses an already solved no-chip plan. gap 0 is exact."""
+    `none_plan` reuses an already solved no-chip plan; it must come from the same ctx, table,
+    banned, forced and gap, or the gains (and `exact`) are wrong. gap 0 is exact."""
     jobs = [(ctx, table, {gw: chip}, banned, forced, gap) for chip, gw in windows]
     if none_plan is None:
         jobs.insert(0, (ctx, table, None, banned, forced, gap))

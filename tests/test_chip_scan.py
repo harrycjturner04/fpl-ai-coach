@@ -47,3 +47,35 @@ def test_parallel_equals_serial():
     b = chip_scan(ctx, table, windows, workers=2)
     pd.testing.assert_frame_equal(a, b)
     assert list(a.gain_vs_none) == sorted(a.gain_vs_none, reverse=True)
+
+
+def test_illegal_plan_in_one_window_does_not_abort_scan(monkeypatch):
+    import reasoning.chips as chips
+    ctx, table = _case()
+    real = chips.plan
+
+    def flaky(ctx, table, *, chips=None, **kw):
+        if chips == {3: "bboost"}:
+            raise RuntimeError("Optimiser produced an illegal plan")
+        return real(ctx, table, chips=chips, **kw)
+
+    monkeypatch.setattr(chips, "plan", flaky)
+    scan = chip_scan(ctx, table, [("bboost", 2), ("bboost", 3)], workers=1)
+    bad = scan[scan.gameweek == 3].iloc[0]
+    assert math.isnan(bad.objective) and "illegal" in bad.note
+    assert scan[scan.gameweek == 2].iloc[0].note == ""
+
+
+def test_none_plan_is_reused_and_baseline_failure_raises(monkeypatch):
+    import reasoning.chips as chips
+    ctx, table = _case()
+    base = plan(ctx, table)
+    a = chip_scan(ctx, table, [("bboost", 2)], workers=1)
+    b = chip_scan(ctx, table, [("bboost", 2)], workers=1, none_plan=base)
+    pd.testing.assert_frame_equal(a, b)
+
+    def boom(*a, **k):
+        raise RuntimeError("nope")
+    monkeypatch.setattr(chips, "plan", boom)
+    with pytest.raises(RuntimeError, match="no-chip plan failed"):
+        chip_scan(ctx, table, [("bboost", 2)], workers=1)
