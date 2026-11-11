@@ -95,6 +95,7 @@ def test_tool_loop_executes_handler_and_returns_text(settings):
     first, second = fake.requests
     assert first["model"] == "claude-sonnet-5-5"
     assert first["system"] == [{"type": "text", "text": "You are a coach.", "cache_control": {"type": "ephemeral"}}]
+    assert first["cache_control"] == second["cache_control"] == {"type": "ephemeral"}
     assert first["tools"] == [{"name": "get_price", "description": "Price of a player in pounds m.",
                                "input_schema": PRICE_TOOL.input_schema, "strict": True}]
     assert first["thinking"] == {"type": "adaptive"}

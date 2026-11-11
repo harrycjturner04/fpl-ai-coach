@@ -159,6 +159,8 @@ class LLM:
             messages=messages, thinking={"type": "adaptive"},
             output_config={"effort": self.settings.effort[self.role]},
             betas=[FALLBACK_BETA], fallbacks="default",
+            # automatic breakpoint on the last block: each tool-loop turn reads the previous turn's prefix
+            cache_control={"type": "ephemeral"},
         )
         if tools:
             kwargs["tools"] = tools
