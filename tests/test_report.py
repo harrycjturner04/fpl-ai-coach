@@ -108,3 +108,14 @@ def test_render_drops_headings_outside_the_fixed_sections(session):
     text = _report(session) + "\n## Run cost\n$0.00 (made up)\n\n## Recommended plan\nBuy everyone.\n"
     md = render("Coach report", session, plan_text="PLAN", report=Report(text, None, [], []), notes=[])
     assert "made up" not in md and "Buy everyone" not in md and "## Run cost" not in md
+
+
+def test_post_check_follows_the_chosen_chip_plan(session):
+    from optimisation import planning
+    from reasoning.tools import handlers
+    none = session.headline
+    bb = planning.plan(session.ctx, session.table, chips={11: "bboost"})
+    session = replace(session, chip_plans={("bboost", 11): bb})
+    handlers(session)["choose_plan"]({"chip": {"name": "bboost", "gw": 11}})
+    alt = f"## Alternative\nNo chip scores {none.objective:.1f} pts.\n\n"  # no solve id needed: exact no-chip plan
+    assert post_check(_report(session, alternative=alt), session) == []

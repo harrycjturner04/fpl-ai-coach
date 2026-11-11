@@ -35,11 +35,14 @@ class Session:
     table: pd.DataFrame             # score_table(pred, horizon): what the headline was solved on
     flags: list[Flag]
     adjustments: list[Adjustment]
-    headline: Plan                  # exact solve on `table`
+    headline: Plan                  # exact solve on `table`: no chip, or the chip plan choose_plan picked
     chips_available: list[tuple[str, int]]  # planning.chip_windows over the table's gameweeks
     chip_scan: pd.DataFrame | None = None
     monitoring: str | None = None
     solves: list[dict] = field(default_factory=list)
+    chip_plans: dict[tuple[str, int], Plan] = field(default_factory=dict)  # chip scan's solved plans
+    chip_expiry: dict[str, int] = field(default_factory=dict)  # chip -> last gameweek it can be played
+    no_chip: Plan | None = None     # the no-chip headline, kept once choose_plan has run
 
 
 def _obj(properties: dict) -> dict:
@@ -69,6 +72,10 @@ TOOLS = [
                "horizon": {"type": ["integer", "null"], "description": "gameweeks to plan, default the headline's"}})),
     Tool("get_chip_scan", "Objective of the plan with each available chip in each horizon week vs no chip.", _obj({})),
     Tool("get_monitoring", "Season-to-date accuracy of the prediction models and planner.", _obj({})),
+    Tool("choose_plan", "Set the recommended plan: a chip window from the chip scan (its solved plan becomes the "
+         "headline) or null for the no-chip plan. Returns the chosen plan.",
+         _obj({"chip": {"type": ["object", "null"], "additionalProperties": False, "required": ["name", "gw"],
+                        "properties": {"name": {"type": "string", "enum": CHIP_NAMES}, "gw": {"type": "integer"}}}})),
 ]
 
 
@@ -138,7 +145,8 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
                 "squad": [who(int(p["player_id"])) | {"position": position.get(p["player_id"]),
                                                       "selling_price": p["selling_price"]} | fpl(int(p["player_id"]))
                           for p in st.get("squad", [])],
-                "chips_available": [{"name": n, "gw": int(g)} for n, g in session.chips_available],
+                "chips_available": [{"name": n, "gw": int(g), "expires_after_gw": session.chip_expiry.get(n)}
+                                    for n, g in session.chips_available],
                 "headline": summary(session.headline)}
 
     def get_predictions(inp: dict) -> dict:
@@ -206,6 +214,20 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
             return {"available": False, "message": "chip scan not available yet"}
         return {"available": True, "rows": session.chip_scan.round(1).to_dict("records")}
 
+    def choose_plan(inp: dict) -> dict:
+        session.no_chip = session.no_chip or session.headline
+        if (chip := inp["chip"]) is None:
+            session.headline = session.no_chip
+            return {"chip": None, "exact": True} | summary(session.headline)
+        key = (chip["name"], chip["gw"])
+        if key not in session.chip_plans:
+            raise ValueError(f"no solved chip plan for {chip['name']} in gameweek {chip['gw']}; scanned: "
+                             f"{[f'{c}:{g}' for c, g in session.chip_plans]}")
+        session.headline = session.chip_plans[key]
+        exact = bool(session.chip_scan is None or session.chip_scan["exact"].all())
+        return {"chip": chip, "exact": exact,
+                "gain_vs_no_chip": _r(session.headline.objective - session.no_chip.objective)} | summary(session.headline)
+
     def get_monitoring(_: dict) -> dict:
         if session.monitoring is None:
             return {"available": False, "message": "monitoring report not available yet"}
@@ -213,5 +235,5 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
 
     raw = {"get_squad_state": get_squad_state, "get_predictions": get_predictions,
            "get_news_flags": get_news_flags, "solve": solve, "get_chip_scan": get_chip_scan,
-           "get_monitoring": get_monitoring}
+           "get_monitoring": get_monitoring, "choose_plan": choose_plan}
     return {k: _safe(f) for k, f in raw.items()}

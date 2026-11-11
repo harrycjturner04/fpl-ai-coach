@@ -29,10 +29,12 @@ def _week1_key(p: Plan):
 
 def chip_scan(ctx: PlanContext, table: pd.DataFrame, windows: list[tuple[str, int]],
               banned: Collection[int] = (), forced: Collection[int] = (), gap: float = 0.0,
-              workers: int | None = None, none_plan: Plan | None = None) -> pd.DataFrame:
+              workers: int | None = None, none_plan: Plan | None = None,
+              plans: dict | None = None) -> pd.DataFrame:
     """One row per window, sorted by gain over the no-chip plan (failed windows last, with a note).
     `none_plan` reuses an already solved no-chip plan; it must come from the same ctx, table,
-    banned, forced and gap, or the gains (and `exact`) are wrong. gap 0 is exact."""
+    banned, forced and gap, or the gains (and `exact`) are wrong. gap 0 is exact.
+    `plans`, when given, is filled with (chip, gameweek) -> solved Plan."""
     jobs = [(ctx, table, {gw: chip}, banned, forced, gap) for chip, gw in windows]
     if none_plan is None:
         jobs.insert(0, (ctx, table, None, banned, forced, gap))
@@ -48,6 +50,8 @@ def chip_scan(ctx: PlanContext, table: pd.DataFrame, windows: list[tuple[str, in
             raise InfeasibleError(f"no-chip plan failed: {note}")
     rows = []
     for (chip, gw), (p, note) in zip(windows, results):
+        if plans is not None and p is not None:
+            plans[(chip, int(gw))] = p
         rows.append({
             "chip": chip, "gameweek": int(gw),
             "objective": float(p.objective) if p else float("nan"),

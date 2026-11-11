@@ -46,8 +46,10 @@ def sections(markdown: str) -> dict[str, str]:
 
 def _known_points(session: Session) -> list[float]:
     """Every figure a "pts" number may quote: headline, chip scan and logged solves (absolute values)."""
-    hp, hit = session.headline, session.ctx.rules.hit_cost
-    vals = [hp.objective, hit, *(w.projected_points for w in hp.weeks), *(w.hits * hit for w in hp.weeks)]
+    hit = session.ctx.rules.hit_cost
+    vals = [hit]
+    for hp in {id(p): p for p in (session.headline, session.no_chip) if p is not None}.values():
+        vals += [hp.objective, *(w.projected_points for w in hp.weeks), *(w.hits * hit for w in hp.weeks)]
     if session.chip_scan is not None:
         vals += session.chip_scan["objective"].tolist() + session.chip_scan["gain_vs_none"].tolist()
     for s in session.solves:
@@ -97,7 +99,8 @@ def post_check(markdown: str, session: Session) -> list[str]:
             warnings.append(f"Post-check: {m.group(0)} matches no figure in the headline, chip scan or logged solves")
     alt = s.get("Alternative")
     ids = {x["solve_id"] for x in session.solves}
-    if alt and not ids & set(_SOLVE_ID.findall(alt)):
+    chose_chip = session.no_chip is not None and session.headline is not session.no_chip  # alt is then the no-chip plan
+    if alt and not chose_chip and not ids & set(_SOLVE_ID.findall(alt)):
         warnings.append("Post-check: the Alternative cites no solve id from this run's solves")
     return warnings
 

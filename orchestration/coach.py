@@ -122,13 +122,17 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
         lap("adjusted predictions and headline solve")
 
         windows = planning.chip_windows(ctx, data_dir, [int(g) for g in table.columns])
-        scan = chip_scan(ctx, table, windows, gap=chip_gap, none_plan=headline if chip_gap == 0 else None)
+        chip_plans: dict = {}
+        scan = chip_scan(ctx, table, windows, gap=chip_gap, none_plan=headline if chip_gap == 0 else None,
+                         plans=chip_plans)
         lap("chip scan")
 
         role = "review"
-        session = Session(ctx, pred_raw, pred, table, flags, adjustments, headline, windows, chip_scan=scan)
+        session = Session(ctx, pred_raw, pred, table, flags, adjustments, headline, windows, chip_scan=scan,
+                          chip_plans=chip_plans, chip_expiry=_chip_expiry(data_dir, next_gw))
         left = settings.max_searches - usages["news"].searches if search else 0
         report = write_report(LLM("review", settings, client), session, searches_left=left, notes=notes)
+        headline = session.headline  # the no-chip plan, or the chip plan the review chose
         usages["review"], calls = report.usage, report.tool_calls
         lap("write-up")
     except LLMUnavailable as err:
@@ -157,6 +161,15 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
           "usage": json.dumps({r: asdict(u) for r, u in usages.items()}),
           "cost_usd": total.cost_usd, "report_path": str(path)}, data_dir)
     return path
+
+
+def _chip_expiry(data_dir: Path, gw: int) -> dict[str, int]:
+    """Chip -> last gameweek of the chip instance covering `gw` (first-half chips expire after GW19)."""
+    defs = storage.load_table_or_none("chips", data_dir)
+    if defs is None:
+        return {}
+    live = defs[(defs["start_event"] <= gw) & (gw <= defs["stop_event"])]
+    return {str(n): int(s) for n, s in zip(live["name"], live["stop_event"])}
 
 
 def _gap_arg(value: str) -> float:

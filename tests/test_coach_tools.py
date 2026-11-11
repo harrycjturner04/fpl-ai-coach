@@ -62,7 +62,7 @@ def test_schemas_are_strict_compatible():
     for t in [*TOOLS, SUBMIT_FLAGS]:
         walk(t.input_schema)
     assert {t.name for t in TOOLS} == {"get_squad_state", "get_predictions", "get_news_flags", "solve",
-                                       "get_chip_scan", "get_monitoring"}
+                                       "get_chip_scan", "get_monitoring", "choose_plan"}
 
 
 def _solve(h, **kw):
@@ -140,7 +140,7 @@ def test_lookups_and_unavailable_tools(session):
     assert flags["flags"][0]["name"] == "P3" and flags["flags"][0]["source_date"] == "2026-11-05"
     assert flags["adjustments"][0]["applied"] == 0.5
     state = h["get_squad_state"]({})
-    assert state["chips_available"] == [{"name": "bboost", "gw": 11}]
+    assert state["chips_available"] == [{"name": "bboost", "gw": 11, "expires_after_gw": None}]
     assert len(state["headline"]["week1"]["starting"]) == 11 and state["squad"] == []
     json.dumps([flags, state, h["get_predictions"]({"player_ids": None, "position": None, "top_n": None})])
     for name in ("get_chip_scan", "get_monitoring"):
@@ -213,3 +213,20 @@ def test_results_are_sanitised(session):
     json.dumps(out, allow_nan=False)
     assert out["rows"] == [{"chip": "bboost", "gw": 11, "objective": 101.2},
                            {"chip": "3xc", "gw": 12, "objective": None}]
+
+
+def test_choose_plan_swaps_the_headline_and_back(session):
+    bb = planning.plan(session.ctx, session.table, chips={11: "bboost"})
+    session = replace(session, chip_plans={("bboost", 11): bb}, chip_expiry={"bboost": 19})
+    none = session.headline
+    h = handlers(session)
+    assert h["get_squad_state"]({})["chips_available"][0]["expires_after_gw"] == 19
+    out = h["choose_plan"]({"chip": {"name": "bboost", "gw": 11}})
+    assert session.headline is bb and session.no_chip is none
+    # fixture weeks are GW10-11, so the GW11 Bench Boost sits in week 2
+    assert out["projected_points"][1]["chip"] == "bboost" and out["gain_vs_no_chip"] == round(bb.objective - none.objective, 1)
+    assert h["get_squad_state"]({})["headline"]["projected_points"][1]["chip"] == "bboost"
+    with pytest.raises(ValueError, match="no solved chip plan"):
+        h["choose_plan"]({"chip": {"name": "3xc", "gw": 11}})
+    h["choose_plan"]({"chip": None})
+    assert session.headline is none

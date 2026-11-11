@@ -108,3 +108,8 @@ None outstanding. Builder check done; flag maths, congestion source and models d
 
 ## Verification (end of build)
 `pytest` all green; `pytest -m live` coach run on 8298351 produces a report whose numbers match the logged solves, flags cite sources, cost printed; `python -m evaluation.monitoring` runs on the current season's logs; grader scores the live report.
+
+
+## Amendment (2026-11-11, C3, user's decision): chip choice can become the headline
+
+The review calls `choose_plan` before writing: null keeps the no-chip plan, or a scanned (chip, gameweek) window makes that window's solved plan the headline (exact when the scan is). It is told each chip's last playable gameweek (`expires_after_gw`; first-half chips expire after GW19) and must give a clear call. The headline is still always an optimiser solve; the no-chip plan stays quotable as the Alternative. Run cost moved out of the report (console and `coach_log` only).

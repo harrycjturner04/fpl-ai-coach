@@ -34,10 +34,13 @@ def test_bench_boost_gain_equals_bench_points_in_that_week():
 
 def test_scan_skips_unavailable_windows():
     ctx, table = _case()
-    scan = chip_scan(ctx, table, [("bboost", 2), ("bboost", 9)], workers=1)
+    plans = {}
+    scan = chip_scan(ctx, table, [("bboost", 2), ("bboost", 9)], workers=1, plans=plans)
     bad = scan[scan.gameweek == 9].iloc[0]
     assert math.isnan(bad.objective) and bad.note != ""
     assert len(scan) == 2
+    good = scan[scan.gameweek == 2].iloc[0]
+    assert list(plans) == [("bboost", 2)] and plans[("bboost", 2)].objective == pytest.approx(good.objective)
 
 
 def test_parallel_equals_serial():
