@@ -116,7 +116,11 @@ _TYPES = {"object": dict, "array": list, "string": str, "integer": int, "number"
 
 def schema_errors(value, schema: dict, path: str = "input") -> list[str]:
     """Problems with `value` under the JSON Schema subset strict tools use (type, enum, required,
-    properties, additionalProperties: false, items)."""
+    properties, additionalProperties: false, items, anyOf)."""
+    if "anyOf" in schema:
+        branches = [schema_errors(value, s, path) for s in schema["anyOf"]]
+        if all(branches):
+            return [f"{path}: matches no anyOf branch ({'; '.join(b[0] for b in branches)})"]
     types = schema.get("type")
     if types is not None:
         types = [types] if isinstance(types, str) else types

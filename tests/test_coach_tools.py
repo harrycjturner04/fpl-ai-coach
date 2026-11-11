@@ -12,6 +12,7 @@ from optimisation.settings import PlanSettings
 from reasoning.adjust import Adjustment
 from reasoning.client import schema_errors
 from reasoning.flags import Flag
+from reasoning.news import SUBMIT_FLAGS
 from reasoning.tools import TOOLS, Session, _clean, handlers
 from tests.optimiser_helpers import FULL_RULES, full_pool, pool
 
@@ -38,6 +39,14 @@ def session():
                    headline=planning.plan(ctx, table), chips_available=[("bboost", 11)])
 
 
+def test_position_filter_validates_through_anyof():
+    s = next(t for t in TOOLS if t.name == "get_predictions").input_schema
+    base = {"player_ids": None, "top_n": 5}
+    assert schema_errors({**base, "position": "MID"}, s) == []
+    assert schema_errors({**base, "position": None}, s) == []
+    assert schema_errors({**base, "position": "STR"}, s) != []
+
+
 def test_schemas_are_strict_compatible():
     banned = {"minimum", "maximum", "multipleOf", "minLength", "pattern", "minItems"}
 
@@ -45,10 +54,12 @@ def test_schemas_are_strict_compatible():
         if s.get("type") == "object" or "properties" in s:
             assert s["additionalProperties"] is False and set(s["required"]) == set(s["properties"])
         assert not banned & set(s)
-        for v in [*s.get("properties", {}).values(), *([s["items"]] if "items" in s else [])]:
+        # the API rejects enum alongside a type list (live 400 at C3); use anyOf instead
+        assert not ("enum" in s and isinstance(s.get("type"), list))
+        for v in [*s.get("properties", {}).values(), *([s["items"]] if "items" in s else []), *s.get("anyOf", [])]:
             walk(v)
 
-    for t in TOOLS:
+    for t in [*TOOLS, SUBMIT_FLAGS]:
         walk(t.input_schema)
     assert {t.name for t in TOOLS} == {"get_squad_state", "get_predictions", "get_news_flags", "solve",
                                        "get_chip_scan", "get_monitoring"}

@@ -56,7 +56,8 @@ TOOLS = [
          "changed them), sorted by horizon total. Filters combine; top_n defaults to 20. At most 50 players per call "
          "(top_n above 50 is clamped; player_ids beyond the first 50 distinct are dropped; the result says so).",
          _obj({"player_ids": {"type": ["array", "null"], "items": {"type": "integer"}},
-               "position": {"type": ["string", "null"], "enum": [*POSITIONS, None]},
+               # strict tools reject enum with a type list, so nullable enums use anyOf
+               "position": {"anyOf": [{"type": "string", "enum": POSITIONS}, {"type": "null"}]},
                "top_n": {"type": ["integer", "null"]}})),
     Tool("get_news_flags", "News flags from this run and the adjustments applied to predictions.", _obj({})),
     Tool("solve", "What-if solve at a 0.1% gap (not exact): ban or force players, play a chip, change the horizon. "
