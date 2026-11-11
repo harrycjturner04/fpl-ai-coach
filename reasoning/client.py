@@ -152,7 +152,7 @@ class LLM:
         self.model = settings.models[role]
         self.client = client or anthropic.Anthropic()  # SDK default credential resolution
 
-    def _request(self, system: str, messages: list, tools: list[dict]):
+    def _request(self, system: str, messages: list, tools: list[dict], output_format: dict | None = None):
         kwargs = dict(
             model=self.model, max_tokens=self.settings.max_tokens,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
@@ -164,6 +164,8 @@ class LLM:
         )
         if tools:
             kwargs["tools"] = tools
+        if output_format:
+            kwargs["output_config"]["format"] = output_format
         try:
             with self.client.beta.messages.stream(**kwargs) as stream:
                 return stream.get_final_message()
@@ -188,13 +190,14 @@ class LLM:
         return call
 
     def run(self, system: str, messages: list, tools: list[Tool], handlers: dict[str, Callable[[dict], dict]],
-            server_tools=(), search_budget: int | None = None) -> RunResult:
+            server_tools=(), search_budget: int | None = None, output_format: dict | None = None) -> RunResult:
         """Manual tool loop. `messages` is the caller's history and is extended in place (append-only:
         each full assistant `content`, then the tool results), so a chat can continue from it. A refused
         turn is not appended; a max_tokens turn is appended without its tool_use blocks.
         Client tools come first in the given order, then server tools, so the cached prefix is stable.
         `search_budget` caps web searches over the whole run (max_uses only caps one request): each request's
-        web_search max_uses is the budget left, and the tool is dropped once it is spent."""
+        web_search max_uses is the budget left, and the tool is dropped once it is spent.
+        `output_format` (e.g. {"type": "json_schema", "schema": ...}) goes in output_config.format."""
         client_params = [t.to_param() for t in tools]
         schemas = {t.name: t.input_schema for t in tools}
         usage, calls = Usage(), []
@@ -205,7 +208,7 @@ class LLM:
                 left = search_budget - usage.searches
                 server = [t | {"max_uses": left} if t.get("name") == "web_search" else t
                           for t in server if t.get("name") != "web_search" or left > 0]
-            response = self._request(system, messages, client_params + server)
+            response = self._request(system, messages, client_params + server, output_format)
             usage += Usage.from_response(response, self.settings, self.model)
             if response.stop_reason == "refusal":  # raise before appending: history stays valid
                 raise LLMUnavailable(f"refused after fallback: {response.stop_details}", usage)
