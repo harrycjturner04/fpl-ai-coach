@@ -36,6 +36,14 @@ def test_keeps_only_non_pl_matches_of_pl_clubs():
     assert row.opponent == "Real Madrid CF"
 
 
+def test_undrawn_side_is_tbd():
+    # Live football-data returns name None for a cup tie whose opponent is not yet drawn.
+    m = {"competition": {"code": "FAC"}, "utcDate": "2027-01-10T15:00:00Z",
+         "homeTeam": {"name": "Arsenal FC"}, "awayTeam": {"name": None}}
+    t = congestion.congestion_table([m], TEAMS)
+    assert list(t.team_code) == [3] and list(t.opponent) == ["TBD"]
+
+
 def test_near_window():
     t = congestion.congestion_table(MATCHES, TEAMS)
     ko = pd.Timestamp("2026-11-28T15:00:00Z")

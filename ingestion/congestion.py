@@ -43,8 +43,10 @@ def _norm(name: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def team_code(name: str, teams: pd.DataFrame) -> int | None:
-    """FPL team code for a football-data team name, or None if not a PL club."""
+def team_code(name: str | None, teams: pd.DataFrame) -> int | None:
+    """FPL team code for a football-data team name, or None if not a PL club (or not yet drawn)."""
+    if not name:
+        return None
     n = _norm(name)
     wanted = {n, *ALIASES.get(n, ())}
     for row in teams.itertuples():
@@ -81,7 +83,7 @@ def congestion_table(matches: list[dict], teams: pd.DataFrame) -> pd.DataFrame:
         for side, other in (("homeTeam", "awayTeam"), ("awayTeam", "homeTeam")):
             code = team_code(m[side]["name"], teams)
             if code is not None:
-                rows.append((code, m["competition"]["code"], pd.Timestamp(m["utcDate"]), m[other]["name"]))
+                rows.append((code, m["competition"]["code"], pd.Timestamp(m["utcDate"]), m[other]["name"] or "TBD"))
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
@@ -114,7 +116,11 @@ def update(
     missing = [n for c, n in zip(teams.code, teams.name) if c not in seen]
     if missing:
         print(f"  congestion: no Premier League match mapped for {', '.join(missing)} (alias gap or no fixture in window)")
-    table = congestion_table(matches, teams)
+    try:
+        table = congestion_table(matches, teams)
+    except (KeyError, TypeError, AttributeError, ValueError) as err:
+        print(f"  congestion: unexpected match data ({type(err).__name__}); skipping")
+        return None
     save_table(table, "congestion", data_dir)
     return table
 
