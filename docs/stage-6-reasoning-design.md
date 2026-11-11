@@ -74,7 +74,7 @@ Staleness: report shows the newest source date per club and warns if a club's pr
 - Structured flags via strict tool or `output_config.format` (forced tool_choice is a 400 on these models; verify web search + structured output compatibility at build; fallback two-step: search call then extraction call).
 - Prompt caching on the stable system prompt + tool list; `max_uses` cap on web search (default ~10, configurable).
 - Cost per run computed from `usage` + search count with a price table in settings; printed and logged.
-- Key: SDK default credential resolution (`ANTHROPIC_API_KEY` or `ant auth login` profile); never stored.
+- Key: SDK default credential resolution (`ANTHROPIC_API_KEY` or `ant auth login` profile); never in the repo. The coach loads a local, git-excluded `.env` (`ingestion/env.py`); variables already set in the shell win.
 
 ## 9. Fixture congestion input
 Structured list of each shortlist club's non-PL fixtures within +/- 4 days of each horizon GW. Source (user): football-data.org API, new `ingestion/` module, key in env var `FOOTBALL_DATA_API_KEY` (never stored), saved as a Parquet table; team names mapped to FPL team codes. Verify free-tier competition coverage at build; gaps (e.g. domestic cups) filled by web search in the news step. New data source: CLAUDE.md section 3 updated. Tests use recorded JSON.

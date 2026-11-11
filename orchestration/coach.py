@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from ingestion import congestion, storage
+from ingestion.env import load_env
 from optimisation import planning
 from optimisation.cli import _horizon_arg, ensure_fresh_data, format_solution
 from optimisation.model import Plan
@@ -176,6 +177,7 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--chip-gap", type=_gap_arg, default=0.0,
                         help="relative solver gap for the chip scan (default 0, exact)")
     args = parser.parse_args(argv)
+    load_env()
     run(args.entry, chat=args.chat, search=args.search, horizon=args.horizon, chip_gap=args.chip_gap)
 
 
