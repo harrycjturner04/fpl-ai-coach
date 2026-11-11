@@ -90,12 +90,13 @@ def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = Non
         "season": season,
         "teams_in_season": sorted(code_of.tolist()),
         "code_to_id": players.set_index("code")["id"],
+        "news": None,
     }
 
 
 def _component(x: dict, data_dir: Path) -> pd.DataFrame:
     return predict(x["history"], x["players_now"], x["fixtures_ahead"], x["cutoff"], x["season"],
-                   x["teams_in_season"], load_live_params(data_dir))
+                   x["teams_in_season"], load_live_params(data_dir), news=x.get("news"))
 
 
 def _before_deadline(gameweeks: pd.DataFrame, now: pd.Timestamp) -> int | None:
@@ -136,19 +137,25 @@ def _predict_candidates(names: list[str], chosen: str, x: dict, data_dir: Path) 
 def run(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp | None = None,
         model: str = SHIPPED_MODEL) -> pd.DataFrame:
     """Predictions from `model`. Before the deadline every candidate is also logged for the forward test."""
+    return run_with_inputs(data_dir, horizon, now, model)[0]
+
+
+def run_with_inputs(data_dir: Path = storage.DATA_DIR, horizon: int = 5, now: pd.Timestamp | None = None,
+                    model: str = SHIPPED_MODEL) -> tuple[pd.DataFrame, dict]:
+    """`run`, also returning the live inputs (with their cache) so a caller can predict again, e.g. with news."""
     x = live_inputs(data_dir, horizon, now)
     gameweeks = storage.load_table("gameweeks", data_dir)
     names = list(CANDIDATES) if _before_deadline(gameweeks, x["cutoff"]) else [model]
     preds = _predict_candidates(names, model, x, data_dir)
     for name, p in preds.items():
-        _record_predictions(p, name, gameweeks, x["season"], data_dir, x["cutoff"])
+        record_predictions(p, name, gameweeks, x["season"], data_dir, x["cutoff"])
     pred = preds[model].copy()
     pred.insert(0, "player_id", pred["player_code"].map(x["code_to_id"]))
     storage.save_table(pred, "predictions", data_dir)
-    return pred
+    return pred, x
 
 
-def _record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, season: str, data_dir: Path,
+def record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, season: str, data_dir: Path,
                         now: pd.Timestamp) -> pd.DataFrame | None:
     """Save the per-gameweek predictions of `model` made for the next gameweek, keeping the latest record
     before its deadline: the forward test of the models as the season is played."""
@@ -157,13 +164,19 @@ def _record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame,
         return None
     totals = pred.groupby(["gameweek", "player_code"], as_index=False)["total"].sum()
     new = totals.assign(season=season, made_for_gameweek=made_for, recorded_at=now, model=model)
+    if "p60" in pred:   # minutes calibration: p60 of the player's first fixture in each gameweek
+        # without kickoff, fixture_id stands in: FPL ids follow date order (a rescheduled fixture keeps its old id)
+        order = [c for c in ("gameweek", "kickoff", "fixture_id") if c in pred]
+        nearest = pred.sort_values(order, kind="stable").groupby(
+            ["gameweek", "player_code"], as_index=False)["p60"].first()
+        new = new.merge(nearest, on=["gameweek", "player_code"], how="left")
     old = storage.load_table_or_none("prediction_log", data_dir)
     if old is not None and "model" not in old:
         old = old.assign(model="component")   # rows logged before the model column existed
     log = new if old is None else pd.concat([old, new], ignore_index=True)
     key = ["season", "made_for_gameweek", "gameweek", "player_code", "model"]
     log = log.sort_values("recorded_at").drop_duplicates(key, keep="last")
-    log = log[key + ["total", "recorded_at"]].reset_index(drop=True)
+    log = log[key + ["total", "recorded_at"] + (["p60"] if "p60" in log else [])].reset_index(drop=True)
     storage.save_table(log, "prediction_log", data_dir)
     return log
 

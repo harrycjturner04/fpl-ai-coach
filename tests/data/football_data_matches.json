@@ -1,0 +1,344 @@
+{
+ "filters": {},
+ "resultSet": {
+  "count": 16
+ },
+ "matches": [
+  {
+   "id": 1,
+   "utcDate": "2026-11-01T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1000,
+    "name": "Arsenal FC",
+    "shortName": "Arsenal",
+    "tla": "ARS"
+   },
+   "awayTeam": {
+    "id": 1001,
+    "name": "Aston Villa FC",
+    "shortName": "Aston Villa",
+    "tla": "AST"
+   }
+  },
+  {
+   "id": 2,
+   "utcDate": "2026-11-02T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1002,
+    "name": "AFC Bournemouth",
+    "shortName": "AFC Bournemouth",
+    "tla": "AFC"
+   },
+   "awayTeam": {
+    "id": 1003,
+    "name": "Brentford FC",
+    "shortName": "Brentford",
+    "tla": "BRE"
+   }
+  },
+  {
+   "id": 3,
+   "utcDate": "2026-11-03T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1004,
+    "name": "Brighton & Hove Albion FC",
+    "shortName": "Brighton & Hove Albion",
+    "tla": "BRI"
+   },
+   "awayTeam": {
+    "id": 1005,
+    "name": "Chelsea FC",
+    "shortName": "Chelsea",
+    "tla": "CHE"
+   }
+  },
+  {
+   "id": 4,
+   "utcDate": "2026-11-01T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1006,
+    "name": "Coventry City FC",
+    "shortName": "Coventry City",
+    "tla": "COV"
+   },
+   "awayTeam": {
+    "id": 1007,
+    "name": "Crystal Palace FC",
+    "shortName": "Crystal Palace",
+    "tla": "CRY"
+   }
+  },
+  {
+   "id": 5,
+   "utcDate": "2026-11-02T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1008,
+    "name": "Everton FC",
+    "shortName": "Everton",
+    "tla": "EVE"
+   },
+   "awayTeam": {
+    "id": 1009,
+    "name": "Fulham FC",
+    "shortName": "Fulham",
+    "tla": "FUL"
+   }
+  },
+  {
+   "id": 6,
+   "utcDate": "2026-11-03T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1010,
+    "name": "Hull City AFC",
+    "shortName": "Hull City",
+    "tla": "HUL"
+   },
+   "awayTeam": {
+    "id": 1011,
+    "name": "Ipswich Town FC",
+    "shortName": "Ipswich Town",
+    "tla": "IPS"
+   }
+  },
+  {
+   "id": 7,
+   "utcDate": "2026-11-01T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1012,
+    "name": "Leeds United FC",
+    "shortName": "Leeds United",
+    "tla": "LEE"
+   },
+   "awayTeam": {
+    "id": 1013,
+    "name": "Liverpool FC",
+    "shortName": "Liverpool",
+    "tla": "LIV"
+   }
+  },
+  {
+   "id": 8,
+   "utcDate": "2026-11-02T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1014,
+    "name": "Manchester City FC",
+    "shortName": "Manchester City",
+    "tla": "MAN"
+   },
+   "awayTeam": {
+    "id": 1015,
+    "name": "Manchester United FC",
+    "shortName": "Manchester United",
+    "tla": "MAN"
+   }
+  },
+  {
+   "id": 9,
+   "utcDate": "2026-11-03T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1016,
+    "name": "Newcastle United FC",
+    "shortName": "Newcastle United",
+    "tla": "NEW"
+   },
+   "awayTeam": {
+    "id": 1017,
+    "name": "Nottingham Forest FC",
+    "shortName": "Nottingham Forest",
+    "tla": "NOT"
+   }
+  },
+  {
+   "id": 10,
+   "utcDate": "2026-11-01T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "PL",
+    "name": "Premier League"
+   },
+   "homeTeam": {
+    "id": 1018,
+    "name": "Tottenham Hotspur FC",
+    "shortName": "Tottenham Hotspur",
+    "tla": "TOT"
+   },
+   "awayTeam": {
+    "id": 1019,
+    "name": "Sunderland AFC",
+    "shortName": "Sunderland",
+    "tla": "SUN"
+   }
+  },
+  {
+   "id": 20,
+   "utcDate": "2026-11-24T20:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "CL",
+    "name": "UEFA Champions League"
+   },
+   "homeTeam": {
+    "id": 1000,
+    "name": "Arsenal FC",
+    "shortName": "Arsenal",
+    "tla": "ARS"
+   },
+   "awayTeam": {
+    "id": 86,
+    "name": "Real Madrid CF",
+    "shortName": "Real Madrid CF",
+    "tla": "REA"
+   }
+  },
+  {
+   "id": 21,
+   "utcDate": "2026-11-25T20:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "CL",
+    "name": "UEFA Champions League"
+   },
+   "homeTeam": {
+    "id": 81,
+    "name": "FC Barcelona",
+    "shortName": "FC Barcelona",
+    "tla": "FC "
+   },
+   "awayTeam": {
+    "id": 1014,
+    "name": "Manchester City FC",
+    "shortName": "Manchester City",
+    "tla": "MAN"
+   }
+  },
+  {
+   "id": 22,
+   "utcDate": "2026-11-26T17:45:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "EL",
+    "name": "UEFA Europa League"
+   },
+   "homeTeam": {
+    "id": 100,
+    "name": "AS Roma",
+    "shortName": "AS Roma",
+    "tla": "AS "
+   },
+   "awayTeam": {
+    "id": 1001,
+    "name": "Aston Villa FC",
+    "shortName": "Aston Villa",
+    "tla": "AST"
+   }
+  },
+  {
+   "id": 23,
+   "utcDate": "2026-11-27T20:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "EL",
+    "name": "UEFA Europa League"
+   },
+   "homeTeam": {
+    "id": 523,
+    "name": "Olympique Lyonnais",
+    "shortName": "Olympique Lyonnais",
+    "tla": "OLY"
+   },
+   "awayTeam": {
+    "id": 1018,
+    "name": "Tottenham Hotspur FC",
+    "shortName": "Tottenham Hotspur",
+    "tla": "TOT"
+   }
+  },
+  {
+   "id": 24,
+   "utcDate": "2026-12-05T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "FAC",
+    "name": "FA Cup"
+   },
+   "homeTeam": {
+    "id": 389,
+    "name": "Luton Town FC",
+    "shortName": "Luton Town",
+    "tla": "LUT"
+   },
+   "awayTeam": {
+    "id": 1003,
+    "name": "Brentford FC",
+    "shortName": "Brentford",
+    "tla": "BRE"
+   }
+  },
+  {
+   "id": 25,
+   "utcDate": "2026-12-06T15:00:00Z",
+   "status": "TIMED",
+   "competition": {
+    "code": "FAC",
+    "name": "FA Cup"
+   },
+   "homeTeam": {
+    "id": 1005,
+    "name": "Chelsea FC",
+    "shortName": "Chelsea",
+    "tla": "CHE"
+   },
+   "awayTeam": {
+    "id": 1008,
+    "name": "Everton FC",
+    "shortName": "Everton",
+    "tla": "EVE"
+   }
+  }
+ ]
+}

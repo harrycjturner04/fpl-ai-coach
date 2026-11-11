@@ -6,11 +6,11 @@ An AI-assisted Fantasy Premier League coach. It combines a statistical/ML predic
 
 Five layers, each with a single responsibility; only clean, structured output crosses a layer boundary.
 
-1. **Ingestion**: official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks, from which the squad, bank, free transfers and chips are reconstructed), later injury/news sources.
+1. **Ingestion**: official FPL API (players, fixtures, per-player history, a manager's history/transfers/picks, from which the squad, bank, free transfers and chips are reconstructed), and European/cup fixtures from football-data.org.
 2. **Feature engineering**: rolling form, per-90 rates, fixture difficulty, minutes reliability, set-piece duty, team strength.
 3. **Prediction**: expected points per player for the next 1–5 gameweeks, built component-by-component from team attack/defence ratings, player minutes/start probability and per-90 rates, combined through FPL's own scoring rules. The default takes its minutes/start probabilities from a LightGBM model; LightGBM, Keras, GRU and stacked points models are compared walk-forward by gameweek and logged alongside.
 4. **Optimisation**: a PuLP integer linear program that plans five gameweeks at once, covering budget, 2/5/5/3 squad, max 3 per club, valid formation, captaincy, free transfers and the −4 transfer hit.
-5. **Reasoning**: an LLM that turns news into structured risk flags, reviews the optimiser's output, plans chip timing, and writes the recommendation, calling the optimiser as a tool to test scenarios.
+5. **Reasoning**: Claude (Anthropic API with tool use) turns FPL news and web search into structured risk flags that code applies within caps, chooses whether to play a chip from solved chip windows, and writes the recommendation, calling the optimiser as a tool to test scenarios; code checks its players and figures against the solves.
 
 ## Status
 
@@ -20,7 +20,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 - [x] Stage 3b: Multi-week optimiser (five-week plan, chips as what-ifs), tested by replaying four past seasons
 - ~~Stage 4: Screenshot parsing~~ (dropped: the manager ID gives the same information more reliably)
 - [x] Stage 5: ML prediction models (LightGBM, Keras, GRU, stacker), compared walk-forward; the component model with LightGBM minutes (`ml-minutes`) is the default
-- [ ] Stage 6: LLM reasoning layer
+- [x] Stage 6: LLM reasoning layer (coach command, news flags, chip call, checked write-up, what-if chat, monitoring, grader)
 - [ ] Stage 7: Presentation
 
 ## Quick start
@@ -48,6 +48,11 @@ python -m optimisation.cli --entry 1234567 --chip bboost:12             # what-i
 
 python -m evaluation.tune --workers 16       # replay four seasons, tune the planning settings (several hours)
 python scripts/make_charts.py                # redraw the charts in docs/img/
+
+python -m orchestration.coach --entry 1234567           # coach report: news, plan, chip call, write-up
+python -m orchestration.coach --entry 1234567 --chat    # then a what-if chat (also --no-search, --horizon N, --chip-gap X)
+python -m evaluation.monitoring              # season-to-date accuracy of the logged predictions
+python -m reasoning.grader                   # Claude scores the newest stored report (--all: every ungraded one)
 
 pytest                                      # offline tests
 pytest -m live                              # check the real FPL API still has every field we use
@@ -211,6 +216,25 @@ Market features (ownership and net transfers) need `python -m ingestion.cli --hi
 optimiser's automatic refresh runs `ingestion.cli` without `--history`, and without it this season's played gameweeks
 have no ownership or transfer values for the models to train and predict from (`ingestion.cli` prints a warning).
 
+## Reasoning layer (coach)
+
+Stage 6 added the coach (new dependency `anthropic`). It needs keys in a local `.env` in the project root, which is
+not committed:
+
+```
+ANTHROPIC_API_KEY=...
+FOOTBALL_DATA_API_KEY=...
+```
+
+Never commit `.env`: the repo has no committed `.gitignore`, so add `.env` to your clone's ignore rules first
+(for example `echo .env >> .git/info/exclude`).
+
+One run: data and predictions, news flags from FPL's fields and web search (code applies them within fixed caps),
+an exact headline solve, a parallel chip scan, Claude's chip call and write-up with tool access, and a code
+post-check of the players and "pts" figures in the text. The report is saved to `data/reports/`; the cost is printed
+and logged. Live runs on 2026-11-11 cost $0.081 to $0.095 each with Sonnet 5.5 and took about 3 minutes. News effects
+cannot be backtested; they are evaluated on the 2026/27 forward test. See [docs/reasoning.md](docs/reasoning.md).
+
 ## How this project is built
 
 I use [Claude Code](https://claude.com/claude-code) as a development tool, in the same way I'd use any tool that makes me faster: it writes much of the implementation and tests, and runs an automated review pass. The thinking behind the project is mine. I set the vision and architecture, decide the approach for each problem, and choose between alternatives after weighing them up. The reasoning behind the key decisions, such as why the optimiser is an integer linear program and how free transfers are valued, is documented in the sections above.
@@ -244,6 +268,10 @@ data/processed/plan_params.json       optimiser settings from a local re-tune (e
 data/processed/ml_training_table.parquet  ML training table, one row per deadline, player and fixture ahead
 data/processed/ml_oos_*.parquet       walk-forward out-of-sample ML predictions, cached (prediction/walkforward.py)
 data/processed/ml_report.txt          the ML model comparison report
+data/processed/coach_log.parquet     one row per coach run: flags, adjustments, tool calls, usage, cost, report path
+data/processed/grade_log.parquet     grader scores per stored report
+data/processed/congestion.parquet    European and cup fixtures of PL clubs (football-data.org)
+data/reports/*.md                     coach reports
 data/models/<date>/                   the live ML models and their meta.json (trained gameweek, failed kinds)
 data/processed/game_rules.json        budget, squad composition, club cap, FT cap, sell-on fee
 data/processed/metadata.json          when data and each team were last pulled (drives auto-refresh)

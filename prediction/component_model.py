@@ -11,6 +11,7 @@ import pandas as pd
 from features.player_rates import RATE_COLUMNS, PlayerParams, player_features, price_band
 from features.team_ratings import TeamParams, fit_team_ratings, team_matches
 
+from .availability import apply_availability
 from .poisson import expected_floor_div
 from .scoring import ScoringRules, rules_for_season
 
@@ -75,8 +76,10 @@ def fixture_components(rows: pd.DataFrame, rules: ScoringRules, components=COMPO
 
 def predict(history: pd.DataFrame, players_now: pd.DataFrame, fixtures_ahead: pd.DataFrame,
             cutoff: pd.Timestamp, season: str, teams_in_season: list[int], params: ModelParams,
-            components=COMPONENTS, minutes: pd.DataFrame | None = None) -> pd.DataFrame:
-    """`minutes` (player_code, fixture_id, p60, psub) replaces the blended minutes where it has a row."""
+            components=COMPONENTS, minutes: pd.DataFrame | None = None,
+            news: pd.DataFrame | None = None) -> pd.DataFrame:
+    """`minutes` (player_code, fixture_id, p60, psub) replaces the blended minutes where it has a row.
+    `news` (prediction.availability.NEWS_COLUMNS) overrides availability and start share."""
     ratings = fit_team_ratings(team_matches(history), cutoff, season, params.team, teams_in_season)
     feats, priors = player_features(history, cutoff, season, ratings, params.player)
 
@@ -107,10 +110,8 @@ def predict(history: pd.DataFrame, players_now: pd.DataFrame, fixtures_ahead: pd
         has = sup["p60"].notna().to_numpy()
         rows.loc[has, "p60"] = sup.loc[has, "p60"].to_numpy()
         rows.loc[has, "psub"] = sup.loc[has, "psub"].to_numpy()
-    chance = rows["chance"].fillna(100) / 100
-    availability = 1 - (1 - chance) * params.flag_fade ** rows["horizon"]
-    rows["p60"] = rows["p60"] * availability
-    rows["psub"] = rows["psub"] * availability
+    rows["p60"], rows["psub"] = apply_availability(rows, rows["p60"].to_numpy(), rows["psub"].to_numpy(),
+                                                   params.flag_fade, news)
     rows["lam_team"] = ratings.expected_goals(rows["team_code"], rows["opponent_code"], rows["was_home"])
     rows["lam_opp"] = ratings.expected_goals(rows["opponent_code"], rows["team_code"],
                                              ~rows["was_home"].astype(bool))

@@ -9,6 +9,8 @@ This page describes the system as a whole. The other methodology pages go into e
 - [Prediction model](prediction-model.md): expected points per player for the next five gameweeks.
 - [Machine-learning models](ml-model.md): the learned minutes and points models and how they were chosen.
 - [Optimiser](optimiser.md): the integer program that plans transfers, team and captain over five gameweeks.
+- [Reasoning layer](reasoning.md): the coach command, news flags, chip decision, write-up checks, chat,
+  monitoring and grading.
 - [Validation](validation.md): how the predictions and the plans were tested on past seasons, and what the tests
   can and cannot show.
 
@@ -29,8 +31,10 @@ next, so each layer can be tested on its own.
 4. **Optimisation** chooses the squad, transfers, starting XI and captain that maximise expected points over the
    next five gameweeks, subject to every FPL rule (budget, squad shape, club limit, formation, free transfers and
    hits). It knows nothing about how the predictions were made: it receives a table of numbers.
-5. **Reasoning** (planned) will use a large language model to read injury news, review the optimiser's plan, advise
-   on chip timing and write the final recommendation, calling the optimiser as a tool to test alternatives.
+5. **Reasoning** uses a large language model (Claude) to turn injury and team news into structured flags, which
+   code applies to the predictions within fixed caps; to choose whether to play a chip from a scan of solved chip
+   plans; and to write the recommendation, calling the optimiser as a tool to test alternatives. It never picks
+   players or states numbers of its own, and code checks its text against the solves.
 
 ## The weekly cycle
 
@@ -41,14 +45,17 @@ flowchart TD
         F["2. Features<br/>team ratings, minutes, per-90 rates, ML feature table"]
         P["3. Prediction<br/>component model + ML minutes (or LightGBM, Keras, stacked)<br/>expected points, next 5 gameweeks"]
         O["4. Optimisation<br/>5-week integer program"]
-        R["5. Reasoning (planned)<br/>news, review, chips, write-up"]
+        R["5. Reasoning<br/>news flags, chip choice, write-up, chat"]
         I --> F --> P --> O --> R
+        R -->|"capped news adjustments"| O
     end
 
     subgraph Weekly["Each gameweek"]
         W1["Pull fresh data"] --> W2["Predict the next 5 gameweeks"]
-        W2 --> W3["Plan transfers, XI and captain for all 5"]
-        W3 --> W4["Act on week one only"]
+        W2 --> W2b["Check team news, adjust predictions within caps"]
+        W2b --> W3["Plan transfers, XI and captain for all 5, and scan chips"]
+        W3 --> W3b["Choose a chip, write and check the report"]
+        W3b --> W4["Act on week one only"]
         W4 --> W5["Gameweek is played"]
         W5 -->|"re-plan with new data"| W1
     end
@@ -68,12 +75,24 @@ week before his team plays twice. The whole plan is solved again the following w
 | 3b. Multi-week optimiser | Built | Five-week plan, chips as what-ifs, season replay and tuned planning settings |
 | 4. Screenshot parsing | Dropped | Not needed: the team ID already gives squad, bank, free transfers and chips |
 | 5. Machine-learning prediction | Built | LightGBM minutes model (shipped default), LightGBM, Keras, GRU and stacked points models, validated walk-forward against the component model |
-| 6. Reasoning layer | Planned | News to risk flags, plan review, chip timing, written recommendation |
+| 6. Reasoning layer | Built | Coach command: news flags with capped adjustments, chip scan and chip call, checked write-up, what-if chat, monitoring report, report grader |
 | 7. Presentation | Planned | Dashboard |
 
-Today the pipeline runs from the command line: `python -m optimisation.cli --entry <your team ID>` refreshes the
-data if needed, predicts five gameweeks, and prints this week's transfers, XI, bench and captain followed by the
-provisional plan for the next four weeks.
+Today the pipeline runs from the command line. `python -m orchestration.coach --entry <your team ID>` refreshes
+the data if needed, predicts five gameweeks, checks the team news, solves the plan and every chip window, and
+writes a report with the transfers, captain, vice-captain and chip call; `--chat` adds a what-if chat. It needs an
+Anthropic API key in a local `.env`; without one it prints the optimiser's plan. `python -m optimisation.cli --entry
+<your team ID>` still prints the optimiser's plan alone.
 
-Not yet covered: injury and team news beyond FPL's own "chance of playing" flag, chip timing (the optimiser applies
-a chip when asked but does not choose when to play it), and price changes over the planning horizon.
+## Stage 6: the coach
+
+The reasoning layer adds what the numbers miss and explains the plan, without taking decisions away from the
+optimiser. News from FPL's own fields and a capped web search becomes structured flags with cited sources, and code
+decides how far each flag may move a player's availability or start chance. The headline plan is an exact solve;
+Claude chooses only whether to play a chip, from windows the optimiser has already solved, with each chip's expiry in
+view. Code then checks the players and "pts" figures in the write-up against the solves. A live run costs about
+$0.08 to $0.10 and takes about 3 minutes. A weekly monitoring report tracks the forward test on 2026/27, and a grader
+scores stored reports so that prompt changes can be judged. See [Reasoning layer](reasoning.md).
+
+Not yet covered: price changes over the planning horizon, and any measured evidence that news adjustments improve
+the predictions (that waits on the 2026/27 forward test).

@@ -7,6 +7,7 @@ plain Python, so a formulation bug can't hide by also being in the checker.
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Collection
 
 import pandas as pd
 
@@ -98,10 +99,13 @@ def check_plan(
     free_transfers: int | None = 1,
     max_hits: int | None = None,
     chips: dict[int, str] | None = None,
+    banned: Collection[int] = (),
+    forced: Collection[int] = (),
 ) -> list[str]:
     """Walk a multi-week plan in plain Python and return every rule violation.
 
-    `free_transfers=None` means week one's transfers are unlimited and free (before gameweek 1)."""
+    `free_transfers=None` means week one's transfers are unlimited and free (before gameweek 1).
+    `banned` players must be in no week's squad; `forced` players must be in week one's."""
     owned, chips = current_squad or {}, chips or {}
     p = players.set_index("id")
     scratch = not owned
@@ -123,6 +127,11 @@ def check_plan(
             bad(msg)
         if lineup and lineup[0].startswith("unknown"):
             return problems
+        for i in sorted(set(banned) & set(sol.squad)):
+            bad(f"banned player {i} in squad")
+        if n == 0:
+            for i in sorted(set(forced) - set(sol.squad)):
+                bad(f"forced player {i} missing")
         chip = chips.get(gw)
         if sol.chip != chip:
             bad(f"chip {sol.chip} != {chip}")

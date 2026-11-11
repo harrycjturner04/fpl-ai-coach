@@ -1,0 +1,19 @@
+[
+  {
+    "id": "msg_01", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
+    "content": [
+      {"type": "thinking", "thinking": "", "signature": "sig_01"},
+      {"type": "tool_use", "id": "toolu_01", "name": "get_price", "input": {"player_id": 7}}
+    ],
+    "stop_reason": "tool_use", "stop_sequence": null,
+    "usage": {"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 0,
+              "cache_creation_input_tokens": 50}
+  },
+  {
+    "id": "msg_02", "type": "message", "role": "assistant", "model": "claude-sonnet-5-5",
+    "content": [{"type": "text", "text": "Player 7 costs 6.5m."}],
+    "stop_reason": "end_turn", "stop_sequence": null,
+    "usage": {"input_tokens": 30, "output_tokens": 10, "cache_read_input_tokens": 150,
+              "cache_creation_input_tokens": 0}
+  }
+]

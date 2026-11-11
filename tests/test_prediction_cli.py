@@ -122,9 +122,9 @@ def _log_inputs():
 
 def test_predictions_logged_before_deadline_keeping_latest(tmp_path):
     pred, gws = _log_inputs()
-    cli._record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-04T09:00Z"))
+    cli.record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-04T09:00Z"))
     pred2 = pred.assign(total=pred["total"] + 1)
-    log = cli._record_predictions(pred2, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-06T12:00Z"))
+    log = cli.record_predictions(pred2, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-06T12:00Z"))
     assert len(log) == 3 and set(log.made_for_gameweek) == {9}
     row = log[(log.player_code == 100) & (log.gameweek == 9)].iloc[0]
     assert row.total == pytest.approx(3.5, abs=1e-4)  # fixtures summed, latest record kept
@@ -133,7 +133,7 @@ def test_predictions_logged_before_deadline_keeping_latest(tmp_path):
 
 def test_predictions_not_logged_after_deadline(tmp_path):
     pred, gws = _log_inputs()
-    assert cli._record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-07T09:00Z")) is None
+    assert cli.record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-07T09:00Z")) is None
     assert storage.load_table_or_none("prediction_log", tmp_path) is None
 
 
@@ -227,8 +227,8 @@ def test_prediction_log_keeps_one_row_per_model_and_migrates_old_rows(tmp_path):
                         "total": [9.0, 8.0], "recorded_at": pd.Timestamp("2023-10-01", tz="UTC")})
     storage.save_table(old, "prediction_log", tmp_path)               # logged before the model column existed
     now = pd.Timestamp("2023-10-04T09:00Z")
-    cli._record_predictions(pred, "lgbm", gws, "2023-24", tmp_path, now)
-    log = cli._record_predictions(pred.assign(total=7.0), "component", gws, "2023-24", tmp_path, now)
+    cli.record_predictions(pred, "lgbm", gws, "2023-24", tmp_path, now)
+    log = cli.record_predictions(pred.assign(total=7.0), "component", gws, "2023-24", tmp_path, now)
     key = ["gameweek", "player_code", "model"]
     assert not log.duplicated(["season", "made_for_gameweek", *key]).any()
     assert set(log.model) == {"component", "lgbm"}
@@ -249,3 +249,14 @@ def test_a_failing_chosen_ml_model_names_the_component_fallback(tmp_path, monkey
     _fake_walkforward(monkeypatch, fail=("lgbm",))
     with pytest.raises(RuntimeError, match="--model component"):
         cli.run(data_dir=tmp_path, now=pd.Timestamp("2023-10-06T12:00Z"), model="lgbm")
+
+
+def test_p60_logged_from_nearest_fixture(tmp_path):
+    pred, gws = _log_inputs()
+    pred = pred.assign(p60=[0.9, 0.2, 0.5, 0.7], kickoff=pd.to_datetime(
+        ["2023-10-07T15:00Z", "2023-10-08T15:00Z", "2023-10-14T15:00Z", "2023-10-07T15:00Z"], utc=True))
+    log = cli.record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-04T09:00Z"))
+    assert log[(log.player_code == 100) & (log.gameweek == 9)]["p60"].iloc[0] == pytest.approx(0.9)
+    by_id = pred.drop(columns="kickoff").assign(fixture_id=[3, 2, 4, 1])  # no kickoff: lowest fixture id
+    log = cli.record_predictions(by_id, "component", gws, "2023-24", tmp_path / "b", pd.Timestamp("2023-10-04T09:00Z"))
+    assert log[(log.player_code == 100) & (log.gameweek == 9)]["p60"].iloc[0] == pytest.approx(0.2)

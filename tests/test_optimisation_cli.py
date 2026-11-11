@@ -5,7 +5,7 @@ import pandas as pd
 import pytest
 
 from ingestion import storage
-from optimisation import cli
+from optimisation import cli, planning
 from optimisation.model import Plan, SquadRules, Solution, solve
 from tests.optimiser_helpers import FULL_RULES, full_pool, pool
 
@@ -132,12 +132,12 @@ def test_first_gameweek_passes_unlimited_free_transfers_and_the_usual_hit_cap(tm
 
 def _spy(monkeypatch, name):
     seen = {}
-    real = getattr(cli, name)
+    real = getattr(planning, name)
 
     def wrapper(*a, **kw):
         seen.update(kw)
         return real(*a, **kw)
-    monkeypatch.setattr(cli, name, wrapper)
+    monkeypatch.setattr(planning, name, wrapper)
     return seen
 
 
