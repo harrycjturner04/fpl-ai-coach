@@ -119,3 +119,13 @@ def test_post_check_follows_the_chosen_chip_plan(session):
     handlers(session)["choose_plan"]({"chip": {"name": "bboost", "gw": 11}})
     alt = f"## Alternative\nNo chip scores {none.objective:.1f} pts.\n\n"  # no solve id needed: exact no-chip plan
     assert post_check(_report(session, alternative=alt), session) == []
+
+
+def test_post_check_does_not_match_a_name_inside_a_longer_name(session):
+    w = session.headline.weeks[0]
+    players = session.ctx.players.copy()
+    players.loc[players.id == w.captain, "web_name"] = "B.Fernandes"
+    players.loc[players.id == w.bench[0], "web_name"] = "Fernandes"  # in the squad, so only the captain line can trip
+    session = replace(session, ctx=replace(session.ctx, players=players))
+    text = _report(session).replace(f"Captain: P{w.captain}", "Captain: B.Fernandes")
+    assert not [x for x in post_check(text, session) if "Captain" in x]

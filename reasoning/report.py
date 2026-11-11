@@ -70,7 +70,8 @@ def post_check(markdown: str, session: Session) -> list[str]:
         return names.get(i, str(i))
 
     def named(text: str) -> set[str]:
-        return {n for n in every if re.search(rf"(?<!\w){re.escape(n)}(?!\w)", text)}
+        # "Fernandes" must not match inside "B.Fernandes", nor "Lewin" inside "Calvert-Lewin"
+        return {n for n in every if re.search(rf"(?<![\w.'-]){re.escape(n)}(?![\w'-])", text)}
 
     def listed(s: set[str]) -> str:
         return ", ".join(sorted(s)) or "nobody"
