@@ -55,7 +55,11 @@ def main(argv: list[str] | None = None, data_dir: Path = storage.DATA_DIR, clien
     parser.add_argument("--all", action="store_true", help="every ungraded logged report (default: the newest)")
     args = parser.parse_args(argv)
     load_env()
-    runs = storage.load_table("coach_log", data_dir).sort_values("recorded_at")
+    runs = storage.load_table_or_none("coach_log", data_dir)
+    if runs is None:
+        print("No coach runs logged.")
+        return
+    runs = runs.sort_values("recorded_at")
     old = storage.load_table_or_none(LOG_TABLE, data_dir)
     graded = set() if old is None else set(old["report_path"])
     todo = runs[~runs["report_path"].isin(graded) & runs["report_path"].map(lambda p: Path(p).exists())]

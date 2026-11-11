@@ -169,6 +169,19 @@ def test_bad_body_skips(monkeypatch, tmp_path):
     assert congestion.update(tmp_path, session=S()) is None
 
 
+def test_malformed_match_skips_with_note(monkeypatch, tmp_path, capsys):
+    _key_and_teams(monkeypatch, tmp_path)
+
+    class S(FakeSession):
+        def get(self, *a, **k):
+            r = super().get(*a, **k)
+            r.json = lambda: {"matches": [{"competition": {"code": "PL"}, "homeTeam": {}}]}
+            return r
+
+    assert congestion.update(tmp_path, session=S(), today=date(2026, 11, 6), days=2) is None
+    assert "unexpected match data (KeyError)" in capsys.readouterr().out
+
+
 def test_near_accepts_naive_kickoff():
     t = congestion.congestion_table(MATCHES, TEAMS)
     assert len(congestion.near(t, 6, pd.Timestamp("2026-11-28T15:00:00"))) == 1

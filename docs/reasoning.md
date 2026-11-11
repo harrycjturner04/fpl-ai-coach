@@ -61,12 +61,13 @@ prints and saves the optimiser's plan with a note instead.
    triple captain) are solved in parallel processes, and ranked by gain over no chip.
 7. **Review and write-up.** Claude gets the squad state, the news flags and adjustments, the chip scan and any
    warnings up front, plus tools: `get_squad_state`, `get_predictions`, `get_news_flags`, `get_chip_scan`,
-   `get_monitoring`, `solve` (a what-if with banned or forced players, a chip or another horizon, at a 0.1% gap) and
-   `choose_plan`. Squad and prediction rows carry FPL's chance of playing and news text, so a low projection is
-   explained by its cause. It writes fixed sections: Verdict, Why, Risks and news, Chip outlook, an optional
-   Alternative (a logged solve, cited by id), and Sources.
+   `get_monitoring`, `solve` (a what-if with players banned from every week or forced into week one's squad, a
+   chip or another horizon, at a 0.1% gap) and `choose_plan`. Squad and prediction rows carry FPL's chance of
+   playing and news text, so a low projection is explained by its cause. It writes fixed sections: Verdict, Why,
+   Risks and news, Chip outlook, an optional Alternative (a logged solve, cited by id), and Sources.
 8. **Post-check, in code.** The players named in the Verdict must be exactly the headline's transfers, captain and
-   vice-captain, and no one outside the week-1 squad or its sales. Every "N pts" figure in the text must match, to
+   vice-captain, and no one outside the week-1 squad or its sales; its Chip line must name the headline's chip and
+   gameweek, or none. Every "N pts" figure in the text must match, to
    0.1, a figure from the headline, the chip scan or a logged solve. Mismatches are listed as warnings at the top
    of the report.
 9. **Run log.** One row per run in `coach_log`: models, flags, adjustments, tool calls, token usage, cost and the
@@ -148,3 +149,5 @@ warnings (since fixed): the grader takes the report's warnings at face value.
   "7.4 pts" difference in the 2026-11-11 runs) and wrong players in the Verdict, but not a wrong count or claim in prose;
   the grader is the check for those, and it is itself a model's judgement.
 - **One team, three runs.** The cost and time figures come from a single team in a single week.
+- **No automated live test of the coach.** There is no `pytest -m live` coach run; every coach test uses a fake
+  client. The live evidence is the C3 runs of 2026-11-11 against the real API.

@@ -5,7 +5,7 @@ import pytest
 
 from optimisation.model import Plan, Solution
 from reasoning.client import LLM, Settings
-from reasoning.news import gather_flags, news_context, shortlist, stale_warnings
+from reasoning.news import _when, gather_flags, news_context, shortlist, stale_warnings
 from tests.fakes import FakeClient, message
 
 # id, web_name, team id, team short, position, chance, news, news_added
@@ -226,3 +226,7 @@ def test_future_flag_date_kept_with_source_date_none(players, congestion, fixtur
     assert f.player_id == 20 and f.source_date is None
     assert len(res.warnings) == 1 and "player 20" in res.warnings[0] and "future" in res.warnings[0]
     assert res.newest_source[2] == date(2026, 11, 3)  # only FPL news_added
+
+
+def test_unknown_kickoff_is_tbc():
+    assert _when(pd.NaT) == "TBC" and _when(pd.Timestamp("2026-11-14T15:00Z")) == "2026-11-14 15:00 UTC"

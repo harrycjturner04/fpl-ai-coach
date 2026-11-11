@@ -226,6 +226,9 @@ ANTHROPIC_API_KEY=...
 FOOTBALL_DATA_API_KEY=...
 ```
 
+Never commit `.env`: the repo has no committed `.gitignore`, so add `.env` to your clone's ignore rules first
+(for example `echo .env >> .git/info/exclude`).
+
 One run: data and predictions, news flags from FPL's fields and web search (code applies them within fixed caps),
 an exact headline solve, a parallel chip scan, Claude's chip call and write-up with tool access, and a code
 post-check of the players and "pts" figures in the text. The report is saved to `data/reports/`; the cost is printed

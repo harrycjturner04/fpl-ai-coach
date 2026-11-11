@@ -90,6 +90,8 @@ NEWS = [message([{"type": "tool_use", "id": "toolu_1", "name": "submit_flags",
 REVIEW = message([{"type": "text", "text": "## Verdict\n- Transfers: none\n- Captain: P2\n- Vice-captain: P3\n"
                                            "- Chip: none\n\n## Why\nP1 is out.\n\n## Sources\n- https://club.example/news\n"}])
 CONNECTION = anthropic.APIConnectionError(request=httpx2.Request("POST", "https://api.anthropic.com/v1/messages"))
+BAD_REQUEST = anthropic.BadRequestError(
+    "invalid request", response=httpx2.Response(400, request=CONNECTION.request), body=None)
 
 
 def test_coach_offline_end_to_end_with_fake_llm(data, capsys):
@@ -120,12 +122,14 @@ def test_coach_offline_end_to_end_with_fake_llm(data, capsys):
     assert STAR not in {p["id"] for p in starting}
 
 
-@pytest.mark.parametrize("responses, news_ran", [([CONNECTION], False), ([*NEWS, CONNECTION], True)])
-def test_coach_without_llm_prints_plan(data, capsys, responses, news_ran):
+@pytest.mark.parametrize("responses, news_ran, error", [([CONNECTION], False, "APIConnectionError"),
+                                                        ([*NEWS, CONNECTION], True, "APIConnectionError"),
+                                                        ([*NEWS, BAD_REQUEST], True, "BadRequestError")])
+def test_coach_without_llm_prints_plan(data, capsys, responses, news_ran, error):
     path = coach.run(42, data, now=NOW, client=FakeClient(responses))
     out = capsys.readouterr().out
     assert "LLM unavailable: no news check or write-up" in out and "Starting XI" in out
-    assert "- LLM unavailable: no news check or write-up (APIConnectionError" in out  # the reason is printed
+    assert f"- LLM unavailable: no news check or write-up ({error}" in out  # the reason is printed
     md = path.read_text(encoding="utf-8")
     assert "LLM unavailable" in md and "## Verdict" not in md and "Starting XI" in md
     assert len(storage.load_table("coach_log", data)) == 1

@@ -257,3 +257,6 @@ def test_p60_logged_from_nearest_fixture(tmp_path):
         ["2023-10-07T15:00Z", "2023-10-08T15:00Z", "2023-10-14T15:00Z", "2023-10-07T15:00Z"], utc=True))
     log = cli.record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-04T09:00Z"))
     assert log[(log.player_code == 100) & (log.gameweek == 9)]["p60"].iloc[0] == pytest.approx(0.9)
+    by_id = pred.drop(columns="kickoff").assign(fixture_id=[3, 2, 4, 1])  # no kickoff: lowest fixture id
+    log = cli.record_predictions(by_id, "component", gws, "2023-24", tmp_path / "b", pd.Timestamp("2023-10-04T09:00Z"))
+    assert log[(log.player_code == 100) & (log.gameweek == 9)]["p60"].iloc[0] == pytest.approx(0.2)

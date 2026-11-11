@@ -109,14 +109,15 @@ def update(
     except (KeyError, ValueError):
         print("  congestion: unexpected football-data.org response; skipping")
         return None
-    seen = {
-        team_code(m[s]["name"], teams)
-        for m in matches if m["competition"]["code"] == "PL" for s in ("homeTeam", "awayTeam")
-    }
-    missing = [n for c, n in zip(teams.code, teams.name) if c not in seen]
-    if missing:
-        print(f"  congestion: no Premier League match mapped for {', '.join(missing)} (alias gap or no fixture in window)")
     try:
+        seen = {
+            team_code(m[s]["name"], teams)
+            for m in matches if m["competition"]["code"] == "PL" for s in ("homeTeam", "awayTeam")
+        }
+        missing = [n for c, n in zip(teams.code, teams.name) if c not in seen]
+        if missing:
+            print(f"  congestion: no Premier League match mapped for {', '.join(missing)} "
+                  "(alias gap or no fixture in window)")
         table = congestion_table(matches, teams)
     except (KeyError, TypeError, AttributeError, ValueError) as err:
         print(f"  congestion: unexpected match data ({type(err).__name__}); skipping")

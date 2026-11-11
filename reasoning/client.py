@@ -21,8 +21,8 @@ SETTINGS_FILE = "reasoning_settings"
 SHIPPED_SETTINGS_PATH = Path(__file__).parent / "settings.json"
 FALLBACK_BETA = "server-side-fallback-2026-07-01"
 MAX_TURNS = 25  # model turns per run (tool rounds plus pause_turn resumes)
-UNAVAILABLE_ERRORS = (anthropic.AuthenticationError, anthropic.PermissionDeniedError, anthropic.CredentialsError,
-                      anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.InternalServerError)
+# APIStatusError covers every HTTP error status (incl. 400/404/409/422), so a bad request still falls back
+UNAVAILABLE_ERRORS = (anthropic.CredentialsError, anthropic.APIConnectionError, anthropic.APIStatusError)
 
 
 class LLMUnavailable(Exception):

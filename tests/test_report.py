@@ -118,7 +118,34 @@ def test_post_check_follows_the_chosen_chip_plan(session):
     session = replace(session, chip_plans={("bboost", 11): bb})
     handlers(session)["choose_plan"]({"chip": {"name": "bboost", "gw": 11}})
     alt = f"## Alternative\nNo chip scores {none.objective:.1f} pts.\n\n"  # no solve id needed: exact no-chip plan
-    assert post_check(_report(session, alternative=alt), session) == []
+    text = _report(session, alternative=alt)
+    assert any("Chip line" in m and "bboost GW11" in m for m in post_check(text, session))
+    assert post_check(text.replace("- Chip: none", "- Chip: Bench Boost GW11"), session) == []
+    assert any("Chip line" in m for m in post_check(text.replace("- Chip: none", "- Chip: bboost GW12"), session))
+
+
+def test_post_check_flags_a_chip_the_headline_does_not_play(session):
+    assert post_check(_report(session).replace("- Chip: none", "- Chip: none, hold the wildcard for GW15"),
+                      session) == []
+    warnings = post_check(_report(session).replace("- Chip: none", "- Chip: wildcard GW11"), session)
+    assert warnings == ["Post-check: the Verdict's Chip line says 'wildcard GW11'; the headline has none"]
+
+
+def test_report_states_exactness_from_the_chip_scan(session, tmp_path):
+    from optimisation import planning
+    from reasoning.tools import handlers
+    scan = pd.DataFrame({"chip": ["bboost"], "gameweek": [11], "objective": [88.8], "gain_vs_none": [4.4],
+                         "week1_same_as_none": [True], "exact": [False], "note": [""]})
+    session = replace(session, chip_scan=scan)
+    assert "(optimiser, exact)" in render("R", session, plan_text="P", report=None, notes=[])  # no-chip headline
+    fake = FakeClient([message([{"type": "text", "text": _report(session)}])])
+    write_report(LLM("review", Settings.load(tmp_path), client=fake), session, searches_left=0)
+    assert "chip scan plans were solved at a gap and are not exact" in fake.requests[0]["messages"][0]["content"]
+    session = replace(session, chip_plans={("bboost", 11): planning.plan(session.ctx, session.table,
+                                                                         chips={11: "bboost"})})
+    handlers(session)["choose_plan"]({"chip": {"name": "bboost", "gw": 11}})
+    md = render("R", session, plan_text="P", report=None, notes=[])
+    assert "(optimiser, exact)" not in md and "not exact" in md
 
 
 def test_post_check_does_not_match_a_name_inside_a_longer_name(session):

@@ -51,3 +51,9 @@ def test_main_grades_newest_ungraded_and_appends(tmp_path, monkeypatch):
     assert first["report_path"].tolist() == [paths[1]] and first["grounded_numbers"].tolist() == [3]
     grader.main(["--all"], tmp_path, FakeClient([_answer()]))
     assert storage.load_table("grade_log", tmp_path)["report_path"].tolist() == [paths[1], paths[0]]
+
+
+def test_main_without_coach_log(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(grader, "load_env", lambda: None)
+    grader.main([], tmp_path, FakeClient([]))
+    assert "No coach runs logged." in capsys.readouterr().out

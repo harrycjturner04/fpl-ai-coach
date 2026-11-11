@@ -38,7 +38,7 @@ def _blocked(f: Flag, p: pd.Series, raising: bool) -> str | None:
     if not raising:
         return None
     chance = p["chance_of_playing_next_round"]
-    if chance == 0 or (p["status"] in RULED_OUT_STATUSES and (pd.isna(chance) or chance == 0)):
+    if p["status"] == "s" or chance == 0 or (p["status"] in RULED_OUT_STATUSES and pd.isna(chance)):
         return "rejected: FPL ruled out or suspended, cannot be raised"
     # Rule 3 "FPL-flagged only" holds by construction: an unflagged player's raw availability is already 1.
     if f.source_date is None:

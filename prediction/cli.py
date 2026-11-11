@@ -164,8 +164,10 @@ def record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, 
         return None
     totals = pred.groupby(["gameweek", "player_code"], as_index=False)["total"].sum()
     new = totals.assign(season=season, made_for_gameweek=made_for, recorded_at=now, model=model)
-    if "p60" in pred:   # minutes calibration: p60 of the player's nearest fixture in each gameweek
-        nearest = pred.sort_values([c for c in ("gameweek", "kickoff") if c in pred]).groupby(
+    if "p60" in pred:   # minutes calibration: p60 of the player's first fixture in each gameweek
+        # without kickoff, fixture_id stands in: FPL ids follow date order (a rescheduled fixture keeps its old id)
+        order = [c for c in ("gameweek", "kickoff", "fixture_id") if c in pred]
+        nearest = pred.sort_values(order, kind="stable").groupby(
             ["gameweek", "player_code"], as_index=False)["p60"].first()
         new = new.merge(nearest, on=["gameweek", "player_code"], how="left")
     old = storage.load_table_or_none("prediction_log", data_dir)

@@ -21,6 +21,9 @@ VERDICT_LINES = ("Transfers", "Captain", "Vice-captain")
 TOLERANCE = 0.1
 _PTS = re.compile(r"(?<![\w.])[+-]?(\d+(?:\.\d+)?)\s?pts\b")
 _SOLVE_ID = re.compile(r"\bS\d+\b")
+_GW = re.compile(r"\bGW\s?(\d+)\b", re.I)
+CHIP_NAMES = {"wildcard": ("wildcard",), "freehit": ("freehit", "free hit"), "bboost": ("bboost", "bench boost"),
+              "3xc": ("3xc", "triple captain")}
 
 
 @dataclass
@@ -61,7 +64,7 @@ def _known_points(session: Session) -> list[float]:
 
 def post_check(markdown: str, session: Session) -> list[str]:
     """Mismatches between Claude's text and the solves: players named in the Verdict (moves, captain, vice and
-    no one outside the week-1 squad or sales), every "N pts" figure (to 0.1), and the Alternative's solve id."""
+    no one outside the week-1 squad or sales), the chip and gameweek, every "N pts" figure (to 0.1), and the Alternative's solve id."""
     names = session.ctx.players.set_index("id")["web_name"].astype(str)
     every = set(names)
     w = session.headline.weeks[0]
@@ -94,6 +97,18 @@ def post_check(markdown: str, session: Session) -> list[str]:
             elif (got := named(line.split(":", 1)[1])) != want[label]:
                 warnings.append(f"Post-check: the Verdict's {label} line names {listed(got)}; "
                                 f"the headline has {listed(want[label])}")
+        played = [(x.chip, x.gameweek) for x in session.headline.weeks if x.chip]
+        line = next((ln for ln in verdict.splitlines() if ln.lstrip("-* ").startswith("Chip:")), None)
+        if line is None:
+            warnings.append("Post-check: the Verdict has no Chip line")
+        else:
+            said = line.split(":", 1)[1].strip()
+            got = ((set(), set()) if said.lower().startswith("none") else  # "none, hold X for GW N" is fine
+                   ({c for c, aliases in CHIP_NAMES.items() if any(a in said.lower() for a in aliases)},
+                    {int(g) for g in _GW.findall(said)}))
+            if got != ({c for c, _ in played}, {g for _, g in played}):
+                want = ", ".join(f"{c} GW{g}" for c, g in played) or "none"
+                warnings.append(f"Post-check: the Verdict's Chip line says {said!r}; the headline has {want}")
     known = _known_points(session)
     for m in _PTS.finditer(markdown):
         if not any(abs(float(m.group(1)) - k) <= TOLERANCE + 1e-9 for k in known):
@@ -106,14 +121,20 @@ def post_check(markdown: str, session: Session) -> list[str]:
     return warnings
 
 
+def _scan_exact(session: Session) -> bool:
+    return session.chip_scan is None or bool(session.chip_scan["exact"].all())
+
+
 def write_report(llm: LLM, session: Session, *, searches_left: int, notes: list[str] = ()) -> Report:
     """The review call: squad state, news and chip scan given up front, tools for predictions and what-ifs,
     web search capped at `searches_left` (none at 0). LLMUnavailable propagates."""
     h = handlers(session)
     context = {"squad_state": h["get_squad_state"]({}), "news": h["get_news_flags"]({}),
                "chip_scan": h["get_chip_scan"]({}), "warnings": list(notes)}
-    messages = [{"role": "user", "content": f"Write the report for gameweek {session.headline.gameweeks[0]}.\n\n"
-                 + json.dumps(context)}]
+    exactness = ("The no-chip plan and every chip scan plan are exact." if _scan_exact(session) else
+                 "The no-chip plan is exact; the chip scan plans were solved at a gap and are not exact.")
+    messages = [{"role": "user", "content": f"Write the report for gameweek {session.headline.gameweeks[0]}. "
+                 f"{exactness}\n\n" + json.dumps(context)}]
     server = [llm.settings.web_search_tool()] if searches_left > 0 else []
     res = llm.run(PROMPT.read_text(encoding="utf-8"), messages, TOOLS, h, server, search_budget=searches_left)
     warnings = post_check(res.text, session)
@@ -177,5 +198,7 @@ def render(title: str, session: Session, *, plan_text: str, report: Report | Non
     for head in LLM_SECTIONS:  # other headings Claude adds are dropped: code owns plan and warnings
         if head in s or head in tables:
             out += [f"## {head}", *([s[head], ""] if s.get(head) else []), *([tables[head], ""] if head in tables else [])]
-    out += ["## Recommended plan (optimiser, exact)", "```", plan_text, "```", ""]
+    exact = session.no_chip is None or session.headline is session.no_chip or _scan_exact(session)
+    kind = "exact" if exact else "chip plan solved at the chip-scan gap, not exact"
+    out += [f"## Recommended plan (optimiser, {kind})", "```", plan_text, "```", ""]
     return "\n".join(out).rstrip() + "\n"

@@ -63,7 +63,8 @@ TOOLS = [
                "position": {"anyOf": [{"type": "string", "enum": POSITIONS}, {"type": "null"}]},
                "top_n": {"type": ["integer", "null"]}})),
     Tool("get_news_flags", "News flags from this run and the adjustments applied to predictions.", _obj({})),
-    Tool("solve", "What-if solve at a 0.1% gap (not exact): ban or force players, play a chip, change the horizon. "
+    Tool("solve", "What-if solve at a 0.1% gap (not exact): ban players (every week) or force them (into week one's "
+         "squad only), play a chip, change the horizon. "
          "Returns week-1 moves, captain, projected points per week, objective and its difference from the "
          "headline objective (null when the horizon differs from the headline's), and a solve_id to cite.",
          _obj({"ban": _PLAYERS, "force": _PLAYERS,

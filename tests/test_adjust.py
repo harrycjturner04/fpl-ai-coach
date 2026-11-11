@@ -44,14 +44,15 @@ def test_output_frame_shape():
     assert news.player_code.eq(700).all()
 
 
-@pytest.mark.parametrize("chance,status", [(0, "i"), (0, "s"), (None, "s"), (None, "u"), (0, "n")])
+@pytest.mark.parametrize("chance,status", [(0, "i"), (0, "s"), (None, "s"), (None, "u"), (0, "n"),
+                                          (50, "s")])  # suspended is a floor whatever FPL's chance says
 def test_fpl_ruled_out_cannot_be_raised(chance, status):
     pl = players(chance, status)
     pl["news_added"] = NEWS_ADDED
     news, audit = run([flag(status="fit", start_prob_next_gw=1.0, confidence="high", source_kind="official")], pl)
     assert news.availability.isna().all()
     assert audit and all(a.applied == a.raw for a in audit)
-    if chance == 0:  # chance NaN means raw availability 1 already, so there is nothing to raise
+    if chance is not None:  # chance NaN means raw availability 1 already, so there is nothing to raise
         assert "ruled out" in audit[0].reason
 
 

@@ -58,7 +58,7 @@ def shortlist(plan: Plan, pred_table: pd.DataFrame, players: pd.DataFrame, owned
 
 
 def _when(ts) -> str:
-    return pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M UTC")
+    return "TBC" if pd.isna(ts) else pd.Timestamp(ts).strftime("%Y-%m-%d %H:%M UTC")
 
 
 def news_context(ids, players, congestion, fixtures, next_gw, *, teams: pd.DataFrame) -> str:
