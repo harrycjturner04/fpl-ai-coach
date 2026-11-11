@@ -26,6 +26,7 @@ class Monitoring:
     calibration: pd.DataFrame  # per model and p60 bucket: n, predicted, observed 60+ rate
     text: str
     planner: pd.DataFrame | None = None
+    summary: str = ""          # compact form for the reasoning layer
 
 
 def monitoring(data_dir: Path = storage.DATA_DIR, season: str | None = None) -> Monitoring:
@@ -39,7 +40,9 @@ def monitoring(data_dir: Path = storage.DATA_DIR, season: str | None = None) -> 
         preds = pd.concat([preds, ep[["gameweek", "player_code", "model", "total", "made_for_gameweek"]]], ignore_index=True)
     played = storage.load_table("match_log", data_dir)
     played = played[played["season"] == season].sort_values("kickoff")
-    played = played[played["gameweek"].isin(preds["gameweek"].unique())]
+    gws = storage.load_table_or_none("gameweeks", data_dir)
+    done = preds["gameweek"].unique() if gws is None else gws.loc[gws["finished"].astype(bool), "id"]
+    played = played[played["gameweek"].isin(done)]   # finished gameweeks only: a part-played one is partial
     actual = played.groupby(["gameweek", "player_code"]).agg(points=("points", "sum"))
     first = played.groupby(["gameweek", "player_code"]).agg(m60=("minutes", lambda m: float(m.iloc[0] >= 60)))
     scored = preds.merge(actual.reset_index(), on=["gameweek", "player_code"])
@@ -52,11 +55,11 @@ def monitoring(data_dir: Path = storage.DATA_DIR, season: str | None = None) -> 
     cal = pd.DataFrame(columns=["model", "bucket", "n", "predicted", "observed"])
     if "p60" in preds:
         c = preds.dropna(subset=["p60"]).merge(first.reset_index(), on=["gameweek", "player_code"])
-        c = c.assign(bucket=(np.floor(c["p60"] * 10).clip(upper=9) / 10).round(1))
+        c = c.assign(bucket=(np.floor(c["p60"] * 10 + 1e-9).clip(upper=9) / 10).round(1))
         cal = c.groupby(["model", "bucket"]).agg(n=("p60", "size"), predicted=("p60", "mean"),
                                                  observed=("m60", "mean")).reset_index()
     planner = _planner(data_dir, season, played)
-    return Monitoring(table, cal, _text(season, table, cal, planner), planner)
+    return Monitoring(table, cal, _text(season, table, cal, planner), planner, _summary(season, table, cal, planner))
 
 
 def _planner(data_dir: Path, season: str, played: pd.DataFrame) -> pd.DataFrame | None:
@@ -68,9 +71,9 @@ def _planner(data_dir: Path, season: str, played: pd.DataFrame) -> pd.DataFrame 
         return None
     players = storage.load_table("players", data_dir).set_index("id")
     rules = SquadRules.from_data(storage.load_json("game_rules", data_dir), storage.load_table("positions", data_dir))
+    ids = lambda s: [int(i) for i in str(s).split(",") if i]  # noqa: E731
     out = []
     for r in plans.itertuples():
-        ids = lambda s: [int(i) for i in str(s).split(",") if i]  # noqa: E731
         gw = played[played["gameweek"] == r.gameweek].groupby("player_code")[["minutes", "points"]].sum()
         by_id = gw.rename(index=players["code"].reset_index().set_index("code")["id"])
         pts = score_gameweek(ids(r.starting), ids(r.bench), r.captain, r.vice_captain, by_id["minutes"],
@@ -90,6 +93,21 @@ def _text(season: str, table: pd.DataFrame, cal: pd.DataFrame, planner: pd.DataF
     if planner is not None:
         lines += ["", "Planner (gameweek: projected vs realised, hits deducted)", planner.round(1).to_string(index=False),
                   f"Mean projected {planner['projected'].mean():.1f}, realised {planner['realised'].mean():.1f}"]
+    return "\n".join(lines)
+
+
+def _summary(season: str, table: pd.DataFrame, cal: pd.DataFrame, planner: pd.DataFrame | None) -> str:
+    if table.empty:
+        return f"Monitoring {season}: no played gameweeks with logged predictions yet."
+    lines = [f"Monitoring {season} (next-GW, error = predicted minus actual)", table.round(2).to_string(index=False)]
+    for m, g in cal.groupby("model"):
+        top = g[g["bucket"] >= 0.8]
+        if top["n"].sum():
+            lines.append(f"{m} minutes: p60>=0.8 predicted {np.average(top['predicted'], weights=top['n']):.2f}, "
+                         f"observed {np.average(top['observed'], weights=top['n']):.2f} (n={int(top['n'].sum())})")
+    if planner is not None:
+        lines.append(f"Planner over {len(planner)} GWs: mean projected {planner['projected'].mean():.1f}, "
+                     f"realised {planner['realised'].mean():.1f}")
     return "\n".join(lines)
 
 

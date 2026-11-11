@@ -172,7 +172,7 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
 def _monitoring_text(data_dir) -> str:
     """The monitoring report for the review's get_monitoring tool; never fails the run."""
     try:
-        return monitoring(data_dir).text
+        return monitoring(data_dir).summary
     except Exception as err:   # noqa: BLE001
         return f"monitoring report not available ({type(err).__name__})"
 
