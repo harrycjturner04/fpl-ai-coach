@@ -106,6 +106,11 @@ headline is fixed once written. What-ifs are solved at a 0.1% gap (`gap=0.001`) 
 answer says whether its figures are exact (the headline and exact chip-scan rows) or within 0.1% of optimal, citing
 the solve id. Its "pts" figures are post-checked in the same way.
 
+"What about player X?" works today as a what-if: the chat forces X into week one's squad with `solve` and reports
+the best plan with him and its points against the headline. Planned next: a player lookup tool (minutes, xG/xA,
+form, fixtures, price, FPL news) so the answer can show his stats, and an "adopt this plan" step that re-solves the
+chosen what-if exactly and makes it the recommended plan, with the report re-rendered and post-checked.
+
 ## Monitoring report
 
 `python -m evaluation.monitoring` scores the logged next-gameweek predictions of the current season against played
