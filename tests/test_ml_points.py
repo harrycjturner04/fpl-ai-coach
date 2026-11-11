@@ -86,7 +86,7 @@ def test_gru_points_fits_and_predicts_two_columns():
 
 
 def test_run_gru_points_totals_every_oos_minutes_row_and_caches_sequences_and_points(tmp_path):
-    from prediction.walkforward import run_gru_points, run_minutes, sequences
+    from prediction.walkforward import run_minutes, run_points, sequences
     from tests.test_backtest import synthetic_log
     from tests.test_walkforward import _table
     table, log = _table(), synthetic_log(n_gw=8)
@@ -97,7 +97,8 @@ def test_run_gru_points_totals_every_oos_minutes_row_and_caches_sequences_and_po
         np.testing.assert_array_equal(store[k][1], again[k][1])
     mins = run_minutes(table, "lgbm", seasons=("2023-24",), params={"n_estimators": 20}, workers=1, data_dir=tmp_path)
     params = {"epochs": 2, "units": 4, "seeds": (0,)}
-    out = run_gru_points(table, store, mins, seasons=("2023-24",), params=params, workers=1, data_dir=tmp_path)
+    out = run_points(table, "gru", mins, seasons=("2023-24",), params=params, workers=1, data_dir=tmp_path,
+                     store=store)
     assert len(out) == len(mins) and out["total"].notna().all()
-    pd.testing.assert_frame_equal(out, run_gru_points(table, store, mins, seasons=("2023-24",), params=params,
-                                                      workers=1, data_dir=tmp_path))
+    pd.testing.assert_frame_equal(out, run_points(table, "gru", mins, seasons=("2023-24",), params=params,
+                                                  workers=1, data_dir=tmp_path, store=store))

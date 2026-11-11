@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
+import inspect
+import textwrap
 import warnings
 from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
@@ -49,6 +52,29 @@ def content_sha256(df: pd.DataFrame, keys: list[str]) -> str:
     return hashlib.sha256(pd.util.hash_pandas_object(d, index=False).to_numpy().tobytes()).hexdigest()
 
 
+def _without_docstrings(tree: ast.AST) -> ast.AST:
+    """`tree` with every module, class and function docstring removed (an emptied body gets `pass`)."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            body = node.body
+            first = body[0].value if body and isinstance(body[0], ast.Expr) else None
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                node.body = body[1:] or [ast.Pass()]
+    return tree
+
+
+def code_sha256(files=(), funcs=()) -> str:
+    """sha256 of what the code does, not how it is written: the syntax tree of each file and function, without
+    docstrings, comments, line numbers or formatting. Cache fingerprints use it, so editing a comment or a docstring
+    keeps cached results valid while any change to the logic invalidates them."""
+    sources = [Path(f).read_text(encoding="utf-8") for f in files]
+    sources += [textwrap.dedent(inspect.getsource(f)) for f in funcs]
+    h = hashlib.sha256()
+    for src in sources:
+        h.update(ast.dump(_without_docstrings(ast.parse(src))).encode())
+    return h.hexdigest()
+
+
 def _season_rows(args) -> pd.DataFrame:
     match_log, season, first_gw, team_params = args
     gws = sorted(match_log.loc[match_log["season"] == season, "gameweek"].unique())
@@ -60,14 +86,13 @@ def _season_rows(args) -> pd.DataFrame:
 
 def _code_hash() -> str:
     """Hash of the code the table is built with: features, team ratings, snapshot and market (backtest) and this file."""
-    h = hashlib.sha256()
-    for f in (ml_features.__file__, team_ratings.__file__, backtest.__file__, __file__):
-        h.update(Path(f).read_bytes())
-    return h.hexdigest()
+    return code_sha256(files=(ml_features.__file__, team_ratings.__file__, backtest.__file__, __file__))
 
 
 def training_table(match_log: pd.DataFrame, seasons: list[str], workers: int = 8,
                    data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    """The cached ML training table for `seasons`, rebuilt (in parallel, per season) only when
+    its fingerprint (inputs, parameters, code) has changed."""
     fp = dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
               match_log_sha256=content_sha256(match_log, ["season", "player_code", "fixture_id"]), code_sha256=_code_hash(), seasons=sorted(seasons), feature_version=FEATURE_VERSION)
     if not fresh and storage.load_json_or_none(f"{NAME}_meta", data_dir) == fp:
@@ -84,11 +109,13 @@ def training_table(match_log: pd.DataFrame, seasons: list[str], workers: int = 8
 
 
 def target_points(table: pd.DataFrame, season: str) -> pd.Series:
+    """FPL points of each row's realised t_* stats under `season`'s scoring rules."""
     rows = table.drop(columns="position", errors="ignore").rename(columns={**{f"t_{c}": c for c in TARGET_STATS}, "t_position": "position"})
     return points_from_stats(rows, rules_for_season(season))
 
 
 def labelled(table: pd.DataFrame, cutoff) -> pd.DataFrame:
+    """Rows whose match kicked off before `cutoff` and has a realised outcome."""
     return table[(table["kickoff"] < cutoff) & table["t_minutes"].notna()]
 
 

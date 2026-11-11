@@ -14,6 +14,7 @@ LGBM_DEFAULTS = dict(n_estimators=2000, learning_rate=0.05, num_leaves=31, min_c
 
 
 class LgbmMinutes:
+    """LightGBM multiclass minutes model, early-stopped on the latest 10% of rows by kickoff."""
     def __init__(self, params: dict | None = None):
         self.params = LGBM_DEFAULTS | (params or {})
 
@@ -27,7 +28,7 @@ class LgbmMinutes:
         yt = np.concatenate([y[tr], absent]).astype(int)
         w = np.r_[np.ones(tr.sum()), np.full(len(absent), 1e-9)]
         self.model = lgb.LGBMClassifier(objective="multiclass", random_state=0, **self.params)
-        self.model.fit(Xt, yt, sample_weight=w, eval_set=[(Xf[va], y[va])],
+        self.model.fit(Xt, yt, sample_weight=w, eval_X=Xf[va], eval_y=y[va],
                        callbacks=[lgb.early_stopping(50, verbose=False)])
         return self
 
@@ -36,6 +37,7 @@ class LgbmMinutes:
 
 
 class KerasMinutes:
+    """Keras MLP minutes model, averaged over several seeds."""
     def __init__(self, params: dict | None = None):
         self.params = params or {}
 

@@ -1,11 +1,22 @@
-"""Walk-forward engine for the ML models: retrain every RETRAIN_EVERY deadlines, predict only what is ahead."""
+"""Walk-forward engine for the ML models (Stage 5): retrain every RETRAIN_EVERY deadlines, predict only what is ahead.
+
+Two uses share this file:
+  * Evaluation: out-of-sample predictions for the test seasons (minutes models, points models, the stacker), the
+    walk-forward backtest comparing every model, and the grid searches. Run from the command line:
+        python -m prediction.walkforward minutes|points|compare [--kind lgbm,keras] [--models ...] [--grid]
+  * Live use: `train_live` fits the models on everything played so far (saved under data/models/<date>/, reused
+    for RETRAIN_EVERY gameweeks) and `predict_live` serves predictions for the coming gameweeks.
+
+Every model predicts per player per fixture. The minutes model gives P(no appearance), P(1-59), P(60+); a points
+model gives expected points if the player plays 1-59 or 60+ minutes; the two combine into expected points
+(ml_points.expected_points). "ml-minutes", the shipped model, is the component model fed the ML minutes.
+"""
 from __future__ import annotations
 
 import argparse
 import contextlib
 import hashlib
 import io
-import inspect
 import itertools
 import json
 import pickle
@@ -29,7 +40,7 @@ from prediction.cli import SHIPPED_PARAMS_PATH, _component, load_live_params
 from prediction.component_model import per_gameweek, predict
 from prediction.ml_report import build_report
 from prediction.minutes_model import MINUTES_MODELS
-from prediction.ml_data import _season_rows, content_sha256, labelled, minutes_class, target_points
+from prediction.ml_data import _season_rows, code_sha256, content_sha256, labelled, minutes_class, target_points
 from prediction.ml_gru import GruPoints
 from prediction.ml_points import POINTS_MODELS, expected_points
 from prediction.stacker import KEYS as STACK_KEYS, MEMBERS, deadline_weights, stacked_oos, wide_table
@@ -43,44 +54,77 @@ GRIDS = {"lgbm": {"num_leaves": [15, 31, 63], "min_child_samples": [50, 200]},
          "gru": {"units": [16, 32], "epochs": [16, 32]}}
 GRID_FIXED = {"lgbm": {}, "keras": {"seeds": (0,)}, "gru": {"seeds": (0,)}}   # one seed per grid config
 MATCH_KEYS = ["season", "player_code", "fixture_id"]
-FEATURES_DIR = Path(__file__).parent.parent / "features"
+PREDICTION_DIR = Path(__file__).parent
+FEATURES_DIR = PREDICTION_DIR.parent / "features"
+# the component model's code: what "component" and "ml-minutes" predictions depend on
+COMPONENT_FILES = [PREDICTION_DIR / "backtest.py", PREDICTION_DIR / "component_model.py",
+                   FEATURES_DIR / "player_rates.py", FEATURES_DIR / "team_ratings.py"]
 COMPARE_COMMAND = "python -m prediction.walkforward compare --models form,component,ml-minutes,lgbm,keras,gru,stacked --kind lgbm"
 CACHED_ONLY = False   # set by the planner re-tune: a missing or stale cache raises instead of being computed
 
 
+# ---- out-of-sample predictions for the test seasons (walk-forward) ----
+# Each test season is cut into blocks of RETRAIN_EVERY deadlines. For each block a fresh model is trained on every
+# labelled row whose match kicked off before the block's first deadline, then predicts the fixtures ahead of every
+# deadline in the block, so no prediction ever sees its own outcome. Blocks run in parallel worker processes.
+# Results are cached per model and season (data/processed/ml_oos_*.parquet) under a fingerprint of the input rows,
+# the settings and the code (ml_data.code_sha256), so a re-run only recomputes what changed.
+
 def retrain_blocks(table: pd.DataFrame, season: str) -> list[tuple[int, list[int]]]:
+    """(first deadline, deadlines it covers) for each block of RETRAIN_EVERY deadlines in `season`."""
     gws = sorted(table.loc[table["season"] == season, "deadline_gw"].unique())
     return [(int(gws[i]), [int(g) for g in gws[i:i + RETRAIN_EVERY]]) for i in range(0, len(gws), RETRAIN_EVERY)]
 
 
 def training_rows(table: pd.DataFrame, season: str, gw: int) -> pd.DataFrame:
+    """Rows a model trained at deadline (season, gw) may learn from: outcomes already known by that deadline."""
     cutoff = table.loc[(table["season"] == season) & (table["deadline_gw"] == gw), "cutoff"].iloc[0]
     return labelled(table[table["season"] <= season], cutoff)
 
 
-def _job(args) -> pd.DataFrame:
-    kind, params, train, ahead = args
+def _jobs(table, kind, seasons, params, store=None):
+    """One job per retraining block: (kind, params, training rows, rows to predict, GRU sequences or None)."""
+    for season in seasons:
+        for gw, deadlines in retrain_blocks(table, season):
+            ahead = table[(table["season"] == season) & table["deadline_gw"].isin(deadlines)]
+            yield kind, params, training_rows(table, season, gw), ahead, store
+
+
+def _minutes_job(args) -> pd.DataFrame:
+    """Worker: train one minutes model, return P(no appearance), P(1-59), P(60+) as p0, p1, p2 for the rows ahead."""
+    kind, params, train, ahead, _ = args
     import torch
-    torch.set_num_threads(2)
+    torch.set_num_threads(2)   # several workers share the machine
     model = MINUTES_MODELS[kind](params).fit(train[FEATURE_COLUMNS], minutes_class(train["t_minutes"]), train["kickoff"])
     p = model.predict_proba(ahead[FEATURE_COLUMNS])
     out = ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True)
     return out.assign(p0=p[:, 0], p1=p[:, 1], p2=p[:, 2])
 
 
-def _jobs(table, kind, seasons, params):
-    for season in seasons:
-        for gw, deadlines in retrain_blocks(table, season):
-            ahead = table[(table["season"] == season) & table["deadline_gw"].isin(deadlines)]
-            yield kind, params, training_rows(table, season, gw), ahead
+def _points_job(args) -> pd.DataFrame:
+    """Worker: train one points-if-plays model (lgbm, keras or gru), return the expected points if the player plays
+    1-59 minutes (pts_cameo) and 60+ (pts_full) for the rows ahead."""
+    kind, params, train, ahead, store = args
+    import torch
+    torch.set_num_threads(2)
+    X, cls, order = train[FEATURE_COLUMNS], minutes_class(train["t_minutes"]), train["kickoff"]
+    y = target_points(train, ahead["season"].iloc[0]).to_numpy()   # scored under the test season's rules
+    if kind == "gru":
+        model = GruPoints(params).fit(X, row_sequences(train, store), cls, y, order)
+        pts = model.predict(ahead[FEATURE_COLUMNS], row_sequences(ahead, store))
+    else:
+        pts = POINTS_MODELS[kind](params).fit(X, cls, y, order).predict(ahead[FEATURE_COLUMNS])
+    return ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True).assign(pts_cameo=pts[:, 0], pts_full=pts[:, 1])
 
 
-def _walk(table, kind, seasons, params, workers) -> pd.DataFrame:
+def _walk(job, table, kind, seasons, params, workers, store=None) -> pd.DataFrame:
+    """Run `job` (_minutes_job or _points_job) over every retraining block of `seasons`."""
     with ProcessPoolExecutor(max_workers=workers) as pool:
-        return pd.concat(pool.map(_job, _jobs(table, kind, seasons, params)), ignore_index=True)
+        return pd.concat(pool.map(job, _jobs(table, kind, seasons, params, store)), ignore_index=True)
 
 
 def _cached(name, fp, compute, data_dir, fresh) -> pd.DataFrame:
+    """The table `name` if it was saved with fingerprint `fp`, else compute() saved under that fingerprint."""
     if not fresh and storage.load_json_or_none(f"{name}_meta", data_dir) == fp:
         return storage.load_table(name, data_dir)
     if CACHED_ONLY:
@@ -103,79 +147,89 @@ def _upto_sha256(df: pd.DataFrame, season: str, keys: list[str]) -> str:
     return memo[season]
 
 
-def _files_sha256(*paths) -> str:
+def _params_sha256(*paths) -> str:
+    """Hash of parameter files (JSON data, so hashed byte for byte)."""
     return hashlib.sha256(b"".join(Path(p).read_bytes() for p in paths)).hexdigest()
 
 
-def _code_hash() -> str:
-    """Hash of the minutes path only: model, features and the walk-forward functions run_minutes uses."""
-    root = Path(__file__).parent
-    files = [root / f for f in ("minutes_model.py", "ml_common.py", "ml_data.py")] + [root.parent / "features" / "ml_features.py"]
-    funcs = (retrain_blocks, training_rows, _job, _jobs, _walk, run_minutes)
-    return hashlib.sha256(b"".join(f.read_bytes() for f in files)
-                          + "".join(inspect.getsource(f) for f in funcs).encode()).hexdigest()
+def _minutes_sha256(minutes_oos: pd.DataFrame) -> str:
+    return hashlib.sha256(pd.util.hash_pandas_object(minutes_oos[KEYS + ["p0", "p1", "p2"]], index=False)
+                          .to_numpy().tobytes()).hexdigest()
+
+
+_WALK_FUNCS = (retrain_blocks, training_rows, _jobs, _walk)
+MINUTES_FILES = [PREDICTION_DIR / f for f in ("minutes_model.py", "ml_common.py", "ml_data.py")] + [
+    FEATURES_DIR / "ml_features.py"]
+
+
+def _points_files(kind: str) -> list[Path]:
+    """Source files a points model's predictions depend on."""
+    own = ["ml_gru.py"] if kind == "gru" else ["minutes_model.py"]   # ml_points takes LGBM_DEFAULTS from minutes_model
+    return ([PREDICTION_DIR / f for f in ("ml_points.py", "ml_common.py", "ml_data.py", "scoring.py", *own)]
+            + [FEATURES_DIR / "ml_features.py"] + ([FEATURES_DIR / "ml_sequences.py"] if kind == "gru" else []))
+
+
+def _season_fp(table, season, kind, params, code, **extra) -> dict:
+    """Cache fingerprint of one season's out-of-sample predictions, in the form it reads back from JSON."""
+    fp = dict(table_sha256=_upto_sha256(table, season, KEYS), kind=kind, params=params, season=season,
+              code_sha256=code, **extra)
+    return json.loads(json.dumps(fp, default=str))
 
 
 def run_minutes(table, kind: str, seasons=TEST_SEASONS, params=None, workers=6,
                 data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    code, out = _code_hash(), []
+    """Out-of-sample minutes-class probabilities (p0, p1, p2) of the `kind` minutes model for every row of `seasons`."""
+    code, out = code_sha256(MINUTES_FILES, (*_WALK_FUNCS, _minutes_job, run_minutes)), []
     for season in seasons:
-        fp = dict(table_sha256=_upto_sha256(table, season, KEYS), kind=kind, params=params, season=season, code_sha256=code)
-        fp = json.loads(json.dumps(fp, default=str))  # as it will read back from disk
         t0 = time.time()
-        out.append(_cached(f"ml_oos_minutes_{kind}_{season}", fp,
-                           lambda: _walk(table, kind, (season,), params, workers), data_dir, fresh))
+        out.append(_cached(f"ml_oos_minutes_{kind}_{season}", _season_fp(table, season, kind, params, code),
+                           lambda: _walk(_minutes_job, table, kind, (season,), params, workers), data_dir, fresh))
         print(f"{kind} {season} done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     return pd.concat(out, ignore_index=True)
 
 
-def _points_job(args) -> pd.DataFrame:
-    kind, params, train, ahead = args
-    import torch
-    torch.set_num_threads(2)
-    y = target_points(train, ahead["season"].iloc[0]).to_numpy()
-    model = POINTS_MODELS[kind](params).fit(train[FEATURE_COLUMNS], minutes_class(train["t_minutes"]), y, train["kickoff"])
-    pts = model.predict(ahead[FEATURE_COLUMNS])
-    return ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True).assign(pts_cameo=pts[:, 0], pts_full=pts[:, 1])
-
-
-def _points_walk(table, kind, season, params, workers) -> pd.DataFrame:
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        return pd.concat(pool.map(_points_job, _jobs(table, kind, (season,), params)), ignore_index=True)
-
-
 def _with_minutes(pts: pd.DataFrame, minutes_oos: pd.DataFrame) -> pd.DataFrame:
+    """Expected points per row: P(1-59) * points if 1-59 + P(60+) * points if 60+, using the minutes predictions."""
     m = pts.merge(minutes_oos[KEYS + ["p0", "p1", "p2"]], on=KEYS, validate="one_to_one")
     total = expected_points(m[["p0", "p1", "p2"]].to_numpy(), m[["pts_cameo", "pts_full"]].to_numpy())
     return m[KEYS + ["gameweek", "horizon"]].assign(total=total)
 
 
-def _points_hash(minutes_oos: pd.DataFrame) -> str:
-    """Points path only (models, features, the walk functions it uses) plus the minutes OOS it consumes."""
-    root = Path(__file__).parent
-    files = [root / f for f in ("ml_points.py", "minutes_model.py", "ml_common.py", "ml_data.py", "scoring.py")] + [root.parent / "features" / "ml_features.py"]
-    funcs = (retrain_blocks, training_rows, _jobs, _points_job, _points_walk, _with_minutes, run_points)
-    minutes = pd.util.hash_pandas_object(minutes_oos[KEYS + ["p0", "p1", "p2"]], index=False).to_numpy().tobytes()
-    return hashlib.sha256(b"".join(f.read_bytes() for f in files) + minutes
-                          + "".join(inspect.getsource(f) for f in funcs).encode()).hexdigest()
+def _sequences_sha256(store: dict, season: str) -> str:
+    """Hash of the GRU sequences of every deadline up to `season`."""
+    return hashlib.sha256(b"".join(store[k][0].tobytes() + store[k][1].tobytes()
+                                   for k in sorted(store) if k[0] <= season)).hexdigest()
 
 
 def run_points(table, kind: str, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS, params=None, workers=6,
-               data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+               data_dir: Path = storage.DATA_DIR, fresh: bool = False, store: dict | None = None) -> pd.DataFrame:
+    """Out-of-sample expected points (`total`) of the `kind` points model (lgbm, keras or gru) combined with
+    `minutes_oos`. The gru model also needs `store`, the per-deadline sequences from `sequences`."""
+    if kind == "gru" and store is None:
+        raise ValueError("the gru points model needs the sequence store (walkforward.sequences)")
+    store = store if kind == "gru" else None   # only the GRU reads sequences: don't ship them to other workers
+    funcs = (*_WALK_FUNCS, _points_job, _with_minutes, run_points)
     out = []
     for season in seasons:
         m = minutes_oos[minutes_oos["season"] == season]
-        fp = dict(table_sha256=_upto_sha256(table, season, KEYS), kind=kind, params=params, season=season,
-                  code_sha256=_points_hash(m))
-        fp = json.loads(json.dumps(fp, default=str))
+        code = hashlib.sha256((code_sha256(_points_files(kind), funcs) + _minutes_sha256(m)).encode()).hexdigest()
+        extra = {"sequences_sha256": _sequences_sha256(store, season)} if store is not None else {}
         t0 = time.time()
-        out.append(_cached(f"ml_oos_points_{kind}_{season}", fp,
-                           lambda: _with_minutes(_points_walk(table, kind, season, params, workers), m), data_dir, fresh))
+        out.append(_cached(f"ml_oos_points_{kind}_{season}", _season_fp(table, season, kind, params, code, **extra),
+                           lambda: _with_minutes(_walk(_points_job, table, kind, (season,), params, workers, store), m),
+                           data_dir, fresh))
         print(f"points {kind} {season} done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
     return pd.concat(out, ignore_index=True)
 
 
+def _points_oos(table, oos, kinds, seasons, workers, data_dir, store=None) -> dict[str, pd.DataFrame]:
+    """run_points for each points model in `kinds`, with its shipped settings from ml_params.json."""
+    return {k: run_points(table, k, oos, seasons, _ml_params("points", k), workers, data_dir, store=store)
+            for k in kinds}
+
+
 def _read_sequences(path: Path) -> dict:
+    """The sequence store saved by `sequences`: keys are "season|gw|codes" and "season|gw|seq"."""
     with np.load(path) as z:
         return {(k.split("|")[0], int(k.split("|")[1])): (z[k + "|codes"], z[k + "|seq"])
                 for k in {k.rsplit("|", 1)[0] for k in z.files}}
@@ -187,7 +241,7 @@ def _sequences_fp(match_log, table) -> dict:
     keys = table[["season", "deadline_gw", "player_code", "cutoff"]].drop_duplicates()
     return dict(match_log_sha256=content_sha256(used, ["player_code", "kickoff"]),
                 table_sha256=content_sha256(keys, ["season", "deadline_gw", "player_code"]),
-                code_sha256=_files_sha256(FEATURES_DIR / "ml_sequences.py"))
+                code_sha256=code_sha256([FEATURES_DIR / "ml_sequences.py"]))
 
 
 def sequences(match_log, table, data_dir: Path = storage.DATA_DIR, fresh: bool = False):
@@ -204,49 +258,7 @@ def sequences(match_log, table, data_dir: Path = storage.DATA_DIR, fresh: bool =
     return store
 
 
-def _gru_job(args) -> pd.DataFrame:
-    params, train, ahead, store = args
-    import torch
-    torch.set_num_threads(2)
-    y = target_points(train, ahead["season"].iloc[0]).to_numpy()
-    model = GruPoints(params).fit(train[FEATURE_COLUMNS], row_sequences(train, store),
-                                  minutes_class(train["t_minutes"]), y, train["kickoff"])
-    pts = model.predict(ahead[FEATURE_COLUMNS], row_sequences(ahead, store))
-    return ahead[KEYS + ["gameweek", "horizon"]].reset_index(drop=True).assign(pts_cameo=pts[:, 0], pts_full=pts[:, 1])
-
-
-def _gru_walk(table, kind, season, params, workers, store) -> pd.DataFrame:
-    jobs = ((params, train, ahead, store) for _, params, train, ahead in _jobs(table, kind, (season,), params))
-    with ProcessPoolExecutor(max_workers=workers) as pool:
-        return pd.concat(pool.map(_gru_job, jobs), ignore_index=True)
-
-
-def _gru_hash(minutes_oos: pd.DataFrame) -> str:
-    """GRU path only (model, sequences, shared plumbing and the walk functions it uses) plus the minutes OOS."""
-    root = Path(__file__).parent
-    files = [root / f for f in ("ml_gru.py", "ml_common.py", "ml_data.py", "scoring.py")] + [root.parent / "features" / "ml_sequences.py"]
-    funcs = (retrain_blocks, training_rows, _jobs, _gru_job, _gru_walk, _with_minutes, run_gru_points)
-    minutes = pd.util.hash_pandas_object(minutes_oos[KEYS + ["p0", "p1", "p2"]], index=False).to_numpy().tobytes()
-    return hashlib.sha256(b"".join(f.read_bytes() for f in files) + minutes
-                          + "".join(inspect.getsource(f) for f in funcs).encode()).hexdigest()
-
-
-def run_gru_points(table, store, minutes_oos: pd.DataFrame, seasons=TEST_SEASONS, params=None, workers=6,
-                   data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
-    out = []
-    for season in seasons:
-        m = minutes_oos[minutes_oos["season"] == season]
-        seq = hashlib.sha256(b"".join(store[k][0].tobytes() + store[k][1].tobytes()
-                                      for k in sorted(store) if k[0] <= season)).hexdigest()
-        fp = dict(table_sha256=_upto_sha256(table, season, KEYS), sequences_sha256=seq, kind="gru", params=params,
-                  season=season, code_sha256=_gru_hash(m))
-        fp = json.loads(json.dumps(fp, default=str))
-        t0 = time.time()
-        out.append(_cached(f"ml_oos_points_gru_{season}", fp,
-                           lambda: _with_minutes(_gru_walk(table, "gru", season, params, workers, store), m), data_dir, fresh))
-        print(f"points gru {season} done ({time.time() - t0:.0f}s)", file=sys.stderr, flush=True)
-    return pd.concat(out, ignore_index=True)
-
+# ---- backtest predictors served from the out-of-sample tables, and the component-minutes baseline ----
 
 def make_table_predictor(oos: pd.DataFrame) -> Predictor:
     """Serves precomputed OOS totals: per player and gameweek for the deadline, fixtures summed."""
@@ -274,13 +286,11 @@ def _component_season(args) -> pd.DataFrame:
 
 def component_minutes(match_log, seasons=TEST_SEASONS, workers=6,
                       data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
+    """Out-of-sample p60/psub of the component model's own minutes (the baseline the ML minutes models must beat)."""
     params = load_params(str(SHIPPED_PARAMS_PATH))
-    root = Path(__file__).parent
-    fp = dict(params_sha256=hashlib.sha256(Path(SHIPPED_PARAMS_PATH).read_bytes()).hexdigest(),
+    fp = dict(params_sha256=_params_sha256(SHIPPED_PARAMS_PATH),
               match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS), seasons=list(seasons),
-              code_sha256=_files_sha256(root / "backtest.py", root / "component_model.py", FEATURES_DIR / "player_rates.py",
-                                        FEATURES_DIR / "team_ratings.py")
-              + hashlib.sha256(inspect.getsource(_component_season).encode()).hexdigest())
+              code_sha256=code_sha256(COMPONENT_FILES, (_component_season,)))
 
     def compute():
         with ProcessPoolExecutor(max_workers=workers) as pool:
@@ -305,6 +315,8 @@ def make_ml_minutes_predictor(params, oos: pd.DataFrame) -> Predictor:
         return per_gameweek(pred)
     return predictor
 
+
+# ---- minutes report and grid searches (settings in ml_params.json were chosen with these) ----
 
 def _log_loss(p: np.ndarray, y: np.ndarray) -> float:
     p = np.clip(p, 1e-6, 1)
@@ -337,11 +349,12 @@ def minutes_report(oos: dict[str, pd.DataFrame], table: pd.DataFrame, component:
 
 
 def _grid(table, kind, seasons, workers):
+    """The GRIDS[kind] minutes settings with the lowest out-of-sample log loss on `seasons` (not cached)."""
     results = []
     for values in itertools.product(*GRIDS[kind].values()):
         params = dict(zip(GRIDS[kind], values))
         t0 = time.time()
-        oos = _scored(_walk(table, kind, seasons, params | GRID_FIXED[kind], workers), table)
+        oos = _scored(_walk(_minutes_job, table, kind, seasons, params | GRID_FIXED[kind], workers), table)
         ll = _log_loss(oos[["p0", "p1", "p2"]].to_numpy(), minutes_class(oos["t_minutes"]))
         print(f"{kind} {params} log_loss={ll:.5f} ({time.time() - t0:.0f}s)", flush=True)
         results.append((ll, params))
@@ -356,7 +369,7 @@ def _grid_points(table, kind, minutes_oos, season, workers, store=None):
         t0 = time.time()
         fixed = GRID_FIXED[kind] | ({k: v for k, v in _ml_params("points", "keras").items() if k in ("hidden", "dropout")}
                                     if kind == "gru" else {})   # the MLP branch keeps the frozen keras settings
-        walk = _gru_walk(table, kind, season, params | fixed, workers, store) if kind == "gru" else             _points_walk(table, kind, season, params | fixed, workers)
+        walk = _walk(_points_job, table, kind, (season,), params | fixed, workers, store if kind == "gru" else None)
         oos = _with_minutes(walk, minutes_oos[minutes_oos["season"] == season])
         d = oos[KEYS + ["total"]].merge(table[KEYS + [c for c in table if c.startswith("t_")]], on=KEYS)
         d = d[d["t_minutes"].notna()]
@@ -367,12 +380,15 @@ def _grid_points(table, kind, minutes_oos, season, workers, store=None):
 
 
 def _ml_params(section, kind):
+    """Shipped settings of one model from ml_params.json (section 'minutes' or 'points'), or None."""
     return json.loads(ML_PARAMS_PATH.read_text()).get(section, {}).get(kind) if ML_PARAMS_PATH.exists() else None
 
 
 def _minutes_params(kind):
     return _ml_params("minutes", kind)
 
+
+# ---- stacker inputs and the walk-forward comparison of every model ----
 
 def _ml_minutes_season(args) -> pd.DataFrame:
     match_log, season, params, oos = args
@@ -389,12 +405,9 @@ def ml_minutes_totals(match_log, oos: pd.DataFrame, seasons=TEST_SEASONS, worker
                       data_dir: Path = storage.DATA_DIR, fresh: bool = False) -> pd.DataFrame:
     """Per-player per-gameweek totals of the "ml-minutes" model for every player at every deadline (the stacker's
     member; cheaper than run_backtest, which keeps only eligible players and scores them as well)."""
-    root = Path(__file__).parent
-    code = hashlib.sha256(b"".join((root / f).read_bytes() for f in ("backtest.py", "component_model.py"))
-                          + Path(SHIPPED_PARAMS_PATH).read_bytes() + inspect.getsource(make_ml_minutes_predictor).encode()
-                          + inspect.getsource(_ml_minutes_season).encode()).hexdigest()
-    code += _files_sha256(FEATURES_DIR / "player_rates.py", FEATURES_DIR / "team_ratings.py")
-    fp = json.loads(json.dumps(dict(code_sha256=code, match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS),
+    code = code_sha256(COMPONENT_FILES, (make_ml_minutes_predictor, _ml_minutes_season))
+    fp = json.loads(json.dumps(dict(code_sha256=code, params_sha256=_params_sha256(SHIPPED_PARAMS_PATH),
+                                    match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS),
                                     seasons=list(seasons),
                                     oos=int(pd.util.hash_pandas_object(oos[KEYS + ["p1", "p2"]], index=False).sum())),
                                default=str))
@@ -431,21 +444,18 @@ def _compare_inputs(models, kind, seasons, workers, data_dir):
     table = storage.load_table("ml_training_table", data_dir)
     oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
     store = sequences(match_log, table, data_dir) if "gru" in models else None
-    oos_points = {m: run_gru_points(table, store, oos, seasons, _ml_params("points", m), workers, data_dir) if m == "gru"
-                  else run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
-                  for m in models if m in POINTS_MODELS or m == "gru"}
+    oos_points = _points_oos(table, oos, [m for m in models if m in POINTS_MODELS or m == "gru"], seasons, workers,
+                             data_dir, store)
     if "stacked" in models:
         missing = [m for m in MEMBERS if m != "ml-minutes" and m not in oos_points]
         if missing:
             raise ValueError(f"stacked needs {missing} in --models")
         oos_points["stacked"] = stacked_oos(*stack_inputs(match_log, table, ml_minutes_totals(match_log, oos, seasons, workers, data_dir),
                                                         oos_points))
-    code = hashlib.sha256(b"".join(Path(f).read_bytes() for f in (
-        Path(__file__).with_name("backtest.py"), Path(__file__).with_name("component_model.py"),
-        SHIPPED_PARAMS_PATH, ML_PARAMS_PATH)) + inspect.getsource(make_ml_minutes_predictor).encode()
-        + inspect.getsource(make_table_predictor).encode() + Path(__file__).with_name("stacker.py").read_bytes()
-        + _code_hash().encode()).hexdigest() + _files_sha256(FEATURES_DIR / "player_rates.py", FEATURES_DIR / "team_ratings.py")
+    code = code_sha256([*COMPONENT_FILES, PREDICTION_DIR / "stacker.py", *MINUTES_FILES],
+                       (make_ml_minutes_predictor, make_table_predictor))
     fp = json.loads(json.dumps(dict(models=models, kind=kind, seasons=seasons,
+                                    params_sha256=_params_sha256(SHIPPED_PARAMS_PATH, ML_PARAMS_PATH),
                                     match_log_sha256=_upto_sha256(match_log, max(seasons), MATCH_KEYS), oos_rows=len(oos),
                                     points=[pd.util.hash_pandas_object(d, index=False).sum() for d in oos_points.values()],
                                     code_sha256=code), default=str))
@@ -494,9 +504,7 @@ def stacker_report(per_gw: pd.DataFrame, kind, seasons, workers, data_dir: Path 
     table = storage.load_table("ml_training_table", data_dir)
     oos = run_minutes(table, kind, seasons, _minutes_params(kind), workers, data_dir)
     store = sequences(match_log, table, data_dir)
-    oos_points = {m: run_gru_points(table, store, oos, seasons, _ml_params("points", m), workers, data_dir) if m == "gru"
-                  else run_points(table, m, oos, seasons, _ml_params("points", m), workers, data_dir)
-                  for m in MEMBERS if m != "ml-minutes"}
+    oos_points = _points_oos(table, oos, [m for m in MEMBERS if m != "ml-minutes"], seasons, workers, data_dir, store)
     frames, actuals, positions = stack_inputs(match_log, table, ml_minutes_totals(match_log, oos, seasons, workers, data_dir), oos_points)
     wide, rows = wide_table(frames, actuals, positions), []
     for season in seasons:
@@ -676,6 +684,7 @@ def train_live(data_dir: Path = storage.DATA_DIR, now: pd.Timestamp | None = Non
     return folder
 
 
+# live predictions: `inputs` (prediction.cli.live_inputs) caches work shared between models under "_cache"
 def _shared(inputs: dict, key, compute):
     cache = inputs.setdefault("_cache", {})
     if key not in cache:
@@ -785,6 +794,8 @@ def predict_live(model: str, inputs: dict, data_dir: Path = storage.DATA_DIR) ->
     return _shared(inputs, ("pred", model), compute)
 
 
+# ---- command line ----
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("task", choices=["minutes", "points", "compare"])
@@ -818,10 +829,9 @@ def main():
         for kind in kinds:
             if a.grid:
                 print("best", kind, _grid_points(table, kind, minutes, seasons[0], a.workers, store))
-            elif kind == "gru":
-                run_gru_points(table, store, minutes, seasons, _ml_params("points", kind), a.workers, fresh=a.fresh)
             else:
-                run_points(table, kind, minutes, seasons, _ml_params("points", kind), a.workers, fresh=a.fresh)
+                run_points(table, kind, minutes, seasons, _ml_params("points", kind), a.workers, fresh=a.fresh,
+                           store=store)
         return
     if a.grid:
         for kind in kinds:

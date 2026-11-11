@@ -58,6 +58,8 @@ def market_at_deadline(season_rows: pd.DataFrame, gameweek: int, lag: int) -> pd
 
 
 def snapshot(match_log: pd.DataFrame, season: str, gameweek: int, horizon: int = 5) -> Snapshot:
+    """The state of the world at `season` `gameweek`'s deadline (its first kickoff): history before
+    it, the registered players, and the fixtures of the next `horizon` gameweeks."""
     s = match_log[match_log["season"] == season]
     cutoff = s.loc[s["gameweek"] == gameweek, "kickoff"].min()
     now = s[s["gameweek"] == gameweek].sort_values("kickoff").drop_duplicates("player_code")
@@ -125,16 +127,19 @@ def form_predictor(snap: Snapshot) -> pd.DataFrame:
 
 
 def eligible_players(history: pd.DataFrame) -> set[int]:
+    """Players who appeared in any of their last five matches: the ones scored in a backtest."""
     last5 = history.sort_values("kickoff").groupby("player_code").tail(5)
     return set(last5.loc[last5["minutes"] > 0, "player_code"])
 
 
 def actual_points(match_log: pd.DataFrame, season: str, gameweek: int) -> pd.Series:
+    """Points per player in one gameweek (fixtures of a double gameweek summed)."""
     rows = match_log[(match_log["season"] == season) & (match_log["gameweek"] == gameweek)]
     return rows.groupby("player_code")["points"].sum()
 
 
 def score_metrics(pred: pd.Series, actual: pd.Series, positions: pd.Series) -> dict:
+    """MAE, RMSE and the mean within-position Spearman rho of `pred` against `actual`."""
     err = pred - actual
     rhos = []
     for _, idx in positions.groupby(positions).groups.items():
@@ -158,6 +163,9 @@ def decision_points(pred: pd.Series, actual: pd.Series, players_now: pd.DataFram
 
 def run_backtest(match_log: pd.DataFrame, seasons: list[str], predictors: dict[str, Predictor],
                  horizons: int = 5, decision: bool = True, every: int = 1) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Walk-forward backtest: at each deadline every predictor sees only the snapshot, and its
+    predictions for each of the next `horizons` gameweeks are scored on eligible players.
+    Returns (metrics per model, season, gameweek and horizon; per-player predictions)."""
     first_season = match_log["season"].min()
     per_gw, per_player = [], []
     for season in seasons:
@@ -191,6 +199,7 @@ def run_backtest(match_log: pd.DataFrame, seasons: list[str], predictors: dict[s
 
 
 def summary(per_gw: pd.DataFrame) -> pd.DataFrame:
+    """Mean metrics per model and horizon."""
     cols = [c for c in ("mae", "rmse", "rho", "decision") if c in per_gw.columns]
     return per_gw.groupby(["model", "horizon"])[cols].mean().round(3)
 
@@ -208,6 +217,8 @@ def _clean_gameweeks(match_log: pd.DataFrame, horizons: int) -> set[tuple[str, i
 
 
 def split_report(per_gw: pd.DataFrame, match_log: pd.DataFrame, horizons: int = 5) -> pd.DataFrame:
+    """Mean metrics per model and horizon in the early season, the rest, and in windows with
+    no double or blank gameweeks."""
     clean = _clean_gameweeks(match_log, horizons)
     in_clean = pd.Series([(s, g) in clean for s, g in zip(per_gw["season"], per_gw["gameweek"])], index=per_gw.index)
     masks = {"early": per_gw["gameweek"] <= WARM_UP_GAMEWEEKS, "rest": per_gw["gameweek"] > WARM_UP_GAMEWEEKS,
@@ -223,6 +234,7 @@ def split_report(per_gw: pd.DataFrame, match_log: pd.DataFrame, horizons: int = 
 
 
 def calibration(per_player: pd.DataFrame, model: str, horizon: int = 0) -> pd.DataFrame:
+    """Mean predicted vs mean actual points per decile of predicted points."""
     rows = per_player[(per_player["model"] == model) & (per_player["horizon"] == horizon)]
     groups = pd.qcut(rows["predicted"].rank(method="first"), 10, labels=False)
     return rows.groupby(groups).agg(mean_predicted=("predicted", "mean"), mean_actual=("actual", "mean"),
@@ -259,6 +271,7 @@ def paired_bootstrap(per_gw: pd.DataFrame, model: str, benchmark: str, horizon: 
 
 
 def make_component_predictor(params: ModelParams, components=COMPONENTS) -> Predictor:
+    """The component model as a backtest Predictor (fixtures summed per gameweek)."""
     def predictor(snap: Snapshot) -> pd.DataFrame:
         pred = predict(snap.history, snap.players_now, snap.fixtures_ahead, snap.cutoff, snap.season,
                        snap.teams_in_season, params, components)
@@ -267,6 +280,7 @@ def make_component_predictor(params: ModelParams, components=COMPONENTS) -> Pred
 
 
 def load_params(path: str | None) -> ModelParams:
+    """Component model parameters from a JSON file, or the defaults when `path` is None."""
     if path is None:
         return ModelParams()
     with open(path, encoding="utf-8") as f:
@@ -276,6 +290,8 @@ def load_params(path: str | None) -> ModelParams:
 def build_predictors(names: list[str], params_path: str | None = None,
                      ablation: bool = False, oos_minutes: pd.DataFrame | None = None,
                      oos_points: dict[str, pd.DataFrame] | None = None) -> dict[str, Predictor]:
+    """Predictors by name. The ML ones are served from precomputed out-of-sample tables;
+    `ablation` adds the component model with each component switched off in turn."""
     params = load_params(params_path)
     predictors: dict[str, Predictor] = {"naive": naive_predictor, "xp": xp_predictor, "form": form_predictor,
                                         "component": make_component_predictor(params)}

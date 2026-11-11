@@ -34,6 +34,7 @@ TYPICAL_MINUTES = {"m60": 87.0, "msub": 25.0}
 
 @dataclass(frozen=True)
 class PlayerParams:
+    """Recency half-lives and shrinkage strengths (kappa) of the player rates."""
     half_life_days: float = 120.0
     minutes_half_life_days: float = 120.0
     minutes_long_half_life_days: float = 60.0
@@ -50,6 +51,7 @@ class PlayerParams:
 
 
 def price_band(prices) -> np.ndarray:
+    """Price band index (0-3) using PRICE_BANDS as the boundaries."""
     return np.digitize(np.asarray(prices, dtype=float), PRICE_BANDS)
 
 
@@ -95,6 +97,9 @@ def _weighted_sums(h: pd.DataFrame, ratings: TeamRatings) -> pd.DataFrame:
 
 def player_features(history: pd.DataFrame, cutoff: pd.Timestamp, season: str, ratings: TeamRatings,
                     params: PlayerParams) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(per-player rates indexed by player_code, priors per position and price band), from
+    matches before `cutoff`. Each rate is shrunk towards the prior of the player's latest
+    position and price band."""
     h = history[history["kickoff"] < cutoff].copy()
     order = {s: i for i, s in enumerate(sorted(set(h["season"]) | {season}))}
     back = order[season] - h["season"].map(order)

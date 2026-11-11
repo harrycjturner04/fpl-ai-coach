@@ -13,6 +13,7 @@ ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 
 
 def load_env(path: Path = ENV_FILE) -> None:
+    """Set each `NAME=value` in `path` as an environment variable unless it is already set."""
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8-sig").splitlines():

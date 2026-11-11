@@ -26,7 +26,8 @@ def test_bench_boost_gain_equals_bench_points_in_that_week():
     ctx, table = _case()
     scan = chip_scan(ctx, table, [("bboost", 2)], workers=1)
     row = scan.iloc[0]
-    wk = plan(ctx, table, chips={2: "bboost"}).weeks[1]
+    # same squad either way; under Bench Boost which 11 are labelled starting is a tie, so the bench is the no-chip one
+    wk = plan(ctx, table).weeks[1]
     bench = sum(table.loc[p, 2] for p in wk.bench)
     assert row.gain_vs_none == pytest.approx((1 - 0.1) * bench)
     assert row.exact and row.note == ""
