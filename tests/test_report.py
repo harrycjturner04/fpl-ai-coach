@@ -83,14 +83,12 @@ def test_render_puts_code_tables_in_fixed_sections_and_warnings_on_top(session):
         {"chip": ["bboost"], "gameweek": [11], "objective": [88.8], "gain_vs_none": [4.4],
          "week1_same_as_none": [True], "exact": [True], "note": [""]}))
     rep = Report(_report(session), usage=None, warnings=["Post-check: 9.9 pts not found"], tool_calls=[])
-    md = render("Coach report", session, plan_text="PLAN", report=rep, notes=["stale news"],
-                cost_lines=["Cost: $0.01"])
+    md = render("Coach report", session, plan_text="PLAN", report=rep, notes=["stale news"])
     assert md.index("9.9 pts not found") < md.index("## Verdict")
     assert md.index("## Risks and news") < md.index("| P3 |") < md.index("## Chip outlook")
     assert md.index("## Chip outlook") < md.index("| bboost |") < md.index("## Sources")
-    assert "stale news" in md and "Cost: $0.01" in md and "PLAN" in md
-    fallback = render("Coach report", session, plan_text="PLAN", report=None, notes=["LLM unavailable"],
-                      cost_lines=[])
+    assert "stale news" in md and "PLAN" in md
+    fallback = render("Coach report", session, plan_text="PLAN", report=None, notes=["LLM unavailable"])
     assert "## Verdict" not in fallback and "PLAN" in fallback and "| P3 |" in fallback
 
 
@@ -108,6 +106,5 @@ def test_review_search_budget_decreases_over_turns_and_tool_drops_at_zero(sessio
 
 def test_render_drops_headings_outside_the_fixed_sections(session):
     text = _report(session) + "\n## Run cost\n$0.00 (made up)\n\n## Recommended plan\nBuy everyone.\n"
-    md = render("Coach report", session, plan_text="PLAN", report=Report(text, None, [], []), notes=[],
-                cost_lines=["- Total: $0.01"])
-    assert "made up" not in md and "Buy everyone" not in md and md.count("## Run cost") == 1
+    md = render("Coach report", session, plan_text="PLAN", report=Report(text, None, [], []), notes=[])
+    assert "made up" not in md and "Buy everyone" not in md and "## Run cost" not in md

@@ -97,8 +97,9 @@ def test_coach_offline_end_to_end_with_fake_llm(data, capsys):
     path = coach.run(42, data, now=NOW, client=fake)
     assert path == data / "reports" / "42_gw9_20261110-1200.md" and path.exists()
     md = path.read_text(encoding="utf-8")
-    assert "## Verdict" in md and "| P1 | out |" in md and "## Run cost" in md and "Starting XI" in md
-    assert md in capsys.readouterr().out
+    assert "## Verdict" in md and "| P1 | out |" in md and "Starting XI" in md and "## Run cost" not in md
+    out = capsys.readouterr().out
+    assert md in out and "Run cost" in out and "Total: $" in out
     assert len(fake.requests) == 3 and fake.responses == []
 
     log = storage.load_table("coach_log", data)

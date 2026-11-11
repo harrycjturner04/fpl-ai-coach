@@ -138,11 +138,12 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
 
     plan_text = format_solution(headline, _plan_context(ctx, table))
     md = render(f"FPL coach: {ctx.state['team_name']}, gameweek {next_gw}", session, plan_text=plan_text,
-                report=report, notes=notes, cost_lines=_cost_lines(usages, settings))
+                report=report, notes=notes)
     path = data_dir / "reports" / f"{entry_id}_gw{next_gw}_{now:%Y%m%d-%H%M}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(md, encoding="utf-8")
     print(md if report else "\n".join([plan_text, "", NO_LLM, *(f"- {n}" for n in notes)]))
+    print("Run cost (console and coach_log only, not in the report):", *_cost_lines(usages, settings), sep="\n")
     print(f"Report saved to {path}")
     if chat:
         print("chat not available yet")

@@ -159,8 +159,7 @@ def _scan_table(session: Session) -> str:
                                        "exact": "Exact", "note": "Note"}))
 
 
-def render(title: str, session: Session, *, plan_text: str, report: Report | None, notes: list[str],
-           cost_lines: list[str]) -> str:
+def render(title: str, session: Session, *, plan_text: str, report: Report | None, notes: list[str]) -> str:
     """The saved report. Post-check warnings go on top; the news and chip tables follow Claude's matching
     sections (or stand alone without a write-up)."""
     out = [f"# {title}", ""]
@@ -171,9 +170,8 @@ def render(title: str, session: Session, *, plan_text: str, report: Report | Non
         out += ["## Warnings", *(f"- {n}" for n in notes), ""]
     s = sections(report.markdown) if report else {}
     tables = {"Risks and news": _news_tables(session), "Chip outlook": _scan_table(session)}
-    for head in LLM_SECTIONS:  # other headings Claude adds are dropped: code owns plan, warnings and cost
+    for head in LLM_SECTIONS:  # other headings Claude adds are dropped: code owns plan and warnings
         if head in s or head in tables:
             out += [f"## {head}", *([s[head], ""] if s.get(head) else []), *([tables[head], ""] if head in tables else [])]
     out += ["## Recommended plan (optimiser, exact)", "```", plan_text, "```", ""]
-    out += ["## Run cost", *cost_lines] if cost_lines else []
     return "\n".join(out).rstrip() + "\n"
