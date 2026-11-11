@@ -24,6 +24,7 @@ from prediction import cli as prediction_cli
 from prediction.cli import SHIPPED_MODEL
 from reasoning.adjust import adjust
 from reasoning.chips import chip_scan
+from reasoning.chat import chat_loop
 from reasoning.client import LLM, LLMUnavailable, Settings, Usage
 from reasoning.news import gather_flags, shortlist, stale_warnings
 from reasoning.report import render, write_report
@@ -150,7 +151,10 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     print("Run cost (console and coach_log only, not in the report):", *_cost_lines(usages, settings), sep="\n")
     print(f"Report saved to {path}")
     if chat:
-        print("chat not available yet")
+        if report:
+            usages["chat"] = chat_loop(LLM("chat", settings, client), session)
+        else:
+            print("Chat needs the LLM, which was unavailable for this run.")
 
     total = sum(usages.values(), Usage())
     _log({"season": x["season"], "gameweek": int(next_gw), "entry": int(entry_id), "recorded_at": pd.Timestamp(now),
