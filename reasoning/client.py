@@ -208,7 +208,10 @@ class LLM:
                 left = search_budget - usage.searches
                 server = [t | {"max_uses": left} if t.get("name") == "web_search" else t
                           for t in server if t.get("name") != "web_search" or left > 0]
-            response = self._request(system, messages, client_params + server, output_format)
+            try:
+                response = self._request(system, messages, client_params + server, output_format)
+            except LLMUnavailable as e:  # keep the spend of the turns already completed
+                raise LLMUnavailable(str(e), usage) from e.__cause__
             usage += Usage.from_response(response, self.settings, self.model)
             if response.stop_reason == "refusal":  # raise before appending: history stays valid
                 raise LLMUnavailable(f"refused after fallback: {response.stop_details}", usage)

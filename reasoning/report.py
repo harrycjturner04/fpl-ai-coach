@@ -1,7 +1,7 @@
 """Write-up: the review call, the number post-check, and the Markdown report.
 
 Claude writes the narrative sections; code renders the news and chip tables, the plan, warnings and run cost,
-and checks every player named in the Verdict and every "pts" figure against the solves."""
+and checks every player named in the Verdict and every "pts" and "xP" figure against the solves and predictions."""
 from __future__ import annotations
 
 import json
@@ -12,6 +12,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from optimisation import planning
+
 from .client import LLM, Usage
 from .tools import TOOLS, Session, handlers
 
@@ -20,6 +22,8 @@ LLM_SECTIONS = ["Verdict", "Why", "Risks and news", "Chip outlook", "Alternative
 VERDICT_LINES = ("Transfers", "Captain", "Vice-captain")
 TOLERANCE = 0.1
 _PTS = re.compile(r"(?<![\w.])[+-]?(\d+(?:\.\d+)?)\s?pts\b")
+_XP = re.compile(r"(?<![\w.])(\d+(?:\.\d+)?)\s?xP\b")
+_DIRECTION = re.compile(r"\b(gain(?:s|ed|ing)?|los(?:e|es|ing|t|s))\b", re.I)
 _SOLVE_ID = re.compile(r"\bS\d+\b")
 _GW = re.compile(r"\bGW\s?(\d+)\b", re.I)
 CHIP_NAMES = {"wildcard": ("wildcard",), "freehit": ("freehit", "free hit"), "bboost": ("bboost", "bench boost"),
@@ -47,24 +51,88 @@ def sections(markdown: str) -> dict[str, str]:
     return {k: "\n".join(v).strip() for k, v in out.items()}
 
 
-def _known_points(session: Session) -> list[float]:
-    """Every figure a "pts" number may quote: headline, chip scan and logged solves (absolute values)."""
+def _finite(vals) -> list[float]:
+    return [float(v) for v in vals if v is not None and math.isfinite(float(v))]
+
+
+def _known_points(session: Session) -> tuple[list[float], list[float]]:
+    """Figures a "pts" number may quote: (totals, signed differences). Totals are the headline's, the chip
+    scan's and logged solves' points and hit costs; differences are gains over no chip, solve deltas against the
+    headline and, once a chip is chosen, the no-chip plan against it."""
     hit = session.ctx.rules.hit_cost
-    vals = [hit]
+    totals, diffs = [hit], []
     for hp in {id(p): p for p in (session.headline, session.no_chip) if p is not None}.values():
-        vals += [hp.objective, *(w.projected_points for w in hp.weeks), *(w.hits * hit for w in hp.weeks)]
+        totals += [hp.objective, *(w.projected_points for w in hp.weeks), *(w.hits * hit for w in hp.weeks)]
+    if session.no_chip is not None and session.headline is not session.no_chip:
+        diffs.append(session.no_chip.objective - session.headline.objective)
     if session.chip_scan is not None:
-        vals += session.chip_scan["objective"].tolist() + session.chip_scan["gain_vs_none"].tolist()
+        totals += session.chip_scan["objective"].tolist()
+        diffs += session.chip_scan["gain_vs_none"].tolist()
     for s in session.solves:
         sm = s["summary"]
-        vals += [sm.get("objective"), sm.get("delta_vs_headline"),
-                 *(p["points"] for p in sm.get("projected_points", []))]
-    return [abs(float(v)) for v in vals if v is not None and math.isfinite(float(v))]
+        totals += [sm.get("objective"), *(p["points"] for p in sm.get("projected_points", []))]
+        diffs.append(sm.get("delta_vs_headline"))
+    return [abs(v) for v in _finite(totals)], _finite(diffs)
+
+
+def _known_xp(session: Session) -> dict[int, list[float]]:
+    """Player id -> every figure an "xP" number may quote for him: each gameweek's prediction and the horizon
+    total, after news and raw."""
+    raw = planning.score_table(session.pred_raw, session.table.shape[1]).reindex(session.table.index)
+    out: dict[int, list[float]] = {}
+    for t in (session.table.fillna(0), raw):
+        for i, row in t.iterrows():
+            out.setdefault(int(i), []).extend(_finite([*row.tolist(), row.sum()]))
+    return out
+
+
+def _near(x: float, vals) -> bool:
+    return any(abs(x - v) <= TOLERANCE + 1e-9 for v in vals)
+
+
+def figure_warnings(text: str, session: Session) -> list[str]:
+    """Every "N pts" figure must match a known total or difference, with the direction it claims ("+N", "-N",
+    or a preceding "gain"/"lose" in its sentence) matching a difference of that sign unless a total matches.
+    Every "N xP" figure must match a prediction of a player named in its sentence (any player if none)."""
+    totals, diffs = _known_points(session)
+    out = []
+    for m in _PTS.finditer(text):
+        x = float(m.group(1))
+        if not (_near(x, totals) or _near(x, map(abs, diffs))):
+            out.append(f"{m.group(0)} matches no figure in the headline, chip scan or logged solves")
+            continue
+        sign = m.group(0)[0]
+        words = _DIRECTION.findall(_sentence_before(text, m.start()))
+        claim = {"+": 1, "-": -1}.get(sign) or (words and (1 if words[-1].lower().startswith("gain") else -1))
+        if claim and not _near(x, totals) and not _near(claim * x, diffs):
+            said = "a gain" if claim > 0 else "a loss"
+            out.append(f"{m.group(0)} is described as {said}, but the matching figure is the opposite sign")
+    xp, names = _known_xp(session), session.ctx.players.set_index("id")["web_name"].astype(str)
+    every_xp = [v for vs in xp.values() for v in vs]
+    for m in _XP.finditer(text):
+        s = _sentence_around(text, m.start())
+        ids = [i for i, n in names.items() if re.search(rf"(?<![\w.'-]){re.escape(n)}(?![\w'-])", s)]
+        vals = [v for i in ids for v in xp.get(int(i), [])] if ids else every_xp
+        if not _near(float(m.group(1)), vals):
+            who = ", ".join(names[i] for i in ids) or "any player"
+            out.append(f"{m.group(0)} matches no prediction for {who}")
+    return out
+
+
+def _sentence_before(text: str, pos: int) -> str:
+    start = max(text.rfind(c, 0, pos) for c in (". ", "\n", "; "))
+    return text[start + 1:pos]
+
+
+def _sentence_around(text: str, pos: int) -> str:
+    end = min((j for c in (". ", "\n") if (j := text.find(c, pos)) != -1), default=len(text))
+    return text[max(text.rfind(c, 0, pos) for c in (". ", "\n")) + 1:end]
 
 
 def post_check(markdown: str, session: Session) -> list[str]:
     """Mismatches between Claude's text and the solves: players named in the Verdict (moves, captain, vice and
-    no one outside the week-1 squad or sales), the chip and gameweek, every "N pts" figure (to 0.1), and the Alternative's solve id."""
+    no one outside the week-1 squad or sales), the chip and gameweek, every "N pts" and "N xP" figure (to 0.1,
+    see `figure_warnings`), and the Alternative's solve id."""
     names = session.ctx.players.set_index("id")["web_name"].astype(str)
     every = set(names)
     w = session.headline.weeks[0]
@@ -109,10 +177,7 @@ def post_check(markdown: str, session: Session) -> list[str]:
             if got != ({c for c, _ in played}, {g for _, g in played}):
                 want = ", ".join(f"{c} GW{g}" for c, g in played) or "none"
                 warnings.append(f"Post-check: the Verdict's Chip line says {said!r}; the headline has {want}")
-    known = _known_points(session)
-    for m in _PTS.finditer(markdown):
-        if not any(abs(float(m.group(1)) - k) <= TOLERANCE + 1e-9 for k in known):
-            warnings.append(f"Post-check: {m.group(0)} matches no figure in the headline, chip scan or logged solves")
+    warnings += [f"Post-check: {w}" for w in figure_warnings(markdown, session)]
     alt = s.get("Alternative")
     ids = {x["solve_id"] for x in session.solves}
     chose_chip = session.no_chip is not None and session.headline is not session.no_chip  # alt is then the no-chip plan

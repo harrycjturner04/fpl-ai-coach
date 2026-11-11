@@ -17,7 +17,7 @@ def _report(session, captain=None, pts=None, alternative=""):
     pts = f"{session.headline.objective:.1f}" if pts is None else pts
     return (f"## Verdict\n- Transfers: OUT {_names(w.transfers_out)} -> IN {_names(w.transfers_in)}\n"
             f"- Captain: P{captain or w.captain}\n- Vice-captain: P{w.vice_captain}\n- Chip: none\n\n"
-            f"## Why\nThe plan is worth {pts} pts over the horizon; P3 is a doubt at 2.5 xP.\n\n"
+            f"## Why\nThe plan is worth {pts} pts over the horizon; P3 is a doubt at {session.table.loc[3].iloc[0]:.1f} xP.\n\n"
             f"## Risks and news\nP3 has a knock.\n\n## Chip outlook\nHold the Bench Boost.\n\n"
             f"{alternative}## Sources\n- https://x\n")
 
@@ -156,3 +156,24 @@ def test_post_check_does_not_match_a_name_inside_a_longer_name(session):
     session = replace(session, ctx=replace(session.ctx, players=players))
     text = _report(session).replace(f"Captain: P{w.captain}", "Captain: B.Fernandes")
     assert not [x for x in post_check(text, session) if "Captain" in x]
+
+
+def test_post_check_flags_xp_not_in_the_named_players_predictions(session):
+    xp = session.table.loc[3]
+    ok = _report(session) + f"\nP3: {xp.iloc[1]:.1f} xP in week two, {xp.sum():.1f} xP in total.\n"
+    assert post_check(ok, session) == []
+    wrong = f"{xp.max() + 5:.1f}"
+    warnings = post_check(_report(session) + f"\nP3 projects {wrong} xP.\n", session)
+    assert warnings == [f"Post-check: {wrong} xP matches no prediction for P3"]
+
+
+def test_post_check_flags_a_loss_described_as_a_gain(session):
+    session.chip_scan = pd.DataFrame({"chip": ["bboost"], "gameweek": [11], "objective": [88.8],
+                                      "gain_vs_none": [-2.3], "week1_same_as_none": [True], "exact": [True],
+                                      "note": [""]})
+    gain = _report(session).replace("Hold the Bench Boost.", "Bench Boost gains 2.3 pts.")
+    assert any("described as a gain" in x for x in post_check(gain, session))
+    plus = _report(session).replace("Hold the Bench Boost.", "Bench Boost: +2.3 pts.")
+    assert any("described as a gain" in x for x in post_check(plus, session))
+    for fine in ("Bench Boost loses 2.3 pts.", "Bench Boost: -2.3 pts.", "Bench Boost differs by 2.3 pts."):
+        assert post_check(_report(session).replace("Hold the Bench Boost.", fine), session) == []

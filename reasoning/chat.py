@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .client import LLM, LLMUnavailable, Usage
-from .report import _PTS, TOLERANCE, _known_points
+from .report import figure_warnings
 from .tools import TOOLS, Session, handlers
 
 PROMPT = Path(__file__).parent / "prompts" / "chat.md"
@@ -37,9 +37,7 @@ def chat_loop(llm: LLM, session: Session, read=input, write=print) -> Usage:
             break
         total += res.usage
         write(res.text)
-        known = _known_points(session)
-        for m in _PTS.finditer(res.text):
-            if not any(abs(float(m.group(1)) - k) <= TOLERANCE + 1e-9 for k in known):
-                write(f"Warning: {m.group(0)} matches no figure in the headline, chip scan or logged solves")
+        for w in figure_warnings(res.text, session):
+            write(f"Warning: {w}")
         write(f"(this answer ${res.usage.cost_usd:.4f}; session ${total.cost_usd:.4f})")
     return total

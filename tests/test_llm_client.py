@@ -265,3 +265,11 @@ def test_search_budget_spans_the_whole_tool_loop(settings):
     uses = [[t.get("max_uses") for t in r["tools"] if t.get("name") == "web_search"] for r in fake.requests]
     assert uses == [[3], [1], []] and res.usage.searches == 3
     assert [t["name"] for t in fake.requests[2]["tools"]] == ["get_price"]
+
+
+def test_later_request_failure_keeps_earlier_turns_usage(settings):
+    err = anthropic.APIConnectionError(request=httpx2.Request("POST", "https://x"))
+    llm, _ = _llm(settings, [message([_tool_use("t1", "get_price", {"player_id": 1})], stop_reason="tool_use"), err])
+    with pytest.raises(LLMUnavailable) as exc:
+        llm.run("s", [{"role": "user", "content": "q"}], [PRICE_TOOL], {"get_price": lambda i: {"price": 5.0}})
+    assert exc.value.usage.input == 10  # the completed first turn is still reported

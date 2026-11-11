@@ -68,8 +68,10 @@ prints and saves the optimiser's plan with a note instead.
 8. **Post-check, in code.** The players named in the Verdict must be exactly the headline's transfers, captain and
    vice-captain, and no one outside the week-1 squad or its sales; its Chip line must name the headline's chip and
    gameweek, or none. Every "N pts" figure in the text must match, to
-   0.1, a figure from the headline, the chip scan or a logged solve. Mismatches are listed as warnings at the top
-   of the report.
+   0.1, a figure from the headline, the chip scan or a logged solve, and a figure described as a gain or a loss
+   ("gains", "loses", "+N", "-N") must match a difference of that sign. Every "N xP" figure must match a
+   prediction (one gameweek or the horizon total) of a player named in its sentence. Mismatches are listed as
+   warnings at the top of the report; the chat prints the same checks after each answer.
 9. **Run log.** One row per run in `coach_log`: models, flags, adjustments, tool calls, token usage, cost and the
    report's path.
 
@@ -151,7 +153,8 @@ warnings (since fixed): the grader takes the report's warnings at face value.
 - **The live runs so far had no news to find.** The 2026-11-11 runs were 10 days before the deadline, so web search
   found no press conferences or predicted lineups and the reports rest on FPL's own fields.
 - **The post-check catches figures, not reasoning.** It flags a "pts" number Claude computed itself (as with a
-  "7.4 pts" difference in the 2026-11-11 runs) and wrong players in the Verdict, but not a wrong count or claim in prose;
+  "7.4 pts" difference in the 2026-11-11 runs), an xP that is not the named player's, a loss called a gain, and
+  wrong players in the Verdict, but not a wrong count or claim in prose;
   the grader is the check for those, and it is itself a model's judgement.
 - **One team, three runs.** The cost and time figures come from a single team in a single week.
 - **No automated live test of the coach.** There is no `pytest -m live` coach run; every coach test uses a fake
