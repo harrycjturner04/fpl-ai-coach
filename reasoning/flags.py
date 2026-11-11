@@ -1,7 +1,12 @@
-"""News flags: the structured form the LLM gives for each player with new information."""
+"""News flags: the structured form the LLM gives for each player with new information.
+
+FLAG_SCHEMA is what Claude must return (a strict tool schema); `parse_flags` re-validates it in code, since every
+flag can change predictions and only valid, sourced flags may reach `reasoning.adjust`."""
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
+
+from .client import schema_errors
 
 STATUSES = ("fit", "doubt", "out", "suspended", "rotation_risk")
 CONFIDENCES = ("low", "medium", "high")
@@ -10,6 +15,7 @@ SOURCE_KINDS = ("official", "media", "predicted_lineup")
 
 @dataclass(frozen=True)
 class Flag:
+    """One validated news flag for one player."""
     player_id: int
     status: Literal["fit", "doubt", "out", "suspended", "rotation_risk"]
     start_prob_next_gw: float
@@ -40,32 +46,17 @@ FLAG_SCHEMA = {
 }
 
 
-def _is_int(v) -> bool:
-    return isinstance(v, int) and not isinstance(v, bool)
-
-
 def _problem(r) -> str | None:
-    if not isinstance(r, dict):
-        return "not an object"
-    keys = set(r)
-    if keys != set(FLAG_SCHEMA["required"]):
-        return f"fields: missing {sorted(set(FLAG_SCHEMA['required']) - keys)}, extra {sorted(keys - set(FLAG_SCHEMA['required']))}"
-    p = r["start_prob_next_gw"]
-    checks = [
-        (_is_int(r["player_id"]), "player_id must be an integer"),
-        (r["status"] in STATUSES, f"status {r['status']!r} not in {STATUSES}"),
-        ((_is_int(p) or isinstance(p, float)) and 0 <= p <= 1, "start_prob_next_gw must be a number in [0, 1]"),
-        (r["return_gw"] is None or _is_int(r["return_gw"]), "return_gw must be an integer or null"),
-        (r["confidence"] in CONFIDENCES, f"confidence {r['confidence']!r} not in {CONFIDENCES}"),
-        (r["source_kind"] in SOURCE_KINDS, f"source_kind {r['source_kind']!r} not in {SOURCE_KINDS}"),
-        (isinstance(r["source_url"], str), "source_url must be a string"),
-        (r["source_date"] is None or isinstance(r["source_date"], str), "source_date must be a string or null"),
-        (isinstance(r["summary"], str), "summary must be a string"),
-    ]
-    return next((msg for ok, msg in checks if not ok), None)
+    """Why the raw flag `r` is invalid (its schema, then the probability range), or None."""
+    if errors := schema_errors(r, FLAG_SCHEMA, "flag"):
+        return "; ".join(errors)
+    if not 0 <= r["start_prob_next_gw"] <= 1:
+        return "start_prob_next_gw must be in [0, 1]"
+    return None
 
 
 def parse_date(s: str | None) -> date | None:
+    """The YYYY-MM-DD date at the start of `s`, or None if missing or unparseable."""
     try:
         return date.fromisoformat(s[:10]) if s else None
     except ValueError:

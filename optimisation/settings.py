@@ -14,6 +14,7 @@ SHIPPED_PARAMS_PATH = Path(__file__).parent / "plan_params.json"
 
 @dataclass(frozen=True)
 class PlanSettings:
+    """Optimiser settings tuned by season replay (shipped in optimisation/plan_params.json)."""
     horizon: int = 5
     discount: float = 1.0
     bench_weight: float = 0.1

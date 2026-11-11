@@ -208,7 +208,7 @@ def test_highs_and_cbc_agree():
     players, scores = random_mini_case(rng, 3, MINI3)
     a = solve_plan(players, scores, MINI3, budget=33.0)
     checked(a, players, MINI3, budget=33.0)
-    b = solve_plan(players, scores, MINI3, budget=33.0, solver=pulp.PULP_CBC_CMD(msg=False))
+    b = solve_plan(players, scores, MINI3, budget=33.0, solver=pulp.COIN_CMD(msg=False, gapRel=0))
     checked(b, players, MINI3, budget=33.0)
     assert a.objective == pytest.approx(b.objective, abs=1e-4)
 

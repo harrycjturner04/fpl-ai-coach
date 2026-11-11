@@ -73,6 +73,9 @@ def run(entry_id: int | None = None, ep_weight: float = 0.7, bench_weight: float
         scorer: str = "component", horizon: int | None = None, discount: float | None = None,
         chips: list[tuple[str, int]] | None = None,
         now: pd.Timestamp | None = None, model: str = SHIPPED_MODEL) -> tuple[Plan | Solution, dict]:
+    """Load (refreshing if stale) the data, predict, and solve: a multi-week plan with the shipped
+    settings, or with `scorer='placeholder'` the Stage 2 one-week solve on current FPL stats.
+    Returns (plan or solution, the context format_solution needs)."""
     players = storage.load_table("players", data_dir)
     game_rules = storage.load_json("game_rules", data_dir)
     rules = SquadRules.from_data(game_rules, storage.load_table("positions", data_dir))
@@ -153,6 +156,7 @@ def _record_plan(plan: Plan, context: dict, gameweeks: pd.DataFrame, season: str
 
 
 def format_solution(result: Plan | Solution, context: dict) -> str:
+    """Printable week-1 recommendation: transfers, XI, bench, captaincy, money and points."""
     sol = result.weeks[0] if isinstance(result, Plan) else result
     p = context["players"].set_index("id")
     s = context["scores"]

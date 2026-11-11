@@ -56,6 +56,9 @@ def _live_market(selectable: pd.DataFrame, next_gw: int, season: str, data_dir: 
 
 
 def live_inputs(data_dir: Path, horizon: int = 5, now: pd.Timestamp | None = None) -> dict:
+    """Everything the live models need, from the processed tables: the full match log, the
+    selectable players with FPL chance and market features, and the fixtures of the next
+    `horizon` gameweeks. Models cache shared work in the returned dict."""
     now = now or pd.Timestamp.now(tz="UTC")
     players = storage.load_table("players", data_dir)
     teams = storage.load_table("teams", data_dir)

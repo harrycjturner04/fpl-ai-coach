@@ -52,6 +52,7 @@ class FPLClient:
         return f"{self.base_url}{path.strip('/')}/" + (f"?{query}" if query else "")
 
     def get(self, path: str) -> Any:
+        """GET one API path (rate limited, retried by the session) and return the parsed JSON."""
         # Polite rate limit: FPL has no published limit, but hammering it
         # during the ~670-request history pull gets you throttled.
         wait = self.min_interval - (time.monotonic() - self._last_request)

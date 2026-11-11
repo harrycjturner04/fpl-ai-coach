@@ -38,14 +38,6 @@ def load_raw(snapshot_dir: Path, name: str) -> Any:
     return json.loads((snapshot_dir / f"{name}.json").read_text(encoding="utf-8"))
 
 
-def latest_snapshot(data_dir: Path = DATA_DIR) -> Path | None:
-    raw = data_dir / "raw"
-    if not raw.exists():
-        return None
-    snapshots = sorted(p for p in raw.iterdir() if p.is_dir())
-    return snapshots[-1] if snapshots else None
-
-
 def _clear_readonly_and_retry(func, path, _exc) -> None:
     """Windows/OneDrive can mark folders read-only, which blocks deletion."""
     os.chmod(path, stat.S_IWRITE)

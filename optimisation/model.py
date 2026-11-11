@@ -38,6 +38,7 @@ class InfeasibleError(RuntimeError):
 
 @dataclass(frozen=True)
 class SquadRules:
+    """FPL's squad rules: composition, formation limits, club cap, hit cost, free-transfer cap."""
     composition: dict[str, int]
     xi_min: dict[str, int]
     xi_max: dict[str, int]
@@ -67,6 +68,7 @@ class SquadRules:
 
 @dataclass
 class Solution:
+    """One gameweek of a plan: squad, XI, bench, captaincy, transfers and their cost."""
     squad: list[int]
     starting: list[int]
     bench: list[int]            # substitution order: GK first, then by score
@@ -86,6 +88,7 @@ class Solution:
 
 @dataclass
 class Plan:
+    """A multi-gameweek plan: one Solution per gameweek."""
     gameweeks: list[int]      # the score table's columns, in order
     weeks: list[Solution]     # one per gameweek
     objective: float          # discounted, incl. leftover value, excl. tie-breaks
@@ -267,9 +270,13 @@ def solve_plan(
         prob += squad_var(i, 0) == 1
     prob += pulp.lpSum(z.values()) <= f[H] - 1
 
-    status = prob.solve(solver or pulp.HiGHS(msg=False, gapRel=gap, gapAbs=0 if gap == 0 else None, threads=1))
-    if pulp.LpStatus[status] != "Optimal":
-        msg = f"No legal squad found (solver status: {pulp.LpStatus[status]})."
+    # threads=1: more than one HiGHS thread returns "Not Solved" in this setup
+    stats = prob.solve(solver or pulp.HiGHS(msg=False, gapRel=gap, gapAbs=0 if gap == 0 else None, threads=1))
+    # GapLimit: proven within the requested gap of optimal (0 when exact); PuLP 4 reports it for gap-stopped
+    # solves and for CBC's "Optimal (within gap tolerance)"
+    accepted = (pulp.LpSolveStatus.Optimal, pulp.LpSolveStatus.GapLimit)
+    if stats.status not in accepted or not stats.has_solution:
+        msg = f"No legal squad found (solver status: {stats.status_str})."
         if forced:
             msg += f" Forced players: {sorted(forced)}."
         raise InfeasibleError(msg)

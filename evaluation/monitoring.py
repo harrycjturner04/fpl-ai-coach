@@ -22,6 +22,7 @@ FPL = "fpl_ep_next"
 
 @dataclass
 class Monitoring:
+    """The monitoring report: accuracy table, minutes calibration, planner points, text forms."""
     table: pd.DataFrame        # per model: n, rmse, rho, mean_error (predicted minus actual)
     calibration: pd.DataFrame  # per model and p60 bucket: n, predicted, observed 60+ rate
     text: str
@@ -30,6 +31,8 @@ class Monitoring:
 
 
 def monitoring(data_dir: Path = storage.DATA_DIR, season: str | None = None) -> Monitoring:
+    """Season-to-date forward test from the logs: next-gameweek accuracy per model (and FPL's
+    ep_next), P(60+) calibration, and the logged plans' realised vs projected points."""
     preds = storage.load_table("prediction_log", data_dir)
     season = season or sorted(preds["season"].unique())[-1]
     preds = preds[(preds["season"] == season) & (preds["gameweek"] == preds["made_for_gameweek"])]

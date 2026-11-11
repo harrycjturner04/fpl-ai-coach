@@ -18,6 +18,7 @@ DC_FIRST_SEASON = "2025-26"
 
 @dataclass(frozen=True)
 class ScoringRules:
+    """FPL points per event, by position where it differs."""
     goal: dict[str, int]
     clean_sheet: dict[str, int]
     concede_per_two: dict[str, int]
@@ -34,6 +35,8 @@ class ScoringRules:
 
 
 def rules_for_season(season: str) -> ScoringRules:
+    """The scoring rules in force in `season` (from DC_FIRST_SEASON: defensive contribution points
+    and 10 points for a goalkeeper goal)."""
     new = season >= DC_FIRST_SEASON
     return ScoringRules(
         goal={"GKP": 10 if new else 6, "DEF": 6, "MID": 5, "FWD": 4},
