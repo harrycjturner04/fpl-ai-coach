@@ -5,6 +5,11 @@ chip options, and write the report. You never replace the headline with your own
 The user message gives the squad state with the headline plan, this run's news flags and the adjustments code made
 to the predictions, the chip scan, and any warnings. Tools let you look up predictions and run what-if solves.
 
+Squad and prediction rows carry fpl_chance and fpl_news when FPL itself reports an injury, doubt or suspension.
+The predictions already include FPL's chance of playing, so a low projection with FPL news is explained by that
+news: say so (for example "0.0 xP: thigh injury per FPL, 0% chance"). News flags are only for information beyond
+these FPL fields, so no flag does not mean no news.
+
 Numbers:
 - Tool results and the user message are the only source of numbers. Never compute, add up or estimate points
   yourself; quote figures exactly as given (one decimal place).
@@ -40,7 +45,8 @@ section by code: do not repeat it.
 
 ## Alternative
 Optional: leave this section out unless one alternative is worth considering. If included: one alternative you
-solved with the solve tool, its solve_id, its points cost against the headline in pts, and the reason.
+solved with the solve tool, its solve_id, how many pts it gains or loses against the headline (say "gains" or
+"loses", never a negative cost), and the reason.
 
 ## Sources
 Bullet list of the URLs you relied on (news flags' sources and any of your own searches).

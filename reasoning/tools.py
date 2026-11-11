@@ -100,8 +100,17 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
     name = players.set_index("id")["web_name"].to_dict()
     position = players.set_index("id")["position"].to_dict()
 
+    fpl_rows = players.set_index("id").reindex(columns=["chance_of_playing_next_round", "news"])
+
     def who(i: int) -> dict:
         return {"id": int(i), "name": name.get(i, str(i))}
+
+    def fpl(i: int) -> dict:
+        """FPL's own availability (already reflected in the predictions); empty when there is no news."""
+        news = fpl_rows.at[i, "news"] if i in fpl_rows.index else None
+        if pd.isna(news) or not news:
+            return {}
+        return {"fpl_chance": fpl_rows.at[i, "chance_of_playing_next_round"], "fpl_news": fpl_rows.at[i, "news"]}
 
     def summary(plan: Plan) -> dict:
         w = plan.weeks[0]
@@ -127,7 +136,8 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
         st = session.ctx.state or {}
         return {"team_name": st.get("team_name"), "bank": st.get("bank"), "free_transfers": session.ctx.free,
                 "squad": [who(int(p["player_id"])) | {"position": position.get(p["player_id"]),
-                                                      "selling_price": p["selling_price"]} for p in st.get("squad", [])],
+                                                      "selling_price": p["selling_price"]} | fpl(int(p["player_id"]))
+                          for p in st.get("squad", [])],
                 "chips_available": [{"name": n, "gw": int(g)} for n, g in session.chips_available],
                 "headline": summary(session.headline)}
 
@@ -155,7 +165,7 @@ def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
         rows = []
         for i in table.loc[ids].sum(axis=1).sort_values(ascending=False).index[:top_n]:
             pts = {str(g): _r(v) for g, v in table.loc[i].fillna(0).items()}
-            row = who(i) | {"position": position.get(i), "points": pts, "total": _r(sum(pts.values()))}
+            row = who(i) | {"position": position.get(i), "points": pts, "total": _r(sum(pts.values()))} | fpl(i)
             raw_pts = {str(g): None if pd.isna(v) else _r(v) for g, v in raw.loc[i].items()}  # None: no raw prediction
             if raw_pts != pts:
                 row["raw_points"] = raw_pts

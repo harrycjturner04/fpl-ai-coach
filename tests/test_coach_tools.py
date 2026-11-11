@@ -186,6 +186,23 @@ def test_get_squad_state_with_real_state_is_json_safe(session):
     assert type(out["bank"]) is float and type(out["squad"][0]["id"]) is int
 
 
+def test_fpl_news_reaches_squad_and_predictions(session):
+    # C3: the review said "haven't found the cause" for 0.0 xP injured players because it never saw FPL news
+    squad = session.headline.weeks[0].squad
+    hurt, fine = int(squad[0]), int(squad[1])
+    players = session.ctx.players.assign(chance_of_playing_next_round=np.nan, news="")
+    players.loc[players.id == hurt, ["chance_of_playing_next_round", "news"]] = [0.0, "Thigh injury"]
+    state = {"squad": [{"player_id": i, "selling_price": 4.6} for i in squad]}
+    h = handlers(replace(session, ctx=replace(session.ctx, players=players, state=state)))
+    rows = {r["id"]: r for r in h["get_squad_state"]({})["squad"]}
+    assert rows[hurt]["fpl_chance"] == 0.0 and rows[hurt]["fpl_news"] == "Thigh injury"
+    assert "fpl_news" not in rows[fine]
+    pred = h["get_predictions"]({"player_ids": [hurt, fine], "position": None, "top_n": None})
+    by_id = {r["id"]: r for r in pred["players"]}
+    assert by_id[hurt]["fpl_news"] == "Thigh injury" and "fpl_news" not in by_id[fine]
+    json.dumps(pred, allow_nan=False)
+
+
 def test_results_are_sanitised(session):
     assert _clean({"a": np.int64(3), "b": np.float64(1.5), "c": float("nan"), "d": (np.bool_(True), pd.NA),
                    "e": date(2026, 11, 5), 7: np.array([1, 2])}) == \
