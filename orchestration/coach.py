@@ -16,6 +16,7 @@ from pathlib import Path
 import pandas as pd
 
 from ingestion import congestion, storage
+from evaluation.monitoring import monitoring
 from ingestion.env import load_env
 from optimisation import planning
 from optimisation.cli import _horizon_arg, ensure_fresh_data, format_solution
@@ -131,6 +132,7 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
         role = "review"
         session = Session(ctx, pred_raw, pred, table, flags, adjustments, headline, windows, chip_scan=scan,
                           chip_plans=chip_plans, chip_expiry=_chip_expiry(data_dir, next_gw))
+        session.monitoring = _monitoring_text(data_dir)
         left = settings.max_searches - usages["news"].searches if search else 0
         report = write_report(LLM("review", settings, client), session, searches_left=left, notes=notes)
         headline = session.headline  # the no-chip plan, or the chip plan the review chose
@@ -165,6 +167,14 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
           "usage": json.dumps({r: asdict(u) for r, u in usages.items()}),
           "cost_usd": total.cost_usd, "report_path": str(path)}, data_dir)
     return path
+
+
+def _monitoring_text(data_dir) -> str:
+    """The monitoring report for the review's get_monitoring tool; never fails the run."""
+    try:
+        return monitoring(data_dir).text
+    except Exception as err:   # noqa: BLE001
+        return f"monitoring report not available ({type(err).__name__})"
 
 
 def _chip_expiry(data_dir: Path, gw: int) -> dict[str, int]:

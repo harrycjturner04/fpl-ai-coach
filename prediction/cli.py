@@ -164,13 +164,17 @@ def record_predictions(pred: pd.DataFrame, model: str, gameweeks: pd.DataFrame, 
         return None
     totals = pred.groupby(["gameweek", "player_code"], as_index=False)["total"].sum()
     new = totals.assign(season=season, made_for_gameweek=made_for, recorded_at=now, model=model)
+    if "p60" in pred:   # minutes calibration: p60 of the player's nearest fixture in each gameweek
+        nearest = pred.sort_values([c for c in ("gameweek", "kickoff") if c in pred]).groupby(
+            ["gameweek", "player_code"], as_index=False)["p60"].first()
+        new = new.merge(nearest, on=["gameweek", "player_code"], how="left")
     old = storage.load_table_or_none("prediction_log", data_dir)
     if old is not None and "model" not in old:
         old = old.assign(model="component")   # rows logged before the model column existed
     log = new if old is None else pd.concat([old, new], ignore_index=True)
     key = ["season", "made_for_gameweek", "gameweek", "player_code", "model"]
     log = log.sort_values("recorded_at").drop_duplicates(key, keep="last")
-    log = log[key + ["total", "recorded_at"]].reset_index(drop=True)
+    log = log[key + ["total", "recorded_at"] + (["p60"] if "p60" in log else [])].reset_index(drop=True)
     storage.save_table(log, "prediction_log", data_dir)
     return log
 

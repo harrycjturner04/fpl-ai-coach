@@ -141,6 +141,7 @@ def _record_plan(plan: Plan, context: dict, gameweeks: pd.DataFrame, season: str
     new = pd.DataFrame([{
         "season": season, "gameweek": w.gameweek, "entry": entry_id,
         "transfers_in": ",".join(map(str, w.transfers_in)), "transfers_out": ",".join(map(str, w.transfers_out)),
+        "starting": ",".join(map(str, w.starting)), "bench": ",".join(map(str, w.bench)),
         "captain": w.captain, "vice_captain": w.vice_captain, "chip": w.chip or "", "hits": w.hits,
         "projected_points": w.projected_points, "settings": json.dumps(context["settings"].to_dict()),
         "recorded_at": now}])

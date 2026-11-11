@@ -249,3 +249,11 @@ def test_a_failing_chosen_ml_model_names_the_component_fallback(tmp_path, monkey
     _fake_walkforward(monkeypatch, fail=("lgbm",))
     with pytest.raises(RuntimeError, match="--model component"):
         cli.run(data_dir=tmp_path, now=pd.Timestamp("2023-10-06T12:00Z"), model="lgbm")
+
+
+def test_p60_logged_from_nearest_fixture(tmp_path):
+    pred, gws = _log_inputs()
+    pred = pred.assign(p60=[0.9, 0.2, 0.5, 0.7], kickoff=pd.to_datetime(
+        ["2023-10-07T15:00Z", "2023-10-08T15:00Z", "2023-10-14T15:00Z", "2023-10-07T15:00Z"], utc=True))
+    log = cli.record_predictions(pred, "component", gws, "2023-24", tmp_path, pd.Timestamp("2023-10-04T09:00Z"))
+    assert log[(log.player_code == 100) & (log.gameweek == 9)]["p60"].iloc[0] == pytest.approx(0.9)
