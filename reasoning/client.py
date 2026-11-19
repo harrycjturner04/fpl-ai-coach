@@ -36,6 +36,7 @@ class LLMUnavailable(Exception):
 
 @dataclass(frozen=True)
 class Settings:
+    """Model, effort, token and search limits and prices for each LLM role (reasoning/settings.json)."""
     models: dict[str, str]
     effort: dict[str, str]
     max_tokens: int
@@ -53,11 +54,13 @@ class Settings:
         return cls(**{f.name: d[f.name] for f in fields(cls)})
 
     def web_search_tool(self) -> dict:
+        """Anthropic's server-side web search tool, capped at `max_searches` per request."""
         return {"type": "web_search_20260209", "name": "web_search", "max_uses": self.max_searches}
 
 
 @dataclass(frozen=True)
 class Usage:
+    """Tokens, searches and USD cost of one or more responses (added with +)."""
     input: int = 0
     output: int = 0
     cache_read: int = 0
@@ -97,12 +100,14 @@ class Tool:
     input_schema: dict
 
     def to_param(self) -> dict:
+        """The tool definition as the Messages API expects it."""
         return {"name": self.name, "description": self.description, "input_schema": self.input_schema,
                 "strict": True}
 
 
 @dataclass
 class RunResult:
+    """Outcome of `LLM.run`: final text and content, total usage, client tool calls, stop reason."""
     text: str
     content: list
     usage: Usage
@@ -146,6 +151,7 @@ def schema_errors(value, schema: dict, path: str = "input") -> list[str]:
 
 
 class LLM:
+    """Claude for one role (news, review, chat, grader) with that role's model and effort."""
     def __init__(self, role: str, settings: Settings, client=None):
         self.role = role
         self.settings = settings

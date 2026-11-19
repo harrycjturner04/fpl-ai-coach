@@ -31,6 +31,7 @@ SCHEMA = {
 
 @dataclass
 class Grade:
+    """Rubric scores (1-5 per criterion) and notes for one stored report."""
     scores: dict[str, int]
     notes: str
     usage: Usage | None = None

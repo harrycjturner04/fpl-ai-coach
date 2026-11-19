@@ -26,6 +26,7 @@ _RENAME = {
 
 
 def fetch_season(season: str, session: requests.Session | None = None) -> dict[str, pd.DataFrame]:
+    """Download one season's merged gameweek file, players and teams from the archive."""
     session = session or requests.Session()
     frames = {}
     for key, path in _FILES.items():
@@ -44,6 +45,8 @@ def _check_mapped(df: pd.DataFrame, mapped_col: str, source_col: str, season: st
 
 def season_match_rows(merged: pd.DataFrame, players_raw: pd.DataFrame, teams: pd.DataFrame,
                       season: str) -> pd.DataFrame:
+    """One season of archive data as match-log rows (MATCH_COLUMNS), with player and team
+    codes that are stable across seasons; raises if any id or name fails to map."""
     df = merged[merged["position"] != "AM"].copy()  # 2024/25 Assistant Manager chip rows
     df["position"] = df["position"].replace({"GK": "GKP"})
     df["player_code"] = df["element"].map(players_raw.set_index("id")["code"])
@@ -69,6 +72,7 @@ def season_match_rows(merged: pd.DataFrame, players_raw: pd.DataFrame, teams: pd
 
 
 def load_archive(seasons=ARCHIVE_SEASONS, fetch=fetch_season) -> pd.DataFrame:
+    """Match-log rows for every season in `seasons`, concatenated."""
     parts = []
     for season in seasons:
         frames = fetch(season)

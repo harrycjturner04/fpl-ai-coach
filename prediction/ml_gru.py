@@ -9,6 +9,7 @@ from .ml_points import _with_played_60
 
 
 class GruPoints:
+    """Points-if-plays model with a GRU over the player's last SEQ_LEN matches alongside the MLP."""
     def __init__(self, params: dict | None = None):
         self.params = params or {}
 

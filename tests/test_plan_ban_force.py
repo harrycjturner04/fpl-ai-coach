@@ -76,7 +76,9 @@ def ban_force_case(seed):
     """A random mini case owning a legal squad, with one owned player banned and one other forced."""
     rng = random.Random(500 + seed)
     players, scores = random_mini_case(rng, rng.choice([2, 3]), MINI_RULES)
-    start = solve_plan(players, scores.iloc[:, :1] * 0 + 1, MINI_RULES, budget=40.0).weeks[0].squad
+    # distinct tiny scores give a unique starting squad, so the case does not depend on how the solver breaks ties
+    unique = scores.iloc[:, :1] * 0 + 1 + scores.index.to_numpy()[:, None] * 1e-3
+    start = solve_plan(players, unique, MINI_RULES, budget=40.0).weeks[0].squad
     price = players.set_index("id")["price"]
     owned = {i: round(price[i] - rng.choice([0.0, 0.1]), 1) for i in start}
     kw = dict(current_squad=owned, bank=rng.choice([0.5, 1.0, 2.0]), free_transfers=rng.randint(0, 2),

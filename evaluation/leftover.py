@@ -24,6 +24,8 @@ def solve_one(job: tuple[dict, PlanSettings, int]) -> float:
 
 def measure_leftover(states: list[dict], settings: PlanSettings, max_free: int = 5, *,
                      map_fn: Callable = map) -> tuple[float, ...]:
+    """Average gain in the plan objective from starting with one more free transfer (1->2, ...,
+    4->5) over the replayed states, made non-increasing and capped below the hit cost."""
     usable = [s for s in states if "current_squad" in s]
     jobs = [(s, settings, f) for s in usable for f in range(1, max_free + 1)]
     objective = list(map_fn(solve_one, jobs))
@@ -40,6 +42,8 @@ def measure_leftover(states: list[dict], settings: PlanSettings, max_free: int =
 
 def fixed_point(run_states: Callable[[PlanSettings], list[dict]], settings: PlanSettings, passes: int = 3,
                 tol: float = 0.05, log=print, map_fn: Callable = map) -> PlanSettings:
+    """Re-measure the leftover values with the previous measurement in the objective until they
+    settle (change < `tol`) or `passes` run out."""
     current = replace(settings, leftover_values=(0.0,) * 4)
     for n in range(1, passes + 1):
         table = measure_leftover(run_states(current), current, map_fn=map_fn)

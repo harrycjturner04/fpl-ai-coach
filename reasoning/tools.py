@@ -29,6 +29,7 @@ CHIP_NAMES = ["wildcard", "freehit", "bboost", "3xc"]
 
 @dataclass
 class Session:
+    """State shared by the review and chat tools for one coach run."""
     ctx: PlanContext
     pred_raw: pd.DataFrame          # model predictions before news
     pred: pd.DataFrame              # after news adjustments
@@ -104,6 +105,7 @@ def _safe(f: Callable[[dict], dict]) -> Callable[[dict], dict]:
 
 
 def handlers(session: Session) -> dict[str, Callable[[dict], dict]]:
+    """The client tool handlers for `session`, by tool name; each returns JSON-safe output."""
     players = session.ctx.players
     name = players.set_index("id")["web_name"].to_dict()
     position = players.set_index("id")["position"].to_dict()

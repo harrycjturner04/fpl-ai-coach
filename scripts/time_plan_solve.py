@@ -58,7 +58,7 @@ def main():
             print(f"{horizon:>7} {mode:<22} {statistics.median(secs):>9.2f} {min(secs):>7.2f} "
                   f"{max(secs):>7.2f} {n:>8}  {'ok' if not problems else problems}")
 
-    secs, _ = timed(1, players, table, rules, **transfer, solver=pulp.PULP_CBC_CMD(msg=False, timeLimit=300))
+    secs, _ = timed(1, players, table, rules, **transfer, solver=pulp.COIN_CMD(msg=False, gapRel=0, timeLimit=300))
     print(f"CBC, horizon 5 transfers (1 run, timeLimit=300): {secs[0]:.2f} s")
 
 

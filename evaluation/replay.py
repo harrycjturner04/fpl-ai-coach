@@ -41,6 +41,9 @@ def _players_table(snap, squad: dict, known: dict) -> pd.DataFrame:
 
 def replay_season(match_log: pd.DataFrame, season: str, predictor: Predictor, settings: PlanSettings, *,
                   cache: dict | None = None, keep_states: bool = False) -> pd.DataFrame:
+    """Play `season` with the optimiser: at each deadline predict, solve with `settings`, check the
+    plan's legality, score week one with FPL's auto-subs, and carry squad, bank and free
+    transfers forward. One row per gameweek (`keep_states` keeps each solve's inputs)."""
     rules = STANDARD_RULES
     season_log = match_log[match_log["season"] == season]
     actual = season_log.groupby(["gameweek", "player_code"])[["minutes", "points"]].sum()

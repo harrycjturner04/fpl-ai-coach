@@ -13,12 +13,16 @@ from features.ml_features import CATEGORICAL  # noqa: E402
 
 
 def time_split(order: pd.Series, val_frac: float = 0.1):
+    """(train mask, validation mask): the latest `val_frac` of rows by `order` validate, so early
+    stopping never looks at matches earlier than the ones it trains on."""
     rank = order.astype("int64").rank(method="first").to_numpy()   # ties broken by position: never an empty split
     val = rank > (1 - val_frac) * len(rank)
     return ~val, val
 
 
 class Preprocessor:
+    """Standardises numeric inputs (binary flags left as 0/1), adds missing-value indicators and
+    maps categories to embedding indices (0 = unseen), using training statistics only."""
     def fit(self, X: pd.DataFrame) -> "Preprocessor":
         # defensive_contribution_* is 0 in every season before 2025-26: its z-scores explode in the test season
         self.num = [c for c in X.columns if c not in CATEGORICAL and not c.startswith("defensive_contribution_")]
@@ -30,6 +34,8 @@ class Preprocessor:
         return self
 
     def transform(self, X: pd.DataFrame) -> dict[str, np.ndarray]:
+        """Keras inputs: {'num': z-scores clipped to +/-5 and missing flags, one array per
+        categorical column}."""
         num = X[self.num].astype(float)
         z = ((num - self.mean) / self.std).fillna(0.0).clip(-5, 5).to_numpy(np.float32)
         miss = num.isna().to_numpy(np.float32)
@@ -40,6 +46,7 @@ class Preprocessor:
 
 
 def build_mlp(pre: Preprocessor, n_out: int, activation: str, hidden=(128, 64), dropout=0.2, emb_dim=4):
+    """MLP over the numeric inputs plus an embedding per categorical column."""
     num_in = keras.Input(shape=(2 * len(pre.num),), name="num")
     parts, inputs = [num_in], [num_in]
     for c in CATEGORICAL:
@@ -53,6 +60,7 @@ def build_mlp(pre: Preprocessor, n_out: int, activation: str, hidden=(128, 64), 
 
 
 def fit_keras(model, inputs, y, order, loss, epochs=60, patience=6, batch_size=2048, seed=0):
+    """Fit `model` with Adam and early stopping on the time-ordered validation split."""
     keras.utils.set_random_seed(seed)
     tr, va = time_split(order)
     pick = lambda m: {k: v[m] for k, v in inputs.items()}  # noqa: E731
@@ -63,6 +71,8 @@ def fit_keras(model, inputs, y, order, loss, epochs=60, patience=6, batch_size=2
 
 
 def lgbm_frame(X: pd.DataFrame, categories: dict | None = None) -> pd.DataFrame:
+    """Copy of X with the categorical columns as pandas categoricals (the training categories when
+    given, so codes match between fit and predict)."""
     X = X.copy()
     for c in CATEGORICAL:
         X[c] = pd.Categorical(X[c], categories=None if categories is None else categories[c])

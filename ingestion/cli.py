@@ -21,6 +21,9 @@ from .fpl_client import FPLClient
 
 def run(history: bool = False, entry_id: int | None = None, data_dir: Path = storage.DATA_DIR,
         client: FPLClient | None = None, keep_raw: int = 1) -> dict:
+    """Pull bootstrap-static and fixtures (plus player histories and one team if asked), save the raw
+    snapshot and every processed table, update the current-season match log and the pre-deadline logs.
+    Returns the snapshot folder, the tables, the current gameweek and the manager state (or None)."""
     client = client or FPLClient()
     snapshot = storage.new_snapshot_dir(data_dir)
 
@@ -99,48 +102,50 @@ def run(history: bool = False, entry_id: int | None = None, data_dir: Path = sto
     return {"snapshot": snapshot, "tables": tables, "current_gw": current_gw, "manager_state": state}
 
 
-def _record_ep_next(tables: dict, data_dir: Path, now: pd.Timestamp) -> pd.DataFrame | None:
-    """Save FPL's own forecast (ep_next) for the next gameweek, keeping the latest record before its deadline.
-    This builds a genuine pre-deadline benchmark as the season goes on."""
-    gws = tables["gameweeks"]
-    upcoming = gws[gws["is_next"]]
-    if upcoming.empty or "ep_next" not in tables["players"].columns:
+def _gameweek_before_deadline(gameweeks: pd.DataFrame, now: pd.Timestamp) -> int | None:
+    """The next gameweek if its deadline is still ahead of `now`, else None (nothing to record)."""
+    upcoming = gameweeks[gameweeks["is_next"]]
+    if upcoming.empty or now >= upcoming["deadline_time"].iloc[0]:
         return None
-    gameweek, deadline = int(upcoming["id"].iloc[0]), upcoming["deadline_time"].iloc[0]
-    if now >= deadline:
-        return None
-    players = tables["players"]
-    new = pd.DataFrame({"season": transform.season_label(gws), "gameweek": gameweek,
-                        "player_code": players["code"].to_numpy(), "ep_next": players["ep_next"].to_numpy(),
-                        "recorded_at": now})
-    old = storage.load_table_or_none("ep_next_log", data_dir)
+    return int(upcoming["id"].iloc[0])
+
+
+def _append_latest(new: pd.DataFrame, name: str, data_dir: Path) -> pd.DataFrame:
+    """Add `new` to the log table `name`, keeping only the latest record per season, gameweek and player."""
+    old = storage.load_table_or_none(name, data_dir)
     log = new if old is None else pd.concat([old, new], ignore_index=True)
     log = log.sort_values("recorded_at").drop_duplicates(["season", "gameweek", "player_code"], keep="last")
-    storage.save_table(log.reset_index(drop=True), "ep_next_log", data_dir)
+    storage.save_table(log.reset_index(drop=True), name, data_dir)
     return log
 
 
-def _record_market(tables: dict, data_dir: Path, now: pd.Timestamp, total_players: int) -> pd.DataFrame | None:
-    """Save ownership and transfer counts for the next gameweek, keeping the latest record before its deadline."""
-    gws = tables["gameweeks"]
-    upcoming = gws[gws["is_next"]]
-    if upcoming.empty:
+def _record_ep_next(tables: dict, data_dir: Path, now: pd.Timestamp) -> pd.DataFrame | None:
+    """Save FPL's own forecast (ep_next) for the next gameweek, keeping the latest record before its deadline.
+    This builds a genuine pre-deadline benchmark as the season goes on."""
+    gameweek = _gameweek_before_deadline(tables["gameweeks"], now)
+    players = tables["players"]
+    if gameweek is None or "ep_next" not in players.columns:
         return None
-    gameweek, deadline = int(upcoming["id"].iloc[0]), upcoming["deadline_time"].iloc[0]
-    if now >= deadline:
+    new = pd.DataFrame({"season": transform.season_label(tables["gameweeks"]), "gameweek": gameweek,
+                        "player_code": players["code"].to_numpy(), "ep_next": players["ep_next"].to_numpy(),
+                        "recorded_at": now})
+    return _append_latest(new, "ep_next_log", data_dir)
+
+
+def _record_market(tables: dict, data_dir: Path, now: pd.Timestamp, total_players: int) -> pd.DataFrame | None:
+    """Save ownership and transfer counts for the next gameweek, keeping the latest record before its deadline
+    (the ML models' market features; the live API only shows the current values)."""
+    gameweek = _gameweek_before_deadline(tables["gameweeks"], now)
+    if gameweek is None:
         return None
     players = tables["players"]
-    new = pd.DataFrame({"season": transform.season_label(gws), "gameweek": gameweek,
+    new = pd.DataFrame({"season": transform.season_label(tables["gameweeks"]), "gameweek": gameweek,
                         "player_code": players["code"].to_numpy(),
                         "selected_by_percent": pd.to_numeric(players["selected_by_percent"]).to_numpy(),
                         "transfers_in_event": players["transfers_in_event"].to_numpy(),
                         "transfers_out_event": players["transfers_out_event"].to_numpy(),
                         "total_players": total_players, "recorded_at": now})
-    old = storage.load_table_or_none("market_log", data_dir)
-    log = new if old is None else pd.concat([old, new], ignore_index=True)
-    log = log.sort_values("recorded_at").drop_duplicates(["season", "gameweek", "player_code"], keep="last")
-    storage.save_table(log.reset_index(drop=True), "market_log", data_dir)
-    return log
+    return _append_latest(new, "market_log", data_dir)
 
 
 def market_gaps(rows: pd.DataFrame, gameweeks: pd.DataFrame, share: float = 0.2) -> list[int]:
@@ -249,6 +254,7 @@ def _pull_entry(client: FPLClient, snapshot: Path, tables: dict, rules: dict,
 
 
 def summarise(result: dict) -> str:
+    """Human-readable summary of a `run` result: table shapes, deadline, flagged players, team state."""
     tables = result["tables"]
     gw = tables["gameweeks"]
     nxt = transform.next_gameweek(gw)

@@ -18,6 +18,7 @@ from .validate import check_plan
 
 @dataclass
 class PlanContext:
+    """Everything a solve needs besides the scores: players, rules, the manager's state, settings."""
     players: pd.DataFrame
     rules: SquadRules
     state: dict | None
@@ -28,6 +29,7 @@ class PlanContext:
 
 
 def load_context(entry_id: int | None, data_dir: Path) -> PlanContext:
+    """PlanContext for team `entry_id` (or from scratch when None) from the processed data."""
     game_rules = storage.load_json("game_rules", data_dir)
     state = storage.load_json(f"manager_state_{entry_id}", data_dir) if entry_id is not None else None
     return PlanContext(

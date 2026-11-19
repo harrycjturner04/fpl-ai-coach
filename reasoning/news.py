@@ -39,6 +39,7 @@ SUBMIT_FLAGS = Tool(
 
 @dataclass
 class NewsResult:
+    """Outcome of the news step: validated flags, warnings, newest source per club, usage."""
     flags: list[Flag]
     warnings: list[str]
     newest_source: dict[int, date | None]  # FPL team id -> newest dated source (sources row, flag or FPL news_added)

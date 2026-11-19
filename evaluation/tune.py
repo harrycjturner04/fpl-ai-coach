@@ -40,16 +40,19 @@ _CACHE: dict | None = None
 
 
 def config_key(settings: PlanSettings) -> str:
+    """Stable string key of a settings object (its sorted JSON)."""
     return json.dumps(settings.to_dict(), sort_keys=True)
 
 
 def with_setting(settings: PlanSettings, key: str, value, base_table: tuple[float, ...]) -> PlanSettings:
+    """`settings` with one grid key changed (leftover_scale scales the measured leftover table)."""
     if key == "leftover_scale":
         return replace(settings, leftover_values=tuple(round(value * v, 2) for v in base_table))
     return replace(settings, **{key: value})
 
 
 def total_points(frames) -> float:
+    """Total replay points over several per-season frames."""
     return float(sum(f["points"].sum() for f in frames))
 
 
@@ -77,6 +80,7 @@ def points_bootstrap(a: pd.DataFrame, b: pd.DataFrame, n_boot: int = 2000, seed:
 
 
 def replayed_gameweeks(log: pd.DataFrame, season: str) -> list[int]:
+    """Gameweeks a replay of `season` plays (the first season skips its warm-up weeks)."""
     gws = sorted(log.loc[log["season"] == season, "gameweek"].unique())
     return [g for g in gws if g > WARM_UP_GAMEWEEKS] if season == log["season"].min() else gws
 
@@ -117,6 +121,7 @@ def _no_predictor(snap):
 
 
 def run_replay(job: tuple[PlanSettings, str, bool, int | None]) -> pd.DataFrame:
+    """Worker: replay one season with one settings object, from the cached predictions."""
     settings, season, keep_states, limit = job
     log = _LOG
     if limit is not None:
@@ -168,6 +173,8 @@ def _saved_leftover(name: str, data_dir: Path, fp: dict) -> dict | None:
 def precompute_predictions(seasons: list[str], workers: int, data_dir: Path, limit: int | None = None, *,
                            name: str = "replay_predictions", fresh: bool = False,
                            model: str = "component") -> pd.DataFrame:
+    """Predictions for every replayed deadline, computed once (cached under a
+    fingerprint) so the replays only solve."""
     fp = fingerprint(seasons, data_dir, model)
     if not fresh and _meta_matches(name, data_dir, fp):
         return storage.load_table(name, data_dir)
@@ -208,6 +215,7 @@ def _save_results(results: dict, data_dir: Path, name: str, meta: dict | None = 
 
 
 def load_results(name: str, data_dir: Path) -> dict:
+    """Saved replay results as {config key: {season: frame}}."""
     results: dict = {}
     for (key, season), f in storage.load_table(name, data_dir).groupby(["config", "season"], sort=False):
         results.setdefault(key, {})[season] = f.drop(columns="config").reset_index(drop=True)

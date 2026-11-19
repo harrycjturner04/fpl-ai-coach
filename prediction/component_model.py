@@ -21,6 +21,7 @@ COMPONENTS = ("appearance", "goals", "assists", "clean_sheet", "conceded", "save
 
 @dataclass(frozen=True)
 class ModelParams:
+    """All component-model parameters: team ratings, player rates and the injury-flag fade."""
     team: TeamParams = field(default_factory=TeamParams)
     player: PlayerParams = field(default_factory=PlayerParams)
     flag_fade: float = 0.5

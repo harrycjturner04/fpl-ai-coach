@@ -24,37 +24,44 @@ FEATURE_COLUMNS = HISTORY_COLUMNS + PATTERN + FIXTURE + PLAYER + CATEGORICAL
 
 
 def history_features(history: pd.DataFrame, cutoff: pd.Timestamp, season: str) -> pd.DataFrame:
+    """Per player (index player_code), from matches before `cutoff`: the mean of each STATS column per match and
+    of each RATE_STATS column per 90 minutes over the last n matches (n in WINDOWS), plus appearance-pattern
+    features (PATTERN, without the two `new_to_*` flags, which need the fixture's team) and `last_team`."""
     h = history[history["kickoff"] < cutoff].sort_values("kickoff")
     g = h.groupby("player_code")
-    out = pd.DataFrame(index=pd.Index(sorted(h["player_code"].unique()), name="player_code"))
+    cols: dict[str, pd.Series] = {}   # built first and joined once: inserting ~140 columns one by one is slow
     for n in WINDOWS:
         last = g.tail(n)
         sums = last.groupby("player_code")[STATS].sum()
         count = last.groupby("player_code").size()
         mins = sums["minutes"].replace(0, np.nan)
         for s in STATS:
-            out[f"{s}_pm{n}"] = sums[s] / count
+            cols[f"{s}_pm{n}"] = sums[s] / count
         for s in RATE_STATS:
-            out[f"{s}_p90_{n}"] = sums[s] / mins * 90
+            cols[f"{s}_p90_{n}"] = sums[s] / mins * 90
     played = h[h["minutes"] > 0]
-    out["matches_total"] = g.size()
-    out["matches_this_season"] = h[h["season"] == season].groupby("player_code").size()
-    out["appearances_total"] = played.groupby("player_code").size()
+    cols["matches_total"] = g.size()
+    cols["matches_this_season"] = h[h["season"] == season].groupby("player_code").size()
+    cols["appearances_total"] = played.groupby("player_code").size()
     lastrow = g.tail(1).set_index("player_code")
-    out["played_last"] = (lastrow["minutes"] > 0).astype(float)
-    out["last_minutes"] = lastrow["minutes"]
-    out["last_team"] = lastrow["team_code"]
+    cols["played_last"] = (lastrow["minutes"] > 0).astype(float)
+    cols["last_minutes"] = lastrow["minutes"]
+    cols["last_team"] = lastrow["team_code"]
     last_app = played.groupby("player_code")["kickoff"].max()
-    out["days_since_appearance"] = (cutoff - last_app).dt.total_seconds() / 86400
+    cols["days_since_appearance"] = (cutoff - last_app).dt.total_seconds() / 86400
     # consecutive starts counted back from the latest match: rows after the last non-start
     started = h["starts"].fillna(0) > 0
     missed = (~started).groupby(h["player_code"]).cumsum()
-    out["consecutive_starts"] = (started & (missed == missed.groupby(h["player_code"]).transform("max"))
-                                 ).groupby(h["player_code"]).sum()
+    cols["consecutive_starts"] = (started & (missed == missed.groupby(h["player_code"]).transform("max"))
+                                  ).groupby(h["player_code"]).sum()
+    index = pd.Index(sorted(h["player_code"].unique()), name="player_code")
+    out = pd.concat({k: v.reindex(index) for k, v in cols.items()}, axis=1)
     return out.fillna({"matches_this_season": 0, "appearances_total": 0})
 
 
 def build_features(snap, team_params: TeamParams) -> pd.DataFrame:
+    """One row per player per fixture ahead of `snap` with every FEATURE_COLUMNS input: team
+    strength for the fixture (Poisson ratings), recent form, appearance pattern and market."""
     ratings = fit_team_ratings(team_matches(snap.history), snap.cutoff, snap.season, team_params,
                                snap.teams_in_season)
     fx = snap.fixtures_ahead

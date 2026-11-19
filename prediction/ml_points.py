@@ -20,6 +20,8 @@ def _with_played_60(X, played_60):
 
 
 class LgbmPoints:
+    """LightGBM points-if-plays model: trained on appearances only, with a played-60 flag, so one
+    model predicts both points if 1-59 and points if 60+ minutes."""
     def __init__(self, params: dict | None = None):
         self.params = LGBM_DEFAULTS | (params or {})
 
@@ -30,7 +32,7 @@ class LgbmPoints:
         y = np.asarray(y)[keep]
         tr, va = time_split(order[keep])
         self.model = lgb.LGBMRegressor(objective="regression", random_state=0, **self.params)
-        self.model.fit(Xf[tr], y[tr], eval_set=[(Xf[va], y[va])], callbacks=[lgb.early_stopping(50, verbose=False)])
+        self.model.fit(Xf[tr], y[tr], eval_X=Xf[va], eval_y=y[va], callbacks=[lgb.early_stopping(50, verbose=False)])
         return self
 
     def _predict(self, X, played_60):
@@ -41,6 +43,7 @@ class LgbmPoints:
 
 
 class KerasPoints:
+    """Keras MLP version of LgbmPoints, averaged over several seeds."""
     def __init__(self, params: dict | None = None):
         self.params = params or {}
 

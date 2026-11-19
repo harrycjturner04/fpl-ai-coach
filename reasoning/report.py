@@ -32,6 +32,7 @@ CHIP_NAMES = {"wildcard": ("wildcard",), "freehit": ("freehit", "free hit"), "bb
 
 @dataclass
 class Report:
+    """Claude's write-up and what checking it found."""
     markdown: str              # Claude's sections, as written
     usage: Usage | None
     warnings: list[str]        # post-check mismatches and an early stop

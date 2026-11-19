@@ -14,6 +14,7 @@ RULED_OUT_STATUSES = {"i", "s", "u", "n"}  # FPL: injured, suspended, unavailabl
 
 @dataclass
 class Adjustment:
+    """Audit entry: one news change (or refusal) for one player and horizon."""
     player_id: int
     horizon: int
     kind: str  # "availability" | "start_share"

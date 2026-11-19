@@ -21,6 +21,7 @@ MIN_WEIGHT = 1e-4
 
 @dataclass(frozen=True)
 class TeamParams:
+    """Settings of the team-rating fit (tuned in prediction/model_params.json)."""
     half_life_days: float = 180.0
     ridge: float = 2.0
     xg_weight: float = 1.0          # alpha: target = alpha*xG + (1-alpha)*goals
@@ -31,6 +32,7 @@ class TeamParams:
 
 @dataclass
 class TeamRatings:
+    """Fitted log-rate parameters per team code; unknown teams get the promoted-team prior."""
     attack: dict[int, float]
     defence: dict[int, float]
     mu: float
@@ -39,6 +41,7 @@ class TeamRatings:
     unknown_defence: float
 
     def expected_goals(self, team_codes, opponent_codes, is_home) -> np.ndarray:
+        """Expected goals of each team against each opponent (Poisson rate lambda)."""
         a = pd.Series(np.asarray(team_codes)).map(self.attack).fillna(self.unknown_attack).to_numpy()
         d = pd.Series(np.asarray(opponent_codes)).map(self.defence).fillna(self.unknown_defence).to_numpy()
         return np.exp(self.mu + self.home * np.asarray(is_home, dtype=float) + a - d)
@@ -65,6 +68,9 @@ def _season_weights(data: pd.DataFrame, cutoff: pd.Timestamp, season: str, param
 
 def fit_team_ratings(tm: pd.DataFrame, cutoff: pd.Timestamp, season: str, params: TeamParams,
                      teams_in_season: list[int]) -> TeamRatings:
+    """Attack and defence ratings from the team matches `tm` before `cutoff` (recency- and
+    season-weighted, ridge towards each team's prior); teams promoted into `season` start
+    at the promoted prior."""
     data = tm[tm["kickoff"] < cutoff]
     seasons = sorted(set(tm["season"]) | {season})
     prev = seasons[seasons.index(season) - 1] if seasons.index(season) > 0 else None

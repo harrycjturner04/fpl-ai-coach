@@ -345,6 +345,19 @@ def test_content_hash_ignores_row_order_column_order_and_integer_widening():
     assert content_sha256(a, ["season", "k"]) != content_sha256(a.assign(v=[3, 5]), ["season", "k"])
 
 
+def test_code_hash_ignores_comments_docstrings_and_formatting_but_not_logic(tmp_path):
+    from prediction.ml_data import code_sha256
+    base = '"""Module."""\ndef f(x):\n    """Doc."""\n    return x + 1\n'
+    variants = {"same": '"""Changed."""\n\n# a comment\ndef f( x ):  # trailing\n    return (x + 1)\n',
+                "logic": '"""Module."""\ndef f(x):\n    """Doc."""\n    return x + 2\n'}
+    paths = {}
+    for name, src in {"base": base, **variants}.items():
+        paths[name] = tmp_path / f"{name}.py"
+        paths[name].write_text(src, encoding="utf-8")
+    assert code_sha256([paths["base"]]) == code_sha256([paths["same"]])
+    assert code_sha256([paths["base"]]) != code_sha256([paths["logic"]])
+
+
 def test_cached_only_mode_raises_with_the_command_instead_of_computing(tmp_path, monkeypatch):
     monkeypatch.setattr(wf, "CACHED_ONLY", True)
     with pytest.raises(RuntimeError, match="prediction.walkforward compare"):

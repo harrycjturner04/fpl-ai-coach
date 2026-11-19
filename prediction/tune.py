@@ -45,6 +45,8 @@ GRID: dict[str, list[float]] = {
 
 
 def objective(component_per_gw: pd.DataFrame, bench_per_gw: pd.DataFrame, weights=(1.0,)) -> float:
+    """The tuning objective J (module docstring) of a model's per-gameweek metrics against the
+    benchmark's, weighted over horizons by `weights`."""
     rmse = lambda d: float(np.sqrt((d["rmse"] ** 2).mean()))  # noqa: E731
     total = norm = 0.0
     for h, w in enumerate(weights):
@@ -58,12 +60,16 @@ def objective(component_per_gw: pd.DataFrame, bench_per_gw: pd.DataFrame, weight
 
 
 def with_value(params: ModelParams, key: str, value: float) -> ModelParams:
+    """`params` with one dotted field ('team.ridge', 'player.kappa_xg', ...) set to `value`."""
     group, name = key.split(".")
     return dataclasses.replace(params, **{group: dataclasses.replace(getattr(params, group), **{name: value})})
 
 
 def coordinate_descent(evaluate, start: ModelParams, grid: dict[str, list[float]], max_passes: int = 3,
                        log=print) -> tuple[ModelParams, float, list[dict]]:
+    """Try each grid value of one parameter at a time, keep any improvement, and repeat for
+    up to `max_passes` passes or until a pass improves nothing. Returns (best, its J,
+    every evaluation)."""
     best, best_j = start, evaluate(start)
     history = [{"pass": 0, "key": "start", "value": None, "J": best_j}]
     log(f"start: J = {best_j:.4f}")
