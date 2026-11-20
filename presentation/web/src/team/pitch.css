@@ -1,0 +1,30 @@
+.pitch-wrap { --slot: clamp(54px, 17vw, 76px); --disc: clamp(42px, 12.5vw, 56px); }
+.pitch { position: relative; border-radius: 8px; overflow: hidden; background: #09120e; }
+.pitch .turf { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pitch .chalk { fill: none; stroke: var(--line); stroke-width: 1.4; vector-effect: non-scaling-stroke; }
+.rows { position: relative; display: flex; flex-direction: column; justify-content: space-around; gap: var(--s3); min-height: clamp(360px, 108vw, 470px); padding: var(--s4) var(--s1); }
+.row { display: flex; justify-content: space-evenly; }
+
+.slot { --c: var(--fit); width: var(--slot); min-width: 0; text-align: center; }
+.slot.doubt { --c: var(--doubt); }
+.slot.out { --c: var(--out); }
+.disc { position: relative; width: var(--disc); height: var(--disc); margin: 0 auto 3px; border-radius: 50%; background: var(--surface); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5); display: grid; place-items: center; }
+.disc svg { position: absolute; inset: 0; transform: rotate(-90deg); }
+.disc circle { fill: none; stroke-width: 4; }
+.disc .track { stroke: rgba(226, 236, 224, 0.14); }
+.disc .ring { stroke: var(--c); stroke-linecap: round; transition: stroke-dashoffset 0.9s cubic-bezier(0.2, 0.7, 0.2, 1); }
+.pts { position: relative; font-size: calc(var(--disc) * 0.4); line-height: 1; }
+.slot.doubt .pts { color: var(--doubt); }
+.slot.out .pts { color: var(--out); }
+.arm, .new { position: absolute; font-size: 11px; font-weight: 800; line-height: 1; border-radius: 3px; }
+.arm { top: -3px; right: -6px; padding: 2px 3px; background: var(--light); color: var(--turf); }
+.new { bottom: -6px; left: 50%; transform: translateX(-50%); padding: 1px 4px; background: var(--turf); color: var(--light); border: 1px solid var(--line); font-weight: 700; }
+.chip { display: inline-flex; flex-direction: column; align-items: center; max-width: 100%; background: rgba(9, 18, 14, 0.85); border-radius: 3px; padding: 1px 4px; }
+.chip .name { max-width: 100%; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chip .label { font-size: 11px; font-weight: 700; color: var(--c); font-variant-numeric: tabular-nums; }
+
+.bench { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
+.bench-title { font-size: 12px; color: var(--muted); }
+.bench .row { flex: 1; }
+.bench .slot { --disc: clamp(36px, 10vw, 46px); opacity: 0.78; }
+.key { margin: var(--s2) 0 0; font-size: 12px; color: var(--muted); }
