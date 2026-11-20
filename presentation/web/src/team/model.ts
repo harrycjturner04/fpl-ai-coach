@@ -11,10 +11,10 @@ const OUT: StatusInfo = { status: "out", label: "✕ 0%", chance: 0 };
 const doubt = (chance: number): StatusInfo => ({ status: "doubt", label: `! ${chance}%`, chance });
 const severity = (s: StatusInfo) => (s.status === "fit" ? Infinity : s.chance ?? 0);
 
-/** The worse of FPL's status and the coach's flag (out/suspended -> out, doubt -> its start probability; fit and rotation risk change nothing). */
+/** The worse of FPL's status and the coach's flag (FPL i/s/u/n or out/suspended -> out, doubt -> its start probability; fit and rotation risk change nothing). */
 export function statusOf(p: Player, flag?: Flag): StatusInfo {
   const fpl: StatusInfo =
-    p.chance === 0 || ["i", "s", "u"].includes(p.status) ? OUT
+    p.chance === 0 || ["i", "s", "u", "n"].includes(p.status) ? OUT
     : p.chance !== null && p.chance >= 25 && p.chance <= 75 ? doubt(p.chance)
     : { status: "fit", label: null, chance: p.chance };
   const coach = flag?.status === "out" || flag?.status === "suspended" ? OUT

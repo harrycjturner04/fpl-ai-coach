@@ -125,6 +125,14 @@ def test_coach_offline_end_to_end_with_fake_llm(data, capsys):
     assert STAR not in {p["id"] for p in starting}
 
 
+def test_snapshot_failure_does_not_stop_the_run(data, capsys, monkeypatch):
+    monkeypatch.setattr(coach.snapshot, "build", lambda *a, **k: 1 / 0)
+    path = coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]))
+    assert path.exists() and not path.with_suffix(".json").exists()
+    assert "Snapshot not saved (ZeroDivisionError" in capsys.readouterr().out
+    assert len(storage.load_table("coach_log", data)) == 1
+
+
 @pytest.mark.parametrize("responses, news_ran, error", [([CONNECTION], False, "APIConnectionError"),
                                                         ([*NEWS, CONNECTION], True, "APIConnectionError"),
                                                         ([*NEWS, BAD_REQUEST], True, "BadRequestError")])

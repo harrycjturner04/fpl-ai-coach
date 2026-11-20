@@ -43,7 +43,7 @@ export function TeamScreen({ data, now = new Date() }: { data: SnapshotResponse;
           : <p className="run">{runLabel(data.generated_at)}</p>}
       </header>
       <div className="team-grid">
-        <Headline now={data.current?.projected_points ?? null} plan={plan.projected_points} />
+        <Headline now={data.current?.points ?? null} plan={plan.points} />
         <section className="team-pitch" aria-label="Pitch">
           <div className="tabs" role="tablist" aria-label="Which team to show">
             {tabs.map((t, i) => (

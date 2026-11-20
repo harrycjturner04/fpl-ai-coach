@@ -10,6 +10,8 @@ export interface Week {
   hits: number;
   chip: string | null;
   projected_points: number;
+  /** This week's predicted points (includes the bench on a Bench Boost week); the headline figure. */
+  points: number;
   money_left: number;
   free_transfers_next: number;
 }
@@ -68,6 +70,7 @@ export interface Snapshot {
   gameweek: number;
   deadline: string;
   generated_at: string;
+  data_pulled_at: string | null;
   report: string;
   model: string;
   exact: boolean;

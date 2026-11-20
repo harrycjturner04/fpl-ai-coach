@@ -5,6 +5,7 @@
   "gameweek": 9,
   "deadline": "2026-11-14T11:00:00+00:00",
   "generated_at": "2026-11-10T12:00:00+00:00",
+  "data_pulled_at": "2026-11-10T12:00:00+00:00",
   "report": "42_gw9_20261110-1200.md",
   "model": "ml-minutes",
   "exact": true,
@@ -722,7 +723,8 @@
     "chip": null,
     "projected_points": 29.0,
     "money_left": 0.0,
-    "free_transfers_next": 2
+    "free_transfers_next": 2,
+    "points": 29.0
   },
   "plan": {
     "objective": 64.7,
@@ -773,7 +775,8 @@
         "chip": null,
         "projected_points": 29.0,
         "money_left": 0.0,
-        "free_transfers_next": 2
+        "free_transfers_next": 2,
+        "points": 29.0
       },
       {
         "gameweek": 10,
@@ -821,7 +824,8 @@
         "chip": null,
         "projected_points": 32.0,
         "money_left": 0.0,
-        "free_transfers_next": 3
+        "free_transfers_next": 3,
+        "points": 32.0
       }
     ]
   },

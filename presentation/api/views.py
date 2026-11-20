@@ -20,7 +20,8 @@ def latest_snapshot_path(reports: Path, entry: int) -> Path | None:
 
 
 def _reason(snap: dict) -> str:
-    why = (snap.get("sections") or {}).get("Why", "")
+    why = (snap.get("sections") or {}).get("Why", "").strip()
+    why = re.sub(r"^[-*] +", "", why.splitlines()[0] if why else "")
     why = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", why)
     why = re.sub(r"[*_`]", "", why).strip()
     return re.split(r"(?<=[.!?])\s", why, maxsplit=1)[0] if why else NO_WRITEUP
@@ -33,14 +34,15 @@ def coach_call(snap: dict) -> dict:
         title = f"Play your {CHIPS.get(chip, chip)} this week"
     elif week.get("transfers_in"):
         n, hits = len(week["transfers_in"]), week.get("hits") or 0
-        title = f"Make {n} transfer{'s' if n != 1 else ''}" + (f", take a −{4 * hits} hit" if hits else "")
+        title = f"Make {n} transfer{'s' if n != 1 else ''}" + (f", take a −{snap['state']['hit_cost'] * hits} hit" if hits else "")
     else:
         title = "Save your free transfer" + ("s" if (snap["state"].get("free_transfers") or 0) > 1 else "")
     return {"title": title, "reason": _reason(snap), "chip": chip}
 
 
 def run_status(snap: dict, pulled_at: datetime | None, now: datetime) -> dict:
-    if pulled_at and pulled_at > datetime.fromisoformat(snap["generated_at"]):
+    """Stale when the data has been pulled again since the pull this run used, or its deadline has passed."""
+    if pulled_at and pulled_at > datetime.fromisoformat(snap.get("data_pulled_at") or snap["generated_at"]):
         return {"stale": True, "reason": "New data since this run. The figures may have changed."}
     if datetime.fromisoformat(snap["deadline"]) < now:
         return {"stale": True, "reason": f"This run was for gameweek {snap['gameweek']}, whose deadline has passed."}

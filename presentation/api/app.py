@@ -24,7 +24,7 @@ def create_app(data_dir: Path = storage.DATA_DIR) -> FastAPI:
 
     def my_entry() -> int:
         raw = os.environ.get("FPL_COACH_ENTRY", "").strip()
-        if not raw.isdigit():
+        if not (raw.isascii() and raw.isdigit()):
             raise HTTPException(503, "Set FPL_COACH_ENTRY to your FPL team ID in .env and restart the API.")
         return int(raw)
 
@@ -45,7 +45,10 @@ def create_app(data_dir: Path = storage.DATA_DIR) -> FastAPI:
             raise HTTPException(404, f"No coach run yet for team {entry}. Run: python -m orchestration.coach --entry {entry}")
         snap = json.loads(path.read_text(encoding="utf-8"))
         pulled = (storage.load_json_or_none("metadata", data_dir) or {}).get("pulled_at")
-        status = views.run_status(snap, datetime.fromisoformat(pulled) if pulled else None, utcnow())
+        pulled = datetime.fromisoformat(pulled) if pulled else None
+        if pulled and pulled.tzinfo is None:
+            pulled = pulled.replace(tzinfo=timezone.utc)
+        status = views.run_status(snap, pulled, utcnow())
         return snap | {"call": views.coach_call(snap), "status": status}
 
     return app

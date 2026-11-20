@@ -20,7 +20,7 @@ const withTransfer = () => {
   w.transfers_in = [1001];
   w.transfers_out = [1000];
   w.hits = 1;
-  w.projected_points = 31.46;
+  w.points = 31.46;
   return s;
 };
 
@@ -35,9 +35,19 @@ it("shows the header and both headline figures to one decimal", () => {
 
 it("colours a loss", () => {
   const s = snap();
-  s.plan.weeks[0].projected_points = 27;
+  s.plan.weeks[0].points = 27;
   show(s);
   expect(within(headline()).getByText("27.0")).toHaveClass("loss");
+});
+
+it("shows a Bench Boost week's points, bench included, not the XI-only figure", () => {
+  const s = snap();
+  s.plan.weeks[0].chip = "bboost";
+  s.plan.weeks[0].projected_points = 30;
+  s.plan.weeks[0].points = 38.04;
+  show(s);
+  expect(within(headline()).getByText("38.0")).toHaveClass("gain");
+  expect(within(headline()).queryByText("30.0")).toBeNull();
 });
 
 it("switches the pitch to the coach's plan", () => {

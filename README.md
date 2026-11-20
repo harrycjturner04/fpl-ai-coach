@@ -250,7 +250,7 @@ uvicorn presentation.api.app:app --host 127.0.0.1 --port 8000
 cd presentation/web                      # Node 24
 npm install
 npm run dev                              # http://localhost:5173, proxies /api to the API
-npm run dev:lan                          # phone check on home Wi-Fi; no login, so stop it afterwards
+npm run dev:lan                          # phone check; unauthenticated: anyone on your Wi-Fi can open it; home Wi-Fi only, stop it afterwards
 npm test                                 # Vitest
 npx playwright install chromium webkit   # once
 npm run e2e                              # Playwright

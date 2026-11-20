@@ -67,6 +67,7 @@ describe("statusOf", () => {
     [{ status: "s", chance: null }, "out", "✕ 0%"],
     [{ status: "i", chance: null }, "out", "✕ 0%"],
     [{ status: "u", chance: null }, "out", "✕ 0%"],
+    [{ status: "n", chance: null }, "out", "✕ 0%"],
   ] as const)("%o -> %s", (over, status, label) => {
     expect(statusOf(player(over))).toMatchObject({ status, label });
   });
