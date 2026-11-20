@@ -21,6 +21,7 @@ from ingestion.env import load_env
 from optimisation import planning
 from optimisation.cli import _horizon_arg, ensure_fresh_data, format_solution
 from optimisation.model import Plan
+from orchestration import snapshot
 from prediction import cli as prediction_cli
 from prediction.cli import SHIPPED_MODEL
 from reasoning.adjust import adjust
@@ -89,6 +90,7 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     gameweeks = storage.load_table("gameweeks", data_dir)
     if not gameweeks["is_next"].any():
         raise SystemExit("No upcoming gameweek: the season has finished.")
+    deadline_time = gameweeks.loc[gameweeks["is_next"], "deadline_time"].iloc[0]
     lap("data")
 
     pred_raw, x = prediction_cli.run_with_inputs(data_dir, now=pd.Timestamp(now))
@@ -149,6 +151,8 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     path = data_dir / "reports" / f"{entry_id}_gw{next_gw}_{now:%Y%m%d-%H%M}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(md, encoding="utf-8")
+    snapshot.write(snapshot.build(session, entry_id=entry_id, deadline=deadline_time, now=now, report=report,
+                                  notes=notes, report_name=path.name, model=SHIPPED_MODEL), path)
     print(md if report else "\n".join([plan_text, "", NO_LLM, *(f"- {n}" for n in notes)]))
     print("Run cost (console and coach_log only, not in the report):", *_cost_lines(usages, settings), sep="\n")
     print(f"Report saved to {path}")
