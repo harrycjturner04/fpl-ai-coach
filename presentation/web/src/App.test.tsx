@@ -11,7 +11,7 @@ it("shows the loading skeleton, then the team name", async () => {
   vi.stubGlobal("fetch", vi.fn((url: string) => Promise.resolve(url === "/api/me" ? json(200, { entry: 42 }) : json(200, fixture))));
   render(<App />);
   expect(screen.getByRole("status")).toBeInTheDocument();
-  expect(await screen.findByText("Test FC")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "Test FC" })).toBeInTheDocument();
 });
 
 it("shows the run-the-coach hint on a 404", async () => {

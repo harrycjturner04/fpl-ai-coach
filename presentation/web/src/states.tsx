@@ -1,11 +1,32 @@
-const boxes = [64, 120, 360, 96];
+import "./team/pitch.css";
+import "./team/team.css";
 
+/** The Team screen's own layout classes with placeholder blocks, so nothing moves when data arrives. */
 export function Loading() {
   return (
-    <main className="skeleton" role="status" aria-label="Loading your team">
-      {boxes.map((h, i) => (
-        <div key={i} className="box" style={{ height: h, marginBottom: "var(--s4)" }} />
-      ))}
+    <main className="team skeleton" role="status" aria-label="Loading your team">
+      <div className="sk sk-head" />
+      <div className="team-grid" aria-hidden="true">
+        <div className="headline">
+          <p className="figures num"><span className="now sk">00.0</span></p>
+          <p className="caption">Predicted points for your team now, and with the coach's plan</p>
+        </div>
+        <div className="team-pitch">
+          <div className="tabs sk" />
+          <div className="pitch-wrap">
+            <div className="rows sk" />
+            <div className="bench">
+              <span className="bench-title">Bench</span>
+              <div className="row">
+                {[0, 1, 2, 3].map((i) => (
+                  <div className="slot" key={i}><div className="disc" /><span className="chip"><span className="name">&nbsp;</span></span></div>
+                ))}
+              </div>
+            </div>
+            <p className="key">Ring = chance of playing 60+ minutes. Number = predicted points.</p>
+          </div>
+        </div>
+      </div>
     </main>
   );
 }

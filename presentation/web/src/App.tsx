@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ApiError, getMe, getSnapshot } from "./api";
 import { ErrorState, Loading } from "./states";
+import { TeamScreen } from "./team/TeamScreen";
 import type { SnapshotResponse } from "./types";
 
 export default function App() {
@@ -16,5 +17,5 @@ export default function App() {
 
   if (error) return <ErrorState title="Couldn't load your team" detail={error.detail} />;
   if (!data) return <Loading />;
-  return <main><pre>{data.team_name}</pre></main>;
+  return <TeamScreen data={data} />;
 }

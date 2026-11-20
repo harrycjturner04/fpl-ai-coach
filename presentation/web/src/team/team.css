@@ -1,0 +1,59 @@
+.team { padding: var(--s4) max(var(--s4), env(safe-area-inset-right)) max(var(--s8), env(safe-area-inset-bottom)) max(var(--s4), env(safe-area-inset-left)); }
+:where(.team) :is(h1, h2, p) { margin: 0; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.gain { color: var(--fit); }
+.loss { color: var(--out); }
+
+.team-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s1) var(--s3); min-height: 25px; }
+.team-head h1 { font-size: 18px; font-weight: 700; line-height: 1.4; }
+.team-head p { font-size: 13px; color: var(--muted); }
+.notice { margin-top: var(--s3); padding: var(--s2) var(--s3); font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+
+.headline { margin-top: var(--s4); }
+.figures { display: flex; align-items: baseline; gap: 10px; line-height: 0.9; }
+.figures .now { font-size: clamp(52px, 16vw, 64px); }
+.figures .arrow { font-size: 22px; font-weight: 400; color: var(--muted); }
+.figures .plan { font-size: clamp(36px, 11vw, 44px); }
+.caption { margin-top: var(--s1); font-size: 13px; color: var(--muted); text-wrap: pretty; }
+
+.team-pitch { margin-top: var(--s4); }
+.tabs { display: flex; margin-bottom: var(--s3); border-bottom: 1px solid var(--line); }
+.tabs button { flex: 1; min-height: 44px; padding: 0 var(--s2); background: none; border: 0; color: var(--muted); font: inherit; font-size: 15px; cursor: pointer; }
+.tabs button[aria-selected="true"] { color: var(--light); font-weight: 600; box-shadow: inset 0 -2px 0 var(--light); }
+.tabs button:focus-visible { outline-offset: -2px; }
+.moves { margin-top: var(--s3); font-size: 14px; }
+.moves-head { display: flex; flex-wrap: wrap; gap: var(--s1) var(--s3); font-weight: 600; }
+.moves ul { margin: var(--s1) 0 0; padding: 0; list-style: none; color: var(--muted); }
+
+.call { margin-top: var(--s6); padding: var(--s4); background: var(--surface); border-left: 3px solid var(--light); border-radius: 0 8px 8px 0; }
+.call h2 { font-size: 18px; line-height: 1.3; }
+.call p { margin-top: var(--s1); color: var(--muted); font-size: 14px; }
+.call button { display: block; width: 100%; min-height: 44px; margin-top: var(--s3); background: var(--light); color: var(--turf); border: 0; border-radius: 6px; font: inherit; font-weight: 700; cursor: pointer; }
+.call button:focus-visible { outline-offset: 3px; }
+
+.list h2 { margin: var(--s6) 0 var(--s1); font-size: 15px; font-weight: 600; }
+.list ul { margin: 0; padding: 0; list-style: none; }
+.list li { display: flex; justify-content: space-between; align-items: baseline; gap: var(--s3); padding: 10px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+.list .who { font-weight: 600; }
+.list .sub { display: block; font-size: 13px; color: var(--muted); }
+.list .tag { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.tag.doubt { color: var(--doubt); }
+.tag.out { color: var(--out); }
+.list .empty { padding: 10px 0; font-size: 14px; color: var(--muted); border-bottom: 1px solid var(--line); }
+
+/* Skeleton placeholders inside the real layout classes. */
+.sk { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
+.sk-head { height: 25px; max-width: 60%; }
+.figures .sk { color: transparent; }
+.tabs.sk { height: 45px; border-bottom: 0; }
+.skeleton .chip { visibility: hidden; }
+
+@media (min-width: 960px) {
+  .team { max-width: 1080px; padding-top: var(--s8); padding-left: var(--s6); padding-right: var(--s6); }
+  .team-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 380px); grid-template-rows: auto auto auto 1fr; grid-template-areas: "pitch headline" "pitch call" "pitch issues" "pitch chips"; column-gap: var(--s8); align-items: start; }
+  .team-grid > .headline { grid-area: headline; }
+  .team-grid > .team-pitch { grid-area: pitch; margin-top: var(--s4); }
+  .team-grid > .call { grid-area: call; }
+  .team-grid > :nth-child(4) { grid-area: issues; }
+  .team-grid > :nth-child(5) { grid-area: chips; }
+}
