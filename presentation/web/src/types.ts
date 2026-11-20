@@ -71,7 +71,7 @@ export interface Snapshot {
   report: string;
   model: string;
   exact: boolean;
-  state: { bank: number; free_transfers: number; chips_available: string[] };
+  state: { bank: number; free_transfers: number; chips_available: string[]; hit_cost: number };
   gameweeks: number[];
   players: Player[];
   current: Week | null;

@@ -90,6 +90,11 @@ it("lists injuries and chips", () => {
   expect(within(chips).getByRole("listitem")).toHaveTextContent("Bench Boost in GW 10, +3.6 over no chip");
 });
 
+it("shows when the coach ran when the run is fresh", () => {
+  show(snap());
+  expect(screen.getByText("Coach run Tue 10 Nov, 12:00")).toBeInTheDocument();
+});
+
 it("shows the run-status notice when stale", () => {
   const s = snap();
   s.status = { stale: true, reason: "New data since this run. The figures may have changed." };
@@ -117,5 +122,41 @@ it("shows only the plan figure without a current team", () => {
   expect(within(headline()).getAllByText("29.0")).toHaveLength(1);
   expect(screen.getByText("Predicted points with the coach's plan")).toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Your team" })).toBeNull();
+  expect(planTab()).toHaveAttribute("aria-selected", "true");
+});
+
+it("shows the coach's out flag on the pitch and in the list", () => {
+  show(snap());
+  const bench = screen.getByRole("group", { name: "Bench" });
+  expect(within(bench).getByRole("img", { name: /^P1,.*0% chance of playing/ })).toBeInTheDocument();
+  const injuries = screen.getByRole("region", { name: "Injuries and doubts" });
+  expect(within(injuries).getAllByRole("listitem")[0]).toHaveTextContent("P1, C1Hamstring, out✕ 0%");
+});
+
+it("shows a coach doubt flag as its start probability", () => {
+  const s = snap();
+  s.flags[0] = { ...s.flags[0], status: "doubt", start_prob_next_gw: 0.5 };
+  show(s);
+  expect(within(screen.getByRole("group", { name: "Bench" })).getByText("! 50%")).toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Injuries and doubts" })).getByText("! 50%")).toBeInTheDocument();
+});
+
+it("lists plan moves paired by position", () => {
+  const s = withTransfer();
+  const w = s.plan.weeks[0];
+  w.squad = w.squad.map((id) => (id === 1036 ? 1030 : id));
+  w.starting = w.starting.map((id) => (id === 1036 ? 1030 : id));
+  w.transfers_out = [1000, 1036];
+  w.transfers_in = [1030, 1001];
+  show(s);
+  fireEvent.click(planTab());
+  expect(screen.getByText("P1000 → P1001")).toBeInTheDocument();
+  expect(screen.getByText("P1036 → P1030")).toBeInTheDocument();
+});
+
+it("falls back to the first tab when the selected one disappears", () => {
+  const s = snap();
+  const { rerender } = show(s);
+  rerender(<TeamScreen data={{ ...s, current: null }} now={NOW} />);
   expect(planTab()).toHaveAttribute("aria-selected", "true");
 });

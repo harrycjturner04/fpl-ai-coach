@@ -4,10 +4,15 @@
 .gain { color: var(--fit); }
 .loss { color: var(--out); }
 
-.team-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s1) var(--s3); min-height: 25px; }
+.head-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s1) var(--s3); min-height: 25px; }
 .team-head h1 { font-size: 18px; font-weight: 700; line-height: 1.4; }
 .team-head p { font-size: 13px; color: var(--muted); }
-.notice { margin-top: var(--s3); padding: var(--s2) var(--s3); font-size: 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.team-head .run { margin-top: 2px; font-size: 12px; }
+@media (max-width: 479px) { .head-row { flex-direction: column; align-items: stretch; gap: 0; } }
+@media (max-width: 359px) { .team-head .run { font-size: 11px; } }
+.skeleton .head-row { align-items: center; }
+.team-head .run.stale { color: var(--light); }
+.run.stale::before { content: "! "; font-weight: 800; }
 
 .headline { margin-top: var(--s4); }
 .figures { display: flex; align-items: baseline; gap: 10px; line-height: 0.9; }
@@ -43,7 +48,8 @@
 
 /* Skeleton placeholders inside the real layout classes. */
 .sk { background: var(--surface); border-radius: 8px; animation: pulse 1.4s ease-in-out infinite; }
-.sk-head { height: 25px; max-width: 60%; }
+.sk-head { height: 25px; width: 30%; }
+.sk-line { display: inline-block; width: 12em; max-width: 100%; }
 .figures .sk { color: transparent; }
 .tabs.sk { height: 45px; border-bottom: 0; }
 .skeleton .chip { visibility: hidden; }

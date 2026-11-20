@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import fixture from "../test/snapshot.json";
-import type { Player, Snapshot } from "../types";
-import { chipsSoon, deadlineLabel, issues, lineup, statusOf, transfersSummary } from "./model";
+import type { Flag, Player, Snapshot } from "../types";
+import { chipsSoon, deadlineLabel, issues, lineup, moves, runLabel, statusOf, transfersSummary } from "./model";
 
 const snap = () => structuredClone(fixture) as Snapshot;
 const player = (over: Partial<Player>): Player => ({ ...snap().players[0], chance: null, status: "a", news: "", ...over });
@@ -68,7 +68,29 @@ describe("statusOf", () => {
     [{ status: "i", chance: null }, "out", "✕ 0%"],
     [{ status: "u", chance: null }, "out", "✕ 0%"],
   ] as const)("%o -> %s", (over, status, label) => {
-    expect(statusOf(player(over))).toEqual({ status, label });
+    expect(statusOf(player(over))).toMatchObject({ status, label });
+  });
+
+  const flag = (over: Partial<Flag>): Flag => ({ ...snap().flags[0], ...over });
+  it.each([
+    [{ chance: null }, { status: "out" }, "out", "✕ 0%"],
+    [{ chance: null }, { status: "suspended" }, "out", "✕ 0%"],
+    [{ chance: null }, { status: "doubt", start_prob_next_gw: 0.5 }, "doubt", "! 50%"],
+    [{ chance: 75 }, { status: "doubt", start_prob_next_gw: 0.5 }, "doubt", "! 50%"],
+    [{ chance: 25 }, { status: "doubt", start_prob_next_gw: 0.5 }, "doubt", "! 25%"],
+    [{ chance: 0 }, { status: "doubt", start_prob_next_gw: 0.5 }, "out", "✕ 0%"],
+    [{ chance: null }, { status: "rotation_risk", start_prob_next_gw: 0.3 }, "fit", null],
+    [{ chance: 50 }, { status: "fit", start_prob_next_gw: 1 }, "doubt", "! 50%"],
+  ] as const)("FPL %o with flag %o -> the worse, %s", (over, f, status, label) => {
+    expect(statusOf(player(over), flag(f))).toMatchObject({ status, label });
+  });
+});
+
+describe("lineup flags", () => {
+  it("carries the coach's flag so a flagged-out player shows out", () => {
+    const s = snap();
+    const p1 = lineup(s, s.current!).bench.find((x) => x.player.id === 1)!;
+    expect(statusOf(p1.player, p1.flag)).toMatchObject({ status: "out", label: "✕ 0%" });
   });
 });
 
@@ -86,11 +108,11 @@ describe("deadlineLabel", () => {
 });
 
 describe("issues", () => {
-  it("lists squad players with doubts or flags, the 75% player first", () => {
+  it("lists squad players with doubts or flags, the flagged-out player first", () => {
     const list = issues(snap());
     expect(list.map((x) => [x.player.name, x.status, x.label, x.news, x.inSquad])).toEqual([
+      ["P1", "out", "✕ 0%", "Hamstring, out", true],
       ["P1000", "doubt", "! 75%", "Knock, 75% chance of playing", true],
-      ["P1", "fit", "", "Hamstring, out", true],
     ]);
   });
   it("includes a flagged player outside the squad after the squad", () => {
@@ -104,7 +126,7 @@ describe("issues", () => {
     const s = snap();
     s.players.push(player({ id: 98, name: "NEW", chance: 25, news: "Ill" }));
     s.plan.weeks[0].squad.push(98);
-    expect(issues(s).map((x) => x.player.name)).toEqual(["NEW", "P1000", "P1"]);
+    expect(issues(s).map((x) => x.player.name)).toEqual(["P1", "NEW", "P1000"]);
   });
   it("is empty when nobody has news", () => {
     const s = snap();
@@ -118,10 +140,8 @@ describe("chipsSoon", () => {
   it("keeps the best positive gain per chip, best first", () => {
     const s = snap();
     s.chip_scan!.push({ ...s.chip_scan![0], chip: "3xc", gameweek: 9, gain_vs_none: 5 }, { ...s.chip_scan![0], chip: "wildcard", gain_vs_none: -2 });
-    expect(chipsSoon(s)).toEqual([
-      { chip: "3xc", gameweek: 9, gain: 5 },
-      { chip: "bboost", gameweek: 10, gain: 3.5999999999999943 },
-    ]);
+    const list = chipsSoon(s);
+    expect(list.map((c) => [c.chip, c.gameweek, c.gain.toFixed(1)])).toEqual([["3xc", 9, "5.0"], ["bboost", 10, "3.6"]]);
   });
   it("is empty without a chip scan", () => {
     const s = snap();
@@ -132,9 +152,24 @@ describe("chipsSoon", () => {
 
 describe("transfersSummary", () => {
   const week = () => snap().plan.weeks[0];
-  it("says no transfers", () => expect(transfersSummary(week())).toBe("No transfers"));
+  it("says no transfers", () => expect(transfersSummary(week(), 4)).toBe("No transfers"));
   it("counts transfers and the hit", () => {
-    expect(transfersSummary({ ...week(), transfers_in: [1, 2], transfers_out: [3, 4], hits: 1 })).toBe("2 transfers, −4 hit");
-    expect(transfersSummary({ ...week(), transfers_in: [1], transfers_out: [3], hits: 0 })).toBe("1 transfer");
+    expect(transfersSummary({ ...week(), transfers_in: [1, 2], transfers_out: [3, 4], hits: 1 }, 4)).toBe("2 transfers, −4 hit");
+    expect(transfersSummary({ ...week(), transfers_in: [1, 2], transfers_out: [3, 4], hits: 1 }, 5)).toBe("2 transfers, −5 hit");
+    expect(transfersSummary({ ...week(), transfers_in: [1], transfers_out: [3], hits: 0 }, 4)).toBe("1 transfer");
   });
+});
+
+describe("moves", () => {
+  it("pairs outgoing and incoming players by position", () => {
+    const s = snap();
+    const w = { ...s.plan.weeks[0], transfers_out: [1000, 1036], transfers_in: [1001, 1030] };
+    expect(moves(s, w).map(([o, i]) => [o.name, i.name])).toEqual([["P1000", "P1001"], ["P1036", "P1030"]]);
+    const swapped = { ...w, transfers_in: [1030, 1001] };
+    expect(moves(s, swapped).map(([o, i]) => [o.position, i.position])).toEqual([["GKP", "GKP"], ["FWD", "FWD"]]);
+  });
+});
+
+describe("runLabel", () => {
+  it("shows when the coach ran", () => expect(runLabel("2026-11-10T12:00:00+00:00")).toBe("Coach run Tue 10 Nov, 12:00"));
 });

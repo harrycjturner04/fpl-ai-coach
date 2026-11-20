@@ -11,7 +11,8 @@
   "state": {
     "bank": 0.0,
     "free_transfers": 1,
-    "chips_available": []
+    "chips_available": [],
+    "hit_cost": 4
   },
   "gameweeks": [
     9,

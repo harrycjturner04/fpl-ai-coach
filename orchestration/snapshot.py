@@ -68,7 +68,7 @@ def build(session: Session, *, entry_id: int, deadline: pd.Timestamp, now: datet
         "gameweek": int(session.table.columns[0]), "deadline": _iso(deadline), "generated_at": _iso(now),
         "report": report_name, "model": model, "exact": plan_exact(session),
         "state": {"bank": state.get("bank"), "free_transfers": ctx.free,
-                  "chips_available": state.get("chips_available", [])},
+                  "chips_available": state.get("chips_available", []), "hit_cost": ctx.rules.hit_cost},
         "gameweeks": [int(g) for g in session.table.columns],
         "players": _players(session),
         "current": week_dict(current) if current else None,

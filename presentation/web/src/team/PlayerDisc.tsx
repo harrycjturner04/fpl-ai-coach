@@ -5,8 +5,8 @@ const R = 21;
 const C = 2 * Math.PI * R;
 
 export function PlayerDisc({ slot }: { slot: Slot }) {
-  const { player, points, p60, captain, vice, isNew } = slot;
-  const { status, label } = statusOf(player);
+  const { player, flag, points, p60, captain, vice, isNew } = slot;
+  const { status, label, chance } = statusOf(player, flag);
   const fill = p60 ?? 0;
   // Start empty and fill on the next frame so the ring animates on mount; later changes animate via the CSS transition.
   const [shown, setShown] = useState(0);
@@ -20,7 +20,7 @@ export function PlayerDisc({ slot }: { slot: Slot }) {
     player.name,
     `${pts} predicted points`,
     p60 === null ? "no minutes estimate" : `${Math.round(p60 * 100)}% chance of 60+ minutes`,
-    label && `${player.chance ?? 0}% chance of playing`,
+    label && `${chance ?? 0}% chance of playing`,
     isNew && "new",
     captain ? "captain" : vice ? "vice captain" : null,
   ]

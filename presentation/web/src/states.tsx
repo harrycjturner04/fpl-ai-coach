@@ -5,7 +5,10 @@ import "./team/team.css";
 export function Loading() {
   return (
     <main className="team skeleton" role="status" aria-label="Loading your team">
-      <div className="sk sk-head" />
+      <header className="team-head">
+        <div className="head-row"><div className="sk sk-head" /><p><span className="sk sk-line">&nbsp;</span></p></div>
+        <p className="run"><span className="sk sk-line">&nbsp;</span></p>
+      </header>
       <div className="team-grid" aria-hidden="true">
         <div className="headline">
           <p className="figures num"><span className="now sk">00.0</span></p>

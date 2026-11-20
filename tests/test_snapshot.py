@@ -37,6 +37,7 @@ def test_snapshot_shape_and_json_safe(session):
     assert snap["plan"]["weeks"][0]["projected_points"] == round(s.headline.weeks[0].projected_points, 1) or \
         snap["plan"]["weeks"][0]["projected_points"] == s.headline.weeks[0].projected_points
     assert snap["flags"][0]["player_id"] == 3 and snap["adjustments"] and snap["chip_scan"] is None
+    assert snap["state"]["hit_cost"] == s.ctx.rules.hit_cost == 4
 
 
 def test_current_week_holds_the_squad(session):

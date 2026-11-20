@@ -19,12 +19,13 @@
 .arm, .new { position: absolute; font-size: 11px; font-weight: 800; line-height: 1; border-radius: 3px; }
 .arm { top: -3px; right: -6px; padding: 2px 3px; background: var(--light); color: var(--turf); }
 .new { bottom: -6px; left: 50%; transform: translateX(-50%); padding: 1px 4px; background: var(--turf); color: var(--light); border: 1px solid var(--line); font-weight: 700; }
-.chip { display: inline-flex; flex-direction: column; align-items: center; max-width: 100%; background: rgba(9, 18, 14, 0.85); border-radius: 3px; padding: 1px 4px; }
+.chip { display: inline-flex; vertical-align: top; flex-direction: column; align-items: center; max-width: 100%; background: rgba(9, 18, 14, 0.85); border-radius: 3px; padding: 1px 4px; }
 .chip .name { max-width: 100%; font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .chip .label { font-size: 11px; font-weight: 700; color: var(--c); font-variant-numeric: tabular-nums; }
 
 .bench { display: flex; align-items: center; gap: var(--s2); padding: var(--s3) 0; border-bottom: 1px solid var(--line); }
 .bench-title { font-size: 12px; color: var(--muted); }
 .bench .row { flex: 1; }
-.bench .slot { --disc: clamp(36px, 10vw, 46px); opacity: 0.78; }
+/* Room for a status label under every bench name, so a label never changes the page height. */
+.bench .slot { --disc: clamp(36px, 10vw, 46px); min-height: calc(var(--disc) + 3px + 33px); opacity: 0.78; }
 .key { margin: var(--s2) 0 0; font-size: 12px; color: var(--muted); }
