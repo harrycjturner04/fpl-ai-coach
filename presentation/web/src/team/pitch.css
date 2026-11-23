@@ -27,5 +27,5 @@
 .bench-title { font-size: 12px; color: var(--muted); }
 .bench .row { flex: 1; }
 /* Room for a status label under every bench name, so a label never changes the page height. */
-.bench .slot { --disc: clamp(36px, 10vw, 46px); min-height: calc(var(--disc) + 3px + 33px); opacity: 0.78; }
+.bench .slot { --disc: clamp(36px, 10vw, 46px); min-height: calc(var(--disc) + 3px + 33px); }
 .key { margin: var(--s2) 0 0; font-size: 12px; color: var(--muted); }
