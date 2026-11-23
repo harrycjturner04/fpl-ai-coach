@@ -1,0 +1,37 @@
+:root {
+  --turf: #0e1a15;
+  --surface: #15241d;
+  --line: rgba(226, 236, 224, 0.28);
+  --light: #f3f5ec;
+  --muted: #8fa096;
+  --fit: #5fd38d;
+  --doubt: #f3b23e;
+  --out: #f2564b;
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s6: 24px;
+  --s8: 32px;
+  --font: "Archivo", system-ui, sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--turf);
+  color: var(--light);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.4;
+}
+.num { font-stretch: 62%; font-weight: 800; font-variant-numeric: tabular-nums; }
+:focus-visible { outline: 2px solid var(--light); outline-offset: 2px; }
+main { max-width: 640px; margin: 0 auto; padding: var(--s4); }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+.skeleton .box { animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: 0.55; } }
+.error h2 { margin: 0 0 var(--s2); }
+.error p { color: var(--muted); margin: 0; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

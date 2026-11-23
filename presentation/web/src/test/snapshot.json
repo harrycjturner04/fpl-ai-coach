@@ -1,0 +1,903 @@
+{
+  "schema": 1,
+  "entry": 42,
+  "team_name": "Test FC",
+  "gameweek": 9,
+  "deadline": "2026-11-14T11:00:00+00:00",
+  "generated_at": "2026-11-10T12:00:00+00:00",
+  "data_pulled_at": "2026-11-10T12:00:00+00:00",
+  "report": "42_gw9_20261110-1200.md",
+  "model": "ml-minutes",
+  "exact": true,
+  "state": {
+    "bank": 0.0,
+    "free_transfers": 1,
+    "chips_available": [],
+    "hit_cost": 4
+  },
+  "gameweeks": [
+    9,
+    10
+  ],
+  "players": [
+    {
+      "id": 1000,
+      "name": "P1000",
+      "team": "C1",
+      "position": "GKP",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": 75.0,
+      "news": "Knock, 75% chance of playing",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1001,
+      "name": "P1001",
+      "team": "C2",
+      "position": "GKP",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1002,
+      "name": "P1002",
+      "team": "C3",
+      "position": "GKP",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1003,
+      "name": "P1003",
+      "team": "C4",
+      "position": "GKP",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1004,
+      "name": "P1004",
+      "team": "C5",
+      "position": "GKP",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1005,
+      "name": "P1005",
+      "team": "C6",
+      "position": "GKP",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1006,
+      "name": "P1006",
+      "team": "C7",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1007,
+      "name": "P1007",
+      "team": "C8",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1008,
+      "name": "P1008",
+      "team": "C9",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1009,
+      "name": "P1009",
+      "team": "C10",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1010,
+      "name": "P1010",
+      "team": "C11",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1011,
+      "name": "P1011",
+      "team": "C12",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1012,
+      "name": "P1012",
+      "team": "C13",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1013,
+      "name": "P1013",
+      "team": "C14",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1014,
+      "name": "P1014",
+      "team": "C15",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1015,
+      "name": "P1015",
+      "team": "C16",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1016,
+      "name": "P1016",
+      "team": "C17",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1017,
+      "name": "P1017",
+      "team": "C18",
+      "position": "DEF",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1018,
+      "name": "P1018",
+      "team": "C19",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1019,
+      "name": "P1019",
+      "team": "C20",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1020,
+      "name": "P1020",
+      "team": "C1",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1021,
+      "name": "P1021",
+      "team": "C2",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1022,
+      "name": "P1022",
+      "team": "C3",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1023,
+      "name": "P1023",
+      "team": "C4",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1024,
+      "name": "P1024",
+      "team": "C5",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1025,
+      "name": "P1025",
+      "team": "C6",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1026,
+      "name": "P1026",
+      "team": "C7",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1027,
+      "name": "P1027",
+      "team": "C8",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1028,
+      "name": "P1028",
+      "team": "C9",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1029,
+      "name": "P1029",
+      "team": "C10",
+      "position": "MID",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1030,
+      "name": "P1030",
+      "team": "C11",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1031,
+      "name": "P1031",
+      "team": "C12",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1032,
+      "name": "P1032",
+      "team": "C13",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1033,
+      "name": "P1033",
+      "team": "C14",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1034,
+      "name": "P1034",
+      "team": "C15",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1035,
+      "name": "P1035",
+      "team": "C16",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": null,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1036,
+      "name": "P1036",
+      "team": "C17",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1037,
+      "name": "P1037",
+      "team": "C18",
+      "position": "FWD",
+      "price": 4.5,
+      "selling_price": 4.5,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        1.0,
+        1.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 1,
+      "name": "P1",
+      "team": "C1",
+      "position": "MID",
+      "price": 10.0,
+      "selling_price": 10.0,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        0.0,
+        4.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 2,
+      "name": "P2",
+      "team": "C2",
+      "position": "FWD",
+      "price": 9.0,
+      "selling_price": 9.0,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        7.0,
+        7.0
+      ],
+      "p60": 0.9
+    },
+    {
+      "id": 3,
+      "name": "P3",
+      "team": "C3",
+      "position": "MID",
+      "price": 8.0,
+      "selling_price": 8.0,
+      "status": "a",
+      "chance": null,
+      "news": "",
+      "points": [
+        6.0,
+        6.0
+      ],
+      "p60": 0.9
+    }
+  ],
+  "current": {
+    "gameweek": 9,
+    "squad": [
+      1000,
+      1004,
+      1007,
+      1012,
+      1013,
+      1015,
+      1017,
+      1018,
+      1021,
+      1024,
+      1036,
+      1037,
+      1,
+      2,
+      3
+    ],
+    "starting": [
+      2,
+      3,
+      1000,
+      1013,
+      1015,
+      1017,
+      1018,
+      1021,
+      1024,
+      1036,
+      1037
+    ],
+    "bench": [
+      1004,
+      1007,
+      1012,
+      1
+    ],
+    "captain": 2,
+    "vice_captain": 3,
+    "transfers_in": [],
+    "transfers_out": [],
+    "hits": 0,
+    "chip": null,
+    "projected_points": 29.0,
+    "money_left": 0.0,
+    "free_transfers_next": 2,
+    "points": 29.0
+  },
+  "plan": {
+    "objective": 64.7,
+    "weeks": [
+      {
+        "gameweek": 9,
+        "squad": [
+          1000,
+          1004,
+          1007,
+          1012,
+          1013,
+          1015,
+          1017,
+          1018,
+          1021,
+          1024,
+          1036,
+          1037,
+          1,
+          2,
+          3
+        ],
+        "starting": [
+          2,
+          3,
+          1000,
+          1012,
+          1013,
+          1015,
+          1018,
+          1021,
+          1024,
+          1036,
+          1037
+        ],
+        "bench": [
+          1004,
+          1007,
+          1017,
+          1
+        ],
+        "captain": 2,
+        "vice_captain": 3,
+        "transfers_in": [],
+        "transfers_out": [],
+        "hits": 0,
+        "chip": null,
+        "projected_points": 29.0,
+        "money_left": 0.0,
+        "free_transfers_next": 2,
+        "points": 29.0
+      },
+      {
+        "gameweek": 10,
+        "squad": [
+          1000,
+          1004,
+          1007,
+          1012,
+          1013,
+          1015,
+          1017,
+          1018,
+          1021,
+          1024,
+          1036,
+          1037,
+          1,
+          2,
+          3
+        ],
+        "starting": [
+          2,
+          3,
+          1,
+          1000,
+          1012,
+          1013,
+          1015,
+          1017,
+          1018,
+          1021,
+          1037
+        ],
+        "bench": [
+          1004,
+          1007,
+          1024,
+          1036
+        ],
+        "captain": 2,
+        "vice_captain": 3,
+        "transfers_in": [],
+        "transfers_out": [],
+        "hits": 0,
+        "chip": null,
+        "projected_points": 32.0,
+        "money_left": 0.0,
+        "free_transfers_next": 3,
+        "points": 32.0
+      }
+    ]
+  },
+  "flags": [
+    {
+      "player_id": 1,
+      "status": "out",
+      "start_prob_next_gw": 0.0,
+      "return_gw": null,
+      "confidence": "high",
+      "source_url": "https://club.example/news",
+      "source_date": "2026-11-10",
+      "source_kind": "official",
+      "summary": "Hamstring, out"
+    }
+  ],
+  "adjustments": [
+    {
+      "player_id": 1,
+      "horizon": 0,
+      "kind": "availability",
+      "raw": 1.0,
+      "proposed": 0.0,
+      "applied": 0.0,
+      "capped": false,
+      "reason": "applied (official, high)"
+    },
+    {
+      "player_id": 1,
+      "horizon": 1,
+      "kind": "availability",
+      "raw": 1.0,
+      "proposed": 0.5,
+      "applied": 0.5,
+      "capped": false,
+      "reason": "applied (official, high)"
+    }
+  ],
+  "chip_scan": [
+    {
+      "chip": "bboost",
+      "gameweek": 10,
+      "objective": 68.3,
+      "gain_vs_none": 3.5999999999999943,
+      "week1_same_as_none": true,
+      "exact": true,
+      "note": ""
+    },
+    {
+      "chip": "bboost",
+      "gameweek": 9,
+      "objective": 67.4,
+      "gain_vs_none": 2.700000000000003,
+      "week1_same_as_none": true,
+      "exact": true,
+      "note": ""
+    }
+  ],
+  "sections": {
+    "Verdict": "- Transfers: none\n- Captain: P2\n- Vice-captain: P3\n- Chip: none",
+    "Why": "P1 is out.",
+    "Sources": "- https://club.example/news"
+  },
+  "notes": [],
+  "warnings": [],
+  "call": {
+    "title": "Save your free transfer",
+    "reason": "P1 is out.",
+    "chip": null
+  },
+  "status": {
+    "stale": false,
+    "reason": null
+  }
+}

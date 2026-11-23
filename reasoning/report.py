@@ -250,6 +250,11 @@ def _scan_table(session: Session) -> str:
                                        "exact": "Exact", "note": "Note"}))
 
 
+def plan_exact(session: Session) -> bool:
+    """Whether the headline plan was solved exactly (no chip plan solved at the chip-scan gap)."""
+    return session.no_chip is None or session.headline is session.no_chip or _scan_exact(session)
+
+
 def render(title: str, session: Session, *, plan_text: str, report: Report | None, notes: list[str]) -> str:
     """The saved report. Post-check warnings go on top; the news and chip tables follow Claude's matching
     sections (or stand alone without a write-up)."""
@@ -264,7 +269,6 @@ def render(title: str, session: Session, *, plan_text: str, report: Report | Non
     for head in LLM_SECTIONS:  # other headings Claude adds are dropped: code owns plan and warnings
         if head in s or head in tables:
             out += [f"## {head}", *([s[head], ""] if s.get(head) else []), *([tables[head], ""] if head in tables else [])]
-    exact = session.no_chip is None or session.headline is session.no_chip or _scan_exact(session)
-    kind = "exact" if exact else "chip plan solved at the chip-scan gap, not exact"
+    kind = "exact" if plan_exact(session) else "chip plan solved at the chip-scan gap, not exact"
     out += [f"## Recommended plan (optimiser, {kind})", "```", plan_text, "```", ""]
     return "\n".join(out).rstrip() + "\n"

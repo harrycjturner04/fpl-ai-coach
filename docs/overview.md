@@ -76,7 +76,8 @@ week before his team plays twice. The whole plan is solved again the following w
 | 4. Screenshot parsing | Dropped | Not needed: the team ID already gives squad, bank, free transfers and chips |
 | 5. Machine-learning prediction | Built | LightGBM minutes model (shipped default), LightGBM, Keras, GRU and stacked points models, validated walk-forward against the component model |
 | 6. Reasoning layer | Built | Coach command: news flags with capped adjustments, chip scan and chip call, checked write-up, what-if chat, monitoring report, report grader |
-| 7. Presentation | Planned | Dashboard |
+| 7a. Presentation, local skeleton | Built | Run snapshot, read-only API and a phone-friendly web app (Team screen) on the owner's machine |
+| 7b-7f. Presentation, rest | Planned | Deployment and login, swaps, report and chat, model page, developer analytics |
 
 Today the pipeline runs from the command line. `python -m orchestration.coach --entry <your team ID>` refreshes
 the data if needed, predicts five gameweeks, checks the team news, solves the plan and every chip window, and
@@ -93,6 +94,22 @@ Claude chooses only whether to play a chip, from windows the optimiser has alrea
 view. Code then checks the players and "pts" figures in the write-up against the solves. A live run costs about
 $0.08 to $0.10 and takes about 3 minutes. A weekly monitoring report tracks the forward test on 2026/27, and a grader
 scores stored reports so that prompt changes can be judged. See [Reasoning layer](reasoning.md).
+
+## Stage 7a: the presentation layer
+
+```mermaid
+flowchart LR
+    C["Coach run"] -->|"writes"| S["Run snapshot<br/>data/reports/*.json"]
+    S -->|"read by"| A["FastAPI<br/>presentation/api"]
+    A -->|"/api/entries/{id}/snapshot"| W["React PWA<br/>presentation/web"]
+```
+
+Each coach run writes a structured JSON snapshot beside the Markdown report: squad state, every player's points per
+gameweek and chance of playing 60 minutes, the current squad's best XI with no transfers, the plan for each week,
+flags and adjustments, the chip scan, the report sections and any warnings. The API only reads the latest snapshot
+for an entry; the web app draws it as a pitch where each player's ring shows the 60-minute chance and the number is
+expected points. Nothing in the app computes predictions or plans, so the five layers are unchanged. 7a runs on
+the owner's machine without a login; deployment and security are 7b.
 
 Not yet covered: price changes over the planning horizon, and any measured evidence that news adjustments improve
 the predictions (that waits on the 2026/27 forward test).

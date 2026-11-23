@@ -103,6 +103,9 @@ def test_coach_offline_end_to_end_with_fake_llm(data, capsys):
     out = capsys.readouterr().out
     assert md in out and "Run cost" in out and "Total: $" in out
     assert len(fake.requests) == 3 and fake.responses == []
+    snap = json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))
+    assert (snap["entry"], snap["gameweek"], snap["report"]) == (42, 9, path.name)
+    assert "Verdict" in snap["sections"] and snap["flags"][0]["player_id"] == STAR
 
     log = storage.load_table("coach_log", data)
     assert len(log) == 1
@@ -122,6 +125,14 @@ def test_coach_offline_end_to_end_with_fake_llm(data, capsys):
     assert STAR not in {p["id"] for p in starting}
 
 
+def test_snapshot_failure_does_not_stop_the_run(data, capsys, monkeypatch):
+    monkeypatch.setattr(coach.snapshot, "build", lambda *a, **k: 1 / 0)
+    path = coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]))
+    assert path.exists() and not path.with_suffix(".json").exists()
+    assert "Snapshot not saved (ZeroDivisionError" in capsys.readouterr().out
+    assert len(storage.load_table("coach_log", data)) == 1
+
+
 @pytest.mark.parametrize("responses, news_ran, error", [([CONNECTION], False, "APIConnectionError"),
                                                         ([*NEWS, CONNECTION], True, "APIConnectionError"),
                                                         ([*NEWS, BAD_REQUEST], True, "BadRequestError")])
@@ -132,6 +143,7 @@ def test_coach_without_llm_prints_plan(data, capsys, responses, news_ran, error)
     assert f"- LLM unavailable: no news check or write-up ({error}" in out  # the reason is printed
     md = path.read_text(encoding="utf-8")
     assert "LLM unavailable" in md and "## Verdict" not in md and "Starting XI" in md
+    assert json.loads(path.with_suffix(".json").read_text(encoding="utf-8"))["sections"] == {}
     assert len(storage.load_table("coach_log", data)) == 1
     models = set(storage.load_table("prediction_log", data).model)
     assert (f"{SHIPPED_MODEL}+news" in models) == news_ran
