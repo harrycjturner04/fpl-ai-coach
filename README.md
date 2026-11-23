@@ -245,7 +245,7 @@ coach once, then start the two servers:
 ```bash
 pip install -e ".[api]"
 python -m orchestration.coach --entry 1234567
-uvicorn presentation.api.app:app --host 127.0.0.1 --port 8000
+python -m uvicorn presentation.api.app:app --host 127.0.0.1 --port 8000
 
 cd presentation/web                      # Node 24
 npm install

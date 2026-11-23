@@ -17,7 +17,7 @@ it("reports a missing server with the uvicorn hint", async () => {
   const err = await getSnapshot(42).catch((e) => e);
   expect(err).toBeInstanceOf(ApiError);
   expect(err.status).toBe(0);
-  expect(err.detail).toContain("uvicorn presentation.api.app:app --port 8000");
+  expect(err.detail).toContain("python -m uvicorn presentation.api.app:app --port 8000");
 });
 
 it("rejects another schema version", async () => {

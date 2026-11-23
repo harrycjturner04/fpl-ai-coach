@@ -6,7 +6,7 @@ export class ApiError extends Error {
   }
 }
 
-const NO_SERVER = "The coach's server isn't running. Start it with: uvicorn presentation.api.app:app --port 8000";
+const NO_SERVER = "The coach's server isn't running. Start it with: python -m uvicorn presentation.api.app:app --port 8000";
 
 async function get<T>(url: string): Promise<T> {
   let res: Response;
