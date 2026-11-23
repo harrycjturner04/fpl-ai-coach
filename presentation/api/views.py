@@ -11,11 +11,12 @@ _NAME = re.compile(r"^(\d+)_gw(\d+)_(\d{8}-\d{4})\.json$")
 
 
 def latest_snapshot_path(reports: Path, entry: int) -> Path | None:
+    """The newest run by its time stamp (gameweek numbers restart each season)."""
     found = []
     for p in reports.glob(f"{entry}_gw*.json"):
         m = _NAME.match(p.name)
         if m and int(m[1]) == entry:
-            found.append(((int(m[2]), m[3]), p))
+            found.append(((m[3], int(m[2])), p))
     return max(found)[1] if found else None
 
 

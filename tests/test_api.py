@@ -45,11 +45,17 @@ def client(tmp_path, monkeypatch):
     return TestClient(create_app(tmp_path))
 
 
-def test_latest_is_by_gameweek_not_string(tmp_path):
-    for n in ("42_gw9_20261110-1200", "42_gw11_20261101-0900", "42_gw11_20261102-0900", "7_gw12_20261103-0900"):
+def test_latest_is_the_newest_run(tmp_path):
+    for n in ("42_gw9_20261110-1200", "42_gw10_20261101-0900", "42_gw11_20261102-0900", "7_gw12_20261111-0900"):
         write(tmp_path, n + ".json", snap())
-    write(tmp_path, "42_gw12_20261103-0900.json.tmp", snap())  # a half-written snapshot is ignored
-    assert views.latest_snapshot_path(tmp_path / "reports", 42).name == "42_gw11_20261102-0900.json"
+    write(tmp_path, "42_gw12_20261112-0900.json.tmp", snap())  # a half-written snapshot is ignored
+    assert views.latest_snapshot_path(tmp_path / "reports", 42).name == "42_gw9_20261110-1200.json"
+
+
+def test_new_season_beats_last_seasons_gw38(tmp_path):
+    for n in ("42_gw38_20270523-1000", "42_gw1_20270814-0900"):
+        write(tmp_path, n + ".json", snap())
+    assert views.latest_snapshot_path(tmp_path / "reports", 42).name == "42_gw1_20270814-0900.json"
 
 
 def test_snapshot_endpoint_adds_call_and_status(tmp_path, client):
