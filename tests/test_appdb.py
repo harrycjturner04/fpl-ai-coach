@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
+from urllib.parse import urlparse
 
 import psycopg
 import pytest
@@ -9,12 +10,15 @@ from orchestration.appdb import AppDB
 
 pytestmark = pytest.mark.db
 URL = os.environ.get("DATABASE_URL", "")
+LOCAL = urlparse(URL).hostname in ("127.0.0.1", "localhost")
 UTC = timezone.utc
 NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
 def db():
+    if not LOCAL:
+        pytest.skip("DATABASE_URL must point at a local database (127.0.0.1 or localhost)")
     d = AppDB(URL)
     d.conn.execute("truncate runs, spend, job_lock, app_users cascade")
     d.conn.execute("update settings set cap_gbp = 5, auto_runs = true, ai_off = false, usd_per_gbp = 1.25")
@@ -125,9 +129,19 @@ def test_release_by_other_holder_is_noop(db):
     assert db.acquire_lock("coach", "b", NOW)
 
 
+@pytest.mark.parametrize("role", ["anon", "authenticated"])
 @pytest.mark.parametrize("table", ["app_users", "settings", "runs", "spend", "job_lock"])
-def test_anon_reads_nothing(db, table):
+def test_api_roles_read_nothing(db, role, table):
     with psycopg.connect(URL, autocommit=True) as c:
-        c.execute("set role anon")
+        c.execute(f"set role {role}")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             c.execute(f"select * from {table}")
+
+
+@pytest.mark.parametrize("role", ["anon", "authenticated"])
+@pytest.mark.parametrize("seq", ["runs_id_seq", "spend_id_seq"])
+def test_api_roles_no_sequence_access(db, role, seq):
+    with psycopg.connect(URL, autocommit=True) as c:
+        c.execute(f"set role {role}")
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            c.execute(f"select nextval('{seq}')")

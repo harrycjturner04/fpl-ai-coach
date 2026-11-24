@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 
 from orchestration.appdb import LOCK_LEASE, block_reason
@@ -18,7 +19,7 @@ class FakeAppDB:
         self.locks: dict[str, tuple[str, datetime]] = {}
 
     def settings(self) -> dict:
-        return dict(self._settings)
+        return deepcopy(self._settings)
 
     def update_settings(self, **fields) -> dict:
         self._settings.update(fields)
@@ -56,7 +57,7 @@ class FakeAppDB:
         self.spend.append({"run_id": run_id, "kind": kind, "cost_usd": cost_usd, "at": at.astimezone(timezone.utc)})
 
     def get_run(self, run_id):
-        return self.runs.get(run_id)
+        return deepcopy(self.runs.get(run_id))
 
     def _for(self, entry):
         return [r for r in self.runs.values() if r["entry"] == entry]
@@ -64,14 +65,14 @@ class FakeAppDB:
     def active_run(self, entry):
         cutoff = datetime.now(timezone.utc) - timedelta(minutes=70)
         live = [r for r in self._for(entry) if r["status"] in ("queued", "running") and r["created_at"] > cutoff]
-        return max(live, key=lambda r: r["id"], default=None)
+        return deepcopy(max(live, key=lambda r: r["id"], default=None))
 
     def latest_run(self, entry):
-        return max(self._for(entry), key=lambda r: r["id"], default=None)
+        return deepcopy(max(self._for(entry), key=lambda r: r["id"], default=None))
 
     def auto_runs_for(self, entry, gameweek):
-        return sorted((r for r in self._for(entry) if r["gameweek"] == gameweek and r["kind"] == "auto"),
-                      key=lambda r: -r["id"])
+        return deepcopy(sorted((r for r in self._for(entry) if r["gameweek"] == gameweek and r["kind"] == "auto"),
+                               key=lambda r: -r["id"]))
 
     def entries_for(self, user_id):
         return [self.entries[user_id]] if user_id in self.entries else []
