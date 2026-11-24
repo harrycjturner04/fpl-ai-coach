@@ -94,7 +94,8 @@ def run_daily(db, bucket, data_dir: Path, now: datetime, coach_run=coach.run) ->
 
 
 def run_refresh(db, bucket, data_dir: Path, now: datetime, ingest=ingest_cli.run, wait_s: int = 900) -> None:
-    """Owner's PC: under the data lock, pull the bucket, fetch fresh FPL data for every entry, push."""
+    """Owner's PC: under the data lock, pull the bucket, fetch fresh FPL data for every entry, push.
+    If finished gameweeks lack market values, fetches once more with player history to fill them."""
     waited = 0
     while not db.acquire_lock(LOCK, "pc-refresh", now + timedelta(seconds=waited)):
         if waited >= wait_s:
@@ -109,6 +110,10 @@ def run_refresh(db, bucket, data_dir: Path, now: datetime, ingest=ingest_cli.run
             print("No entries in the database: updating general data only.")
         for entry in entries or [None]:
             ingest(entry_id=entry, data_dir=data_dir)
+        rows, gws = (storage.load_table_or_none(n, data_dir) for n in ("current_season_rows", "gameweeks"))
+        if rows is not None and gws is not None and ingest_cli.market_gaps(rows, gws):
+            print("Market values missing for finished gameweeks: backfilling with player history.")
+            ingest(entry_id=(entries or [None])[0], data_dir=data_dir, history=True)
         if bucket:
             bucket_sync.push(bucket, data_dir)
     finally:

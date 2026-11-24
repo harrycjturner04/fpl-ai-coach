@@ -1,4 +1,4 @@
-"""Sync `data/` with the private GCS bucket. Skips raw snapshots; never deletes anything."""
+"""Sync `data/` with the private GCS bucket. Skips raw snapshots, local logs and temp files; never deletes anything."""
 
 from __future__ import annotations
 
@@ -9,7 +9,10 @@ from pathlib import Path
 
 import google_crc32c
 
+from ingestion.env import load_env
 from ingestion.storage import DATA_DIR
+
+SKIP_PREFIXES = ("raw/", "logs/")
 
 
 def _crc(path: Path) -> str:
@@ -23,10 +26,11 @@ def _order(rel: str) -> tuple[int, str]:
 
 
 def push(bucket, data_dir: Path) -> list[str]:
-    """Upload new and changed files (not `raw/`); returns the relative paths."""
+    """Upload new and changed files (not `raw/`, `logs/` or `*.tmp`); returns the relative paths."""
     remote = {b.name: b.crc32c for b in bucket.list_blobs()}
     local = {p.relative_to(data_dir).as_posix(): p for p in data_dir.rglob("*") if p.is_file()}
-    changed = sorted((r for r in local if not r.startswith("raw/") and remote.get(r) != _crc(local[r])), key=_order)
+    changed = sorted((r for r in local if not r.startswith(SKIP_PREFIXES) and not r.endswith(".tmp")
+                      and remote.get(r) != _crc(local[r])), key=_order)
     for rel in changed:
         bucket.blob(rel).upload_from_filename(str(local[rel]))
     return changed
@@ -36,13 +40,18 @@ def pull(bucket, data_dir: Path, only: list[str] | None = None) -> list[str]:
     """Download new and changed files (all, or just `only`); returns the relative paths."""
     pulled = []
     for blob in bucket.list_blobs():
+        if blob.name.endswith("/"):  # folder marker, not a file
+            continue
         path = data_dir / blob.name
         if (only is not None and blob.name not in only) or (path.exists() and _crc(path) == blob.crc32c):
             continue
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp = path.with_name(path.name + ".tmp")
-        bucket.blob(blob.name).download_to_filename(str(tmp))
-        os.replace(tmp, path)
+        try:
+            bucket.blob(blob.name).download_to_filename(str(tmp))
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
         pulled.append(blob.name)
     return pulled
 
@@ -54,6 +63,7 @@ def open_bucket(name: str):
 
 
 def main() -> None:
+    load_env()
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("action", choices=["push", "pull"])
     ap.add_argument("--bucket", default=os.environ.get("FPL_COACH_BUCKET"))

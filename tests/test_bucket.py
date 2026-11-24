@@ -1,3 +1,5 @@
+import pytest
+
 from orchestration import bucket as sync
 from tests.fake_bucket import FakeBucket
 
@@ -48,3 +50,41 @@ def test_pull_only_limits_paths(tmp_path):
     fake = FakeBucket({"processed/metadata.json": b"m", "processed/a.json": b"a"})
     assert sync.pull(fake, tmp_path, only=["processed/metadata.json"]) == ["processed/metadata.json"]
     assert not (tmp_path / "processed/a.json").exists()
+
+
+def test_push_skips_logs_and_tmp(tmp_path):
+    fake = FakeBucket()
+    _write(tmp_path, "logs/refresh.log", "x")
+    _write(tmp_path, "processed/a.json.tmp", "x")
+    _write(tmp_path, "processed/a.json", "1")
+    assert sync.push(fake, tmp_path) == ["processed/a.json"]
+
+
+def test_pull_skips_folder_markers(tmp_path):
+    fake = FakeBucket({"processed/": b"", "processed/a.json": b"a"})
+    assert sync.pull(fake, tmp_path) == ["processed/a.json"]
+
+
+def test_pull_failed_download_leaves_no_tmp(tmp_path):
+    class Broken(FakeBucket):
+        def blob(self, name):
+            blob = super().blob(name)
+
+            def fail(path):
+                open(path, "wb").write(b"part")
+                raise OSError("network")
+            blob.download_to_filename = fail
+            return blob
+    with pytest.raises(OSError):
+        sync.pull(Broken({"processed/a.json": b"a"}), tmp_path)
+    assert not list(tmp_path.rglob("*.tmp")) and not (tmp_path / "processed/a.json").exists()
+
+
+def test_main_reads_bucket_from_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("FPL_COACH_BUCKET", raising=False)
+    seen = []
+    monkeypatch.setattr(sync, "load_env", lambda: monkeypatch.setenv("FPL_COACH_BUCKET", "b"))
+    monkeypatch.setattr(sync, "open_bucket", lambda name: seen.append(name) or FakeBucket())
+    monkeypatch.setattr("sys.argv", ["bucket", "push", "--data-dir", str(tmp_path)])
+    sync.main()
+    assert seen == ["b"]

@@ -188,6 +188,19 @@ def test_refresh_pulls_ingests_pushes_in_order(tmp_path):
     assert seen == [(42, True, True)] and bucket.uploads == ["processed/new.json"] and "data" not in db.locks
 
 
+def test_refresh_backfills_market_gaps_with_history(tmp_path):
+    db = FakeAppDB(entries={"u": 42})
+    calls = []
+
+    def ingest(entry_id, data_dir, history=False):
+        calls.append((entry_id, history))
+        storage.save_table(pd.DataFrame({"id": [1], "finished": [True]}), "gameweeks", data_dir)
+        storage.save_table(pd.DataFrame({"gameweek": [1], "selected": [None if not history else 5.0]}),
+                           "current_season_rows", data_dir)
+    job.run_refresh(db, None, tmp_path, NOW, ingest=ingest)
+    assert calls == [(42, False), (42, True)]
+
+
 def test_refresh_gives_up_when_locked(tmp_path):
     db = FakeAppDB()
     db.acquire_lock("data", "other", NOW)
