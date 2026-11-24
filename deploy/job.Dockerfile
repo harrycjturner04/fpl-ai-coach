@@ -12,6 +12,7 @@ COPY reasoning reasoning
 COPY orchestration orchestration
 COPY presentation presentation
 RUN pip install ".[cloud]"
+RUN apt-get update && apt-get install -y --no-install-recommends libgomp1 && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home app
 USER app
 ENTRYPOINT ["python", "-m", "orchestration.job"]
