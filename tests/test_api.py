@@ -283,6 +283,39 @@ def test_run_limit_429(tmp_path):
     assert r.status_code == 429 and r.json()["detail"] == "Too many requests. Try again shortly."
 
 
+def test_active_run_polls_do_not_use_allowance(tmp_path):
+    c, _ = runs_client(tmp_path)
+    c.post("/api/entries/42/runs")
+    for _ in range(8):
+        assert c.post("/api/entries/42/runs").status_code == 200
+
+
+def test_start_run_without_data_503(tmp_path):
+    c = make(tmp_path, db=FakeAppDB({"u1": 42}), launcher=Launch())
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 503 and r.json()["detail"] == "No data yet: run the refresh on your PC."
+
+
+def test_concurrent_starts_launch_once(tmp_path):
+    import threading
+    import time
+
+    class Slow(Launch):
+        def start(self, entry, run_id):
+            time.sleep(0.3)
+            super().start(entry, run_id)
+
+    launch = Slow()
+    c, db = runs_client(tmp_path, launch)
+    out = []
+    ts = [threading.Thread(target=lambda: out.append(c.post("/api/entries/42/runs"))) for _ in range(2)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert sorted(r.status_code for r in out) == [200, 202]
+    assert len(launch.calls) == 1 and len(db.runs) == 1
+    assert {r.json()["id"] for r in out} == {1}
+
+
 def test_get_run_other_entry_404(tmp_path):
     c, db = runs_client(tmp_path)
     mine = c.post("/api/entries/42/runs").json()["id"]

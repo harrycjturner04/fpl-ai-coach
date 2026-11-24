@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -45,6 +46,7 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
         raise ValueError("ALLOWED_ORIGIN must be the web app's origin, not '*'.")
     db = db or AppDB()
     launcher = launcher or launcher_from_env(data_dir)
+    start_lock = threading.Lock()
     verifier = verifier or Verifier(os.environ["SUPABASE_URL"])
     general, patches, starts = RateLimiter(60, 60), RateLimiter(20, 3600), RateLimiter(5, 86400)
     if allowed_origin:
@@ -114,22 +116,25 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
     def start_run(entry: int, user=Depends(current_user)):
         if entry not in user[1]:
             raise HTTPException(403, "Not your team.")
-        if not starts.allow(user[0]):
-            raise HTTPException(429, "Too many requests. Try again shortly.")
-        if active := db.active_run(entry):
-            return JSONResponse(jsonable_encoder(run_view(active)), status_code=200)
-        if reason := db.ai_block_reason(utcnow()):
-            return JSONResponse({"detail": reason, "reason": "ai_off" if db.settings()["ai_off"] else "cap"}, status_code=409)
-        gameweek = transform.next_gameweek(storage.load_table("gameweeks", data_dir))
-        if gameweek is None:
-            return JSONResponse({"detail": "No upcoming gameweek: the season has finished.", "reason": "season"},
-                                status_code=409)
-        run_id = db.create_run(entry, gameweek, "manual")
-        try:
-            launcher.start(entry, run_id)
-        except Exception as exc:
-            db.finish_run(run_id, "failed", f"Couldn't start the coach: {exc}")
-            raise HTTPException(502, "Couldn't start the coach.") from exc
+        with start_lock:
+            if active := db.active_run(entry):
+                return JSONResponse(jsonable_encoder(run_view(active)), status_code=200)
+            if reason := db.ai_block_reason(utcnow()):
+                return JSONResponse({"detail": reason, "reason": "ai_off" if db.settings()["ai_off"] else "cap"},
+                                    status_code=409)
+            if (gameweeks := storage.load_table_or_none("gameweeks", data_dir)) is None:
+                raise HTTPException(503, "No data yet: run the refresh on your PC.")
+            if (gameweek := transform.next_gameweek(gameweeks)) is None:
+                return JSONResponse({"detail": "No upcoming gameweek: the season has finished.", "reason": "season"},
+                                    status_code=409)
+            if not starts.allow(user[0]):
+                raise HTTPException(429, "Too many requests. Try again shortly.")
+            run_id = db.create_run(entry, gameweek, "manual")
+            try:
+                launcher.start(entry, run_id)
+            except Exception as exc:
+                db.finish_run(run_id, "failed", f"Couldn't start the coach: {exc}")
+                raise HTTPException(502, "Couldn't start the coach.") from exc
         return run_view(db.get_run(run_id))
 
     @app.get("/api/runs/{run_id}")
