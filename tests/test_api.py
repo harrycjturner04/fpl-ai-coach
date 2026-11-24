@@ -204,3 +204,101 @@ def test_basic_auth_401(tmp_path):
 def test_wildcard_origin_refused(tmp_path):
     with pytest.raises(ValueError, match="ALLOWED_ORIGIN"):
         create_app(tmp_path, db=FakeAppDB(), verifier=verifier(), allowed_origin="*")
+
+
+class Launch:
+    def __init__(self, exc=None):
+        self.calls, self.exc = [], exc
+
+    def start(self, entry, run_id):
+        self.calls.append((entry, run_id))
+        if self.exc:
+            raise self.exc
+
+
+def runs_client(tmp_path, launcher=None, db=None, next_gw=True, **kw):
+    import pandas as pd
+    storage.save_table(pd.DataFrame({"id": [12], "is_next": [next_gw]}), "gameweeks", tmp_path)
+    db = db or FakeAppDB({"u1": 42}, **kw)
+    return make(tmp_path, db=db, launcher=launcher or Launch()), db
+
+
+def test_start_run_202_and_launches(tmp_path):
+    launch = Launch()
+    c, db = runs_client(tmp_path, launch)
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 202
+    body = r.json()
+    assert (body["status"], body["gameweek"], body["kind"]) == ("queued", 12, "manual")
+    assert body["steps_expected"][0] == "data" and len(body["steps_expected"]) == 6
+    assert body["data_age_hours"] is None
+    assert launch.calls == [(42, body["id"])]
+
+
+def test_start_run_returns_active_run(tmp_path):
+    launch = Launch()
+    c, db = runs_client(tmp_path, launch)
+    first = c.post("/api/entries/42/runs").json()
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 200 and r.json()["id"] == first["id"]
+    assert len(launch.calls) == 1
+
+
+def test_start_run_blocked_by_cap_409(tmp_path):
+    c, db = runs_client(tmp_path, cap_gbp=1.0)
+    db.record_spend(1, "coach", 5.0, utcnow_())
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 409 and r.json()["reason"] == "cap" and r.json()["detail"].startswith("Monthly AI cap reached")
+
+
+def test_start_run_blocked_ai_off_409(tmp_path):
+    c, _ = runs_client(tmp_path, ai_off=True)
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 409 and r.json() == {"detail": "AI is switched off in Settings.", "reason": "ai_off"}
+
+
+def test_start_run_season_over_409(tmp_path):
+    c, _ = runs_client(tmp_path, next_gw=False)
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 409 and r.json()["reason"] == "season"
+
+
+def test_start_run_other_entry_403(tmp_path):
+    c, _ = runs_client(tmp_path)
+    assert c.post("/api/entries/7/runs").status_code == 403
+
+
+def test_start_run_launch_failure_502_marks_failed(tmp_path):
+    c, db = runs_client(tmp_path, Launch(RuntimeError("boom")))
+    assert c.post("/api/entries/42/runs").status_code == 502
+    assert db.runs[1]["status"] == "failed" and db.runs[1]["error"] == "Couldn't start the coach: boom"
+
+
+def test_run_limit_429(tmp_path):
+    c, db = runs_client(tmp_path)
+    for _ in range(5):
+        assert c.post("/api/entries/42/runs").status_code == 202
+        db.finish_run(len(db.runs), "done")
+    r = c.post("/api/entries/42/runs")
+    assert r.status_code == 429 and r.json()["detail"] == "Too many requests. Try again shortly."
+
+
+def test_get_run_other_entry_404(tmp_path):
+    c, db = runs_client(tmp_path)
+    mine = c.post("/api/entries/42/runs").json()["id"]
+    assert c.get(f"/api/runs/{mine}").json()["id"] == mine
+    other = db.create_run(7, 12, "manual")
+    assert c.get(f"/api/runs/{other}").status_code == 404
+    assert c.get("/api/runs/999").status_code == 404
+
+
+def test_latest_run_null(tmp_path):
+    c, _ = runs_client(tmp_path)
+    r = c.get("/api/entries/42/runs/latest")
+    assert r.status_code == 200 and r.json() is None
+    c.post("/api/entries/42/runs")
+    assert c.get("/api/entries/42/runs/latest").json()["status"] == "queued"
+
+
+def utcnow_():
+    return datetime.now(timezone.utc)

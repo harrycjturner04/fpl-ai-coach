@@ -7,16 +7,23 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from ingestion import storage
+from ingestion import storage, transform
 from ingestion.env import load_env
 from orchestration.appdb import AppDB
 from presentation.api import views
 from presentation.api.auth import RateLimiter, Verifier
+from presentation.api.launcher import launcher_from_env
 
 load_env()
+
+
+STEPS_EXPECTED = ["data", "predictions and initial solve", "news", "adjusted predictions and headline solve",
+                  "chip scan", "write-up"]
 
 
 def utcnow() -> datetime:
@@ -37,8 +44,9 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
     if allowed_origin == "*":
         raise ValueError("ALLOWED_ORIGIN must be the web app's origin, not '*'.")
     db = db or AppDB()
+    launcher = launcher or launcher_from_env(data_dir)
     verifier = verifier or Verifier(os.environ["SUPABASE_URL"])
-    general, patches = RateLimiter(60, 60), RateLimiter(20, 3600)
+    general, patches, starts = RateLimiter(60, 60), RateLimiter(20, 3600), RateLimiter(5, 86400)
     if allowed_origin:
         app.add_middleware(CORSMiddleware, allow_origins=[allowed_origin], allow_methods=["GET", "POST", "PATCH"],
                            allow_headers=["Authorization", "Content-Type"])
@@ -59,6 +67,13 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
         s, now = db.settings(), utcnow()
         return {"cap_gbp": s["cap_gbp"], "auto_runs": s["auto_runs"], "ai_off": s["ai_off"],
                 "spent_gbp": round(db.month_spend_usd(now) / s["usd_per_gbp"], 2), "month": now.strftime("%B %Y")}
+
+    def run_view(run: dict | None) -> dict | None:
+        if run is None:
+            return None
+        pulled = run["data_pulled_at"]
+        age = round((utcnow() - pulled).total_seconds() / 3600, 1) if pulled else None
+        return run | {"steps_expected": STEPS_EXPECTED, "data_age_hours": age}
 
     @app.get("/api/health")
     def health():
@@ -94,6 +109,41 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
             pulled = pulled.replace(tzinfo=timezone.utc)
         status = views.run_status(snap, pulled, utcnow())
         return snap | {"call": views.coach_call(snap), "status": status}
+
+    @app.post("/api/entries/{entry}/runs", status_code=202)
+    def start_run(entry: int, user=Depends(current_user)):
+        if entry not in user[1]:
+            raise HTTPException(403, "Not your team.")
+        if not starts.allow(user[0]):
+            raise HTTPException(429, "Too many requests. Try again shortly.")
+        if active := db.active_run(entry):
+            return JSONResponse(jsonable_encoder(run_view(active)), status_code=200)
+        if reason := db.ai_block_reason(utcnow()):
+            return JSONResponse({"detail": reason, "reason": "ai_off" if db.settings()["ai_off"] else "cap"}, status_code=409)
+        gameweek = transform.next_gameweek(storage.load_table("gameweeks", data_dir))
+        if gameweek is None:
+            return JSONResponse({"detail": "No upcoming gameweek: the season has finished.", "reason": "season"},
+                                status_code=409)
+        run_id = db.create_run(entry, gameweek, "manual")
+        try:
+            launcher.start(entry, run_id)
+        except Exception as exc:
+            db.finish_run(run_id, "failed", f"Couldn't start the coach: {exc}")
+            raise HTTPException(502, "Couldn't start the coach.") from exc
+        return run_view(db.get_run(run_id))
+
+    @app.get("/api/runs/{run_id}")
+    def get_run(run_id: int, user=Depends(current_user)):
+        run = db.get_run(run_id)
+        if run is None or run["entry"] not in user[1]:
+            raise HTTPException(404, "No such run.")
+        return run_view(run)
+
+    @app.get("/api/entries/{entry}/runs/latest")
+    def latest_run(entry: int, user=Depends(current_user)):
+        if entry not in user[1]:
+            raise HTTPException(403, "Not your team.")
+        return run_view(db.latest_run(entry))
 
     return app
 
