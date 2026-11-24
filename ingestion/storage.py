@@ -17,7 +17,7 @@ from typing import Any
 
 import pandas as pd
 
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+DATA_DIR = Path(os.environ.get("FPL_COACH_DATA_DIR") or Path(__file__).resolve().parent.parent / "data")
 
 
 def new_snapshot_dir(data_dir: Path = DATA_DIR, now: datetime | None = None) -> Path:

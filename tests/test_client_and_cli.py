@@ -135,3 +135,14 @@ def test_combine_match_log_with_no_archive_keeps_all_current_rows():
                             "kickoff": pd.to_datetime(["2026-08-22T14:00Z"], utc=True)})
     combined = cli._combine_match_log(None, current)
     assert len(combined) == 1
+
+
+def test_data_dir_env_override(monkeypatch, tmp_path):
+    import importlib
+
+    monkeypatch.setenv("FPL_COACH_DATA_DIR", str(tmp_path))
+    try:
+        assert importlib.reload(storage).DATA_DIR == tmp_path
+    finally:
+        monkeypatch.delenv("FPL_COACH_DATA_DIR")
+        importlib.reload(storage)
