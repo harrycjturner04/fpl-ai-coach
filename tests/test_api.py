@@ -10,7 +10,9 @@ from ingestion import storage
 from orchestration import coach
 from presentation.api import views
 from presentation.api.app import create_app
+from tests.fake_appdb import FakeAppDB
 from tests.fakes import FakeClient
+from tests.test_auth import token, verifier
 from tests.test_coach import NEWS, NOW, REVIEW, data  # noqa: F401  (data is a fixture)
 
 FIXTURE = Path(__file__).resolve().parent.parent / "presentation" / "web" / "src" / "test" / "snapshot.json"
@@ -39,10 +41,14 @@ def write(tmp_path, name, body):
     (reports / name).write_text(json.dumps(body), encoding="utf-8")
 
 
+def make(data_dir, user="u1", **kw):
+    app = create_app(data_dir, db=kw.pop("db", FakeAppDB({"u1": 42})), verifier=verifier(), **kw)
+    return TestClient(app, headers={"Authorization": f"Bearer {token(sub=user)}"})
+
+
 @pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("FPL_COACH_ENTRY", "42")
-    return TestClient(create_app(tmp_path))
+def client(tmp_path):
+    return make(tmp_path)
 
 
 def test_latest_is_the_newest_run(tmp_path):
@@ -64,7 +70,7 @@ def test_snapshot_endpoint_adds_call_and_status(tmp_path, client):
     assert r.status_code == 200
     assert set(KEYS) | {"call", "status"} <= set(r.json())
     assert client.get("/api/health").json() == {"ok": True}
-    assert client.get("/api/me").json() == {"entry": 42}
+    assert client.get("/api/me").json() == {"entry": 42, "entries": [42]}
 
 
 def test_other_entry_forbidden(client):
@@ -74,12 +80,6 @@ def test_other_entry_forbidden(client):
 def test_missing_snapshot_404_says_what_to_run(client):
     r = client.get("/api/entries/42/snapshot")
     assert r.status_code == 404 and "python -m orchestration.coach --entry 42" in r.json()["detail"]
-
-
-def test_me_without_env_503(tmp_path, monkeypatch):
-    monkeypatch.delenv("FPL_COACH_ENTRY", raising=False)
-    r = TestClient(create_app(tmp_path)).get("/api/me")
-    assert r.status_code == 503 and "FPL_COACH_ENTRY" in r.json()["detail"]
 
 
 @pytest.mark.parametrize("over, title, chip, reason", [
@@ -108,12 +108,6 @@ def test_run_status_cases():
     assert views.run_status(pulled_after_start, T0 + timedelta(minutes=1), T0)["stale"] is False
 
 
-def test_me_rejects_non_ascii_digits(tmp_path, monkeypatch):
-    monkeypatch.setenv("FPL_COACH_ENTRY", "²")  # superscript two: str.isdigit() but not an int
-    r = TestClient(create_app(tmp_path)).get("/api/me")
-    assert r.status_code == 503 and "FPL_COACH_ENTRY" in r.json()["detail"]
-
-
 def test_fresh_run_not_stale_until_a_later_pull(data, monkeypatch):  # noqa: F811
     """The coach pulls data after its clock starts; only a pull after the run's own pull is new data."""
     after = NOW + timedelta(minutes=1)
@@ -126,9 +120,8 @@ def test_fresh_run_not_stale_until_a_later_pull(data, monkeypatch):  # noqa: F81
 
     monkeypatch.setattr(coach, "ensure_fresh_data", fresh)
     coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]))
-    monkeypatch.setenv("FPL_COACH_ENTRY", "42")
     monkeypatch.setattr("presentation.api.app.utcnow", lambda: NOW + timedelta(minutes=5))
-    get = lambda: TestClient(create_app(data)).get("/api/entries/42/snapshot").json()["status"]  # noqa: E731
+    get = lambda: make(data).get("/api/entries/42/snapshot").json()["status"]  # noqa: E731
     assert get() == {"stale": False, "reason": None}
     meta = storage.load_json("metadata", data)
     storage.save_json(meta | {"pulled_at": (NOW + timedelta(hours=2)).replace(tzinfo=None).isoformat()}, "metadata",
@@ -142,9 +135,63 @@ def test_web_fixture_up_to_date(data, monkeypatch):  # noqa: F811
     players.loc[players["id"] == owned, ["chance_of_playing_next_round", "news"]] = [75, "Knock, 75% chance of playing"]
     storage.save_table(players, "players", data)
     coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]))
-    monkeypatch.setenv("FPL_COACH_ENTRY", "42")
     monkeypatch.setattr("presentation.api.app.utcnow", lambda: NOW)
-    body = TestClient(create_app(data)).get("/api/entries/42/snapshot").json()
+    body = make(data).get("/api/entries/42/snapshot").json()
     if os.environ.get("UPDATE_WEB_FIXTURE"):
         FIXTURE.write_text(json.dumps(body, indent=2) + "\n", encoding="utf-8")
     assert body == json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def test_no_token_401(tmp_path):
+    r = make(tmp_path).get("/api/me", headers={"Authorization": ""})
+    assert r.status_code == 401 and r.json()["detail"] == "Sign in again."
+
+
+def test_unknown_user_403(tmp_path):
+    r = make(tmp_path, user="stranger").get("/api/me")
+    assert r.status_code == 403 and r.json()["detail"] == "This account has no team."
+
+
+def test_other_entry_403_message(client):
+    assert client.get("/api/entries/7/snapshot").json()["detail"] == "Not your team."
+
+
+def test_me_lists_entries(client):
+    assert client.get("/api/me").json() == {"entry": 42, "entries": [42]}
+
+
+def test_settings_get_and_patch(tmp_path, monkeypatch):
+    monkeypatch.setattr("presentation.api.app.utcnow", lambda: T0)
+    db = FakeAppDB({"u1": 42})
+    db.record_spend(1, "auto", 2.5, T0)
+    c = make(tmp_path, db=db)
+    assert c.get("/api/settings").json() == {"cap_gbp": 5.0, "auto_runs": True, "ai_off": False, "spent_gbp": 2.0,
+                                             "month": "November 2026"}
+    r = c.patch("/api/settings", json={"cap_gbp": 10, "ai_off": True})
+    assert r.json() == {"cap_gbp": 10, "auto_runs": True, "ai_off": True, "spent_gbp": 2.0, "month": "November 2026"}
+    assert c.patch("/api/settings", json={}).json()["cap_gbp"] == 10
+
+
+@pytest.mark.parametrize("body", [{"cap_gbp": 51}, {"cap_gbp": -1}, {"usd_per_gbp": 9}])
+def test_settings_bad_body_422(client, body):
+    assert client.patch("/api/settings", json=body).status_code == 422
+
+
+def test_rate_limit_429(client):
+    codes = [client.get("/api/me").status_code for _ in range(61)]
+    assert codes[:60] == [200] * 60 and codes[60] == 429
+    assert client.get("/api/me").json()["detail"] == "Too many requests. Try again shortly."
+    assert client.get("/api/health").status_code == 200
+
+
+def test_patch_settings_limited_to_20_an_hour(client):
+    codes = [client.patch("/api/settings", json={"ai_off": True}).status_code for _ in range(21)]
+    assert codes[:20] == [200] * 20 and codes[20] == 429
+
+
+def test_cors_allows_only_origin(tmp_path):
+    c = make(tmp_path, allowed_origin="https://app.example")
+    pre = lambda o: c.options("/api/me", headers={"Origin": o, "Access-Control-Request-Method": "GET",  # noqa: E731
+                                                  "Access-Control-Request-Headers": "Authorization"})
+    assert pre("https://evil.example").headers.get("access-control-allow-origin") is None
+    assert pre("https://app.example").headers["access-control-allow-origin"] == "https://app.example"

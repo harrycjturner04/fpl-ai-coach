@@ -239,7 +239,8 @@ cannot be backtested; they are evaluated on the 2026/27 forward test. See [docs/
 
 Stage 7a adds a read-only web app over the latest coach run (Team screen: pitch with minutes rings, the coach's plan,
 news flags, chips worth playing soon). Each coach run now also writes `data/reports/<entry>_gw<N>_<stamp>.json`
-beside the Markdown report; the app reads that file. Put your team ID in `.env` (`FPL_COACH_ENTRY=1234567`), run the
+beside the Markdown report; the app reads that file. The API now needs a Supabase login (`SUPABASE_URL`, `DATABASE_URL`; see the 7b deploy notes), so the
+login-free local mode is gone. Run the
 coach once, then start the two servers:
 
 ```bash
