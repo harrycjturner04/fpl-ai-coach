@@ -195,3 +195,12 @@ def test_cors_allows_only_origin(tmp_path):
                                                   "Access-Control-Request-Headers": "Authorization"})
     assert pre("https://evil.example").headers.get("access-control-allow-origin") is None
     assert pre("https://app.example").headers["access-control-allow-origin"] == "https://app.example"
+
+
+def test_basic_auth_401(tmp_path):
+    assert make(tmp_path).get("/api/me", headers={"Authorization": "Basic x"}).status_code == 401
+
+
+def test_wildcard_origin_refused(tmp_path):
+    with pytest.raises(ValueError, match="ALLOWED_ORIGIN"):
+        create_app(tmp_path, db=FakeAppDB(), verifier=verifier(), allowed_origin="*")

@@ -36,6 +36,8 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
     db = db or AppDB()
     verifier = verifier or Verifier(os.environ["SUPABASE_URL"])
     allowed_origin = allowed_origin or os.environ.get("ALLOWED_ORIGIN")
+    if allowed_origin == "*":
+        raise ValueError("ALLOWED_ORIGIN must be the web app's origin, not '*'.")
     general, patches = RateLimiter(60, 60), RateLimiter(20, 3600)
     if allowed_origin:
         app.add_middleware(CORSMiddleware, allow_origins=[allowed_origin], allow_methods=["GET", "POST", "PATCH"],

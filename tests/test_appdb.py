@@ -145,3 +145,8 @@ def test_api_roles_no_sequence_access(db, role, seq):
         c.execute(f"set role {role}")
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
             c.execute(f"select nextval('{seq}')")
+
+
+def test_reconnects_after_dropped_connection(db):
+    db.conn.close()
+    assert db.settings()["cap_gbp"] == 5.0

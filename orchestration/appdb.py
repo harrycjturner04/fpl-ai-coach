@@ -31,10 +31,24 @@ def _plain(row: dict | None) -> dict | None:
 
 class AppDB:
     def __init__(self, url: str | None = None):
-        self.conn = psycopg.connect(url or os.environ["DATABASE_URL"], autocommit=True, row_factory=dict_row)
+        self.url = url or os.environ["DATABASE_URL"]
+        self.conn = self._connect()
+
+    def _connect(self):
+        return psycopg.connect(self.url, autocommit=True, row_factory=dict_row)
+
+    def _exec(self, sql: str, args=()):
+        """Run one statement; reconnect and retry once if the pooler dropped the connection."""
+        try:
+            if self.conn.closed:
+                self.conn = self._connect()
+            return self.conn.execute(sql, args)
+        except psycopg.OperationalError:
+            self.conn = self._connect()
+            return self.conn.execute(sql, args)
 
     def _one(self, sql: str, args=()) -> dict | None:
-        return _plain(self.conn.execute(sql, args).fetchone())
+        return _plain(self._exec(sql, args).fetchone())
 
     def settings(self) -> dict:
         return self._one(f"select {', '.join(_SETTINGS)} from settings")
@@ -44,7 +58,7 @@ class AppDB:
         if bad:
             raise ValueError(f"unknown settings: {sorted(bad)}")
         sets = ", ".join(f"{k} = %({k})s" for k in fields)
-        self.conn.execute(f"update settings set {sets}", fields)
+        self._exec(f"update settings set {sets}", fields)
         return self.settings()
 
     def month_spend_usd(self, now: datetime) -> float:
@@ -65,19 +79,19 @@ class AppDB:
         return row["id"] if row else None
 
     def start_run(self, run_id: int, data_pulled_at: datetime | None) -> None:
-        self.conn.execute("update runs set status = 'running', started_at = now(), data_pulled_at = %s where id = %s",
+        self._exec("update runs set status = 'running', started_at = now(), data_pulled_at = %s where id = %s",
                           (data_pulled_at, run_id))
 
     def add_step(self, run_id: int, name: str, secs: float) -> None:
-        self.conn.execute("update runs set steps = steps || %s where id = %s",
+        self._exec("update runs set steps = steps || %s where id = %s",
                           (Jsonb([{"name": name, "secs": secs}]), run_id))
 
     def finish_run(self, run_id: int, status: str, error: str | None = None, cost_usd: float | None = None) -> None:
-        self.conn.execute("update runs set status = %s, error = %s, cost_usd = %s, finished_at = now() where id = %s",
+        self._exec("update runs set status = %s, error = %s, cost_usd = %s, finished_at = now() where id = %s",
                           (status, error, cost_usd, run_id))
 
     def record_spend(self, run_id: int | None, kind: str, cost_usd: float, at: datetime) -> None:
-        self.conn.execute("insert into spend (run_id, kind, cost_usd, at) values (%s, %s, %s, %s)",
+        self._exec("insert into spend (run_id, kind, cost_usd, at) values (%s, %s, %s, %s)",
                           (run_id, kind, cost_usd, at))
 
     def get_run(self, run_id: int) -> dict | None:
@@ -91,18 +105,18 @@ class AppDB:
         return self._one("select * from runs where entry = %s order by id desc limit 1", (entry,))
 
     def auto_runs_for(self, entry: int, gameweek: int) -> list[dict]:
-        rows = self.conn.execute("select * from runs where entry = %s and gameweek = %s and kind = 'auto' "
+        rows = self._exec("select * from runs where entry = %s and gameweek = %s and kind = 'auto' "
                                  "order by id desc", (entry, gameweek)).fetchall()
         return [_plain(r) for r in rows]
 
     def entries_for(self, user_id: str) -> list[int]:
-        return [r["entry"] for r in self.conn.execute("select entry from app_users where user_id = %s", (user_id,))]
+        return [r["entry"] for r in self._exec("select entry from app_users where user_id = %s", (user_id,))]
 
     def all_entries(self) -> list[int]:
-        return [r["entry"] for r in self.conn.execute("select distinct entry from app_users")]
+        return [r["entry"] for r in self._exec("select distinct entry from app_users")]
 
     def acquire_lock(self, name: str, holder: str, now: datetime) -> bool:
-        row = self.conn.execute(
+        row = self._exec(
             "insert into job_lock (name, holder, expires_at) values (%(name)s, %(holder)s, %(exp)s) "
             "on conflict (name) do update set holder = excluded.holder, expires_at = excluded.expires_at "
             "where job_lock.expires_at < %(now)s returning holder",
@@ -110,4 +124,4 @@ class AppDB:
         return row is not None
 
     def release_lock(self, name: str, holder: str) -> None:
-        self.conn.execute("delete from job_lock where name = %s and holder = %s", (name, holder))
+        self._exec("delete from job_lock where name = %s and holder = %s", (name, holder))
