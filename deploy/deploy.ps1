@@ -12,6 +12,7 @@ $Bucket = "fpl-ai-coach-data"
 $Registry = "$Region-docker.pkg.dev/$Project/fpl"
 $Repo = Split-Path -Parent $PSScriptRoot
 $Web = Join-Path $Repo "presentation\web"
+$Wrangler = "wrangler@4.168.0"
 
 function Read-DotEnv([string]$Path) {
     # Same rules as ingestion/env.py: NAME=value, skip blanks and comments, strip quotes, shell values win.
@@ -77,13 +78,13 @@ $schedulerSa = "fpl-scheduler@$Project.iam.gserviceaccount.com"
 
 Step "Build and push images ($tag)"
 foreach ($name in @("api", "job")) {
-    Invoke-Native docker @("build", "-f", (Join-Path $Repo "deploy\$name.Dockerfile"), "-t", "$Registry/${name}:$tag", $Repo)
+    Invoke-Native docker @("build", "--platform=linux/amd64", "--provenance=false", "-f", (Join-Path $Repo "deploy\$name.Dockerfile"), "-t", "$Registry/${name}:$tag", $Repo)
     Invoke-Native docker @("push", "$Registry/${name}:$tag")
 }
 
 Step "Cloud Run Job coach"
 Invoke-Native gcloud.cmd @("run", "jobs", "deploy", "coach", "--image=$Registry/job:$tag", "--region=$Region",
-    "--service-account=$jobSa", "--cpu=4", "--memory=8Gi", "--task-timeout=3600", "--max-retries=0",
+    "--service-account=$jobSa", "--cpu=4", "--memory=8Gi", "--task-timeout=3600", "--max-retries=0", "--args=daily",
     "--set-env-vars=FPL_COACH_BUCKET=$Bucket,FPL_COACH_DATA_DIR=/tmp/data",
     "--set-secrets=ANTHROPIC_API_KEY=ANTHROPIC_API_KEY:latest,FOOTBALL_DATA_API_KEY=FOOTBALL_DATA_API_KEY:latest,DATABASE_URL=DATABASE_URL:latest")
 
@@ -93,10 +94,10 @@ Invoke-Native gcloud.cmd @("run", "jobs", "add-iam-policy-binding", "coach", "--
 Invoke-Native gcloud.cmd @("run", "jobs", "add-iam-policy-binding", "coach", "--region=$Region",
     "--member=serviceAccount:$schedulerSa", "--role=roles/run.invoker")
 
-Step "Scheduler job daily (06:00 Europe/London, args daily)"
-# Body from a file: PowerShell 5.1 strips the inner quotes of JSON passed as a native argument.
+Step "Scheduler job daily (06:00 Europe/London, runs the job's default args: daily)"
+# Empty body, no overrides: run.invoker does not allow overrides. From a file: PowerShell 5.1 strips quotes in native args.
 $body = Join-Path $env:TEMP "fpl-scheduler-body.json"
-[IO.File]::WriteAllText($body, '{"overrides":{"containerOverrides":[{"args":["daily"]}]}}')
+[IO.File]::WriteAllText($body, '{}')
 $schedule = @("--location=$Region", "--schedule=0 6 * * *", "--time-zone=Europe/London",
     "--uri=https://run.googleapis.com/v2/$($coachJob):run", "--http-method=POST", "--message-body-from-file=$body",
     "--oauth-service-account-email=$schedulerSa")
@@ -132,8 +133,9 @@ try {
     $headers = (Get-Content -Raw (Join-Path $PSScriptRoot "headers.template")).Replace("{{API_ORIGIN}}", $apiUrl).Replace("{{SUPABASE_ORIGIN}}", $supabaseUrl)
     Write-Host "> write dist\_headers (connect-src $apiUrl $supabaseUrl)"
     if (-not $DryRun) { [IO.File]::WriteAllText((Join-Path $Web "dist\_headers"), $headers) }
-    Invoke-Native npx.cmd @("wrangler", "pages", "deploy", "dist", "--project-name=$pagesProject", "--branch=main")
+    Invoke-Native npx.cmd @("--yes", $Wrangler, "pages", "deploy", "dist", "--project-name=$pagesProject", "--branch=main")
 } finally { Pop-Location }
 
 Write-Host "`nDone. App: https://$pagesProject.pages.dev  api: $apiUrl"
 Write-Host "api ALLOWED_ORIGIN is $allowedOrigin; if the app is served elsewhere, set ALLOWED_ORIGIN in .env and re-run."
+Write-Host "Manual runs: gcloud run jobs execute coach --region $Region (daily); a coach run: --args=coach,--entry,E,--run-id,R"

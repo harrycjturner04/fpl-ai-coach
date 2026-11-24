@@ -1,7 +1,8 @@
 # One-off cloud setup for the FPL AI Coach (safe to re-run). Run from any folder:
 #   powershell -File deploy\setup.ps1 [-DryRun]
 # .env keys needed: ANTHROPIC_API_KEY, FOOTBALL_DATA_API_KEY, DATABASE_URL (secrets), SUPABASE_URL (project ref)
-# Also needs: gcloud signed in with project fpl-ai-coach, and `npx wrangler login` done once.
+# Optional: PAGES_PROJECT (default fpl-ai-coach).
+# Also needs: gcloud signed in with project fpl-ai-coach, and `npx --yes wrangler@4.168.0 login` done once.
 param([switch]$DryRun)
 $ErrorActionPreference = "Stop"
 
@@ -9,6 +10,7 @@ $Project = "fpl-ai-coach"
 $Region = "europe-west2"
 $Bucket = "fpl-ai-coach-data"
 $Secrets = @("ANTHROPIC_API_KEY", "FOOTBALL_DATA_API_KEY", "DATABASE_URL")
+$Wrangler = "wrangler@4.168.0"
 $Repo = Split-Path -Parent $PSScriptRoot
 
 function Read-DotEnv([string]$Path) {
@@ -44,6 +46,25 @@ function Test-Native([string]$Exe, [string[]]$Arguments) {
     $LASTEXITCODE -eq 0
 }
 
+function Write-Stdin([string]$Exe, [string]$Arguments, [string]$Value) {
+    # Sends $Value on stdin with no newline and no BOM (a PowerShell pipe adds a newline; .NET adds a
+    # UTF-8 BOM when the console input code page is 65001). Returns the exit code.
+    $saved = [Console]::InputEncoding
+    try {
+        [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $Exe
+        $psi.Arguments = $Arguments
+        $psi.UseShellExecute = $false
+        $psi.RedirectStandardInput = $true
+        $proc = [System.Diagnostics.Process]::Start($psi)
+        $proc.StandardInput.Write($Value)
+        $proc.StandardInput.Close()
+        $proc.WaitForExit()
+        $proc.ExitCode
+    } finally { [Console]::InputEncoding = $saved }
+}
+
 function Step([string]$Text) { Write-Host "`n== $Text" -ForegroundColor Cyan }
 
 $envVars = Read-DotEnv (Join-Path $Repo ".env")
@@ -74,6 +95,7 @@ if (-not (Test-Native gcloud.cmd @("storage", "buckets", "describe", "gs://$Buck
     Invoke-Native gcloud.cmd @("storage", "buckets", "create", "gs://$Bucket", "--location=$Region",
         "--uniform-bucket-level-access", "--public-access-prevention")
 }
+Invoke-Native gcloud.cmd @("storage", "buckets", "update", "gs://$Bucket", "--uniform-bucket-level-access", "--public-access-prevention")
 
 Step "Secrets (values from .env, sent on stdin, never shown)"
 foreach ($name in $Secrets) {
@@ -86,17 +108,12 @@ foreach ($name in $Secrets) {
     if ($current -ceq $envVars[$name]) { Write-Host "$name unchanged"; continue }
     Write-Host "> gcloud secrets versions add $name --data-file=-  (value on stdin)"
     if ($DryRun) { continue }
-    # Process with redirected stdin: a PowerShell pipe would append a newline to the secret.
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = (Get-Command gcloud.cmd).Source
-    $psi.Arguments = "secrets versions add $name --data-file=-"
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardInput = $true
-    $proc = [System.Diagnostics.Process]::Start($psi)
-    $proc.StandardInput.Write($envVars[$name])
-    $proc.StandardInput.Close()
-    $proc.WaitForExit()
-    if ($proc.ExitCode -ne 0) { throw "gcloud secrets versions add $name failed (exit $($proc.ExitCode))" }
+    $code = Write-Stdin (Get-Command gcloud.cmd).Source "secrets versions add $name --data-file=-" $envVars[$name]
+    if ($code -ne 0) { throw "gcloud secrets versions add $name failed (exit $code)" }
+    $ErrorActionPreference = "Continue"
+    $stored = (& gcloud.cmd secrets versions access latest "--secret=$name" 2>$null) -join "`n"
+    $ErrorActionPreference = "Stop"
+    if ($stored -cne $envVars[$name]) { throw "$name read back from Secret Manager does not match .env (value not shown)." }
 }
 
 Step "Service accounts"
@@ -119,14 +136,17 @@ foreach ($name in $Secrets) {
 }
 Write-Host "Job-level roles (api: run.jobsExecutorWithOverrides, scheduler: run.invoker) are applied by deploy.ps1 once job coach exists."
 
-Step "Cloudflare Pages project fpl-ai-coach"
+$pagesProject = $envVars["PAGES_PROJECT"]
+if (-not $pagesProject) { $pagesProject = "fpl-ai-coach" }
+Step "Cloudflare Pages project $pagesProject"
 $ErrorActionPreference = "Continue"
-$pages = (& npx.cmd wrangler pages project list 2>$null) -join "`n"
+$pages = (& npx.cmd --yes $Wrangler pages project list 2>$null) -join "`n"
 $listed = $LASTEXITCODE -eq 0
 $ErrorActionPreference = "Stop"
-if (-not $listed) { throw "npx wrangler pages project list failed; run: npx wrangler login" }
-if ($pages -notmatch "\bfpl-ai-coach\b") {
-    Invoke-Native npx.cmd @("wrangler", "pages", "project", "create", "fpl-ai-coach", "--production-branch=main")
+if (-not $listed) { throw "npx $Wrangler pages project list failed; run: npx --yes $Wrangler login" }
+$cell = '[\s|' + [char]0x2502 + ']'  # wrangler prints a box-drawn table
+if ($pages -notmatch "(^|$cell)$([regex]::Escape($pagesProject))($cell|$)") {
+    Invoke-Native npx.cmd @("--yes", $Wrangler, "pages", "project", "create", $pagesProject, "--production-branch=main")
 }
 
 Step "Supabase (run these yourself)"
