@@ -91,3 +91,20 @@ export type SnapshotResponse = Snapshot & {
   call: { title: string; reason: string; chip: string | null };
   status: { stale: boolean; reason: string | null };
 };
+
+export interface Run {
+  id: number;
+  entry: number;
+  gameweek: number;
+  kind: string;
+  status: "queued" | "running" | "done" | "failed" | "blocked";
+  steps: { name: string; secs: number }[];
+  error: string | null;
+  cost_usd: number | null;
+  data_pulled_at: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  steps_expected: string[];
+  data_age_hours: number | null;
+}

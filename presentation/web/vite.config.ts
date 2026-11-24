@@ -17,7 +17,7 @@ export default defineConfig({
         icons: [{ src: "icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any maskable" }],
       },
       workbox: {
-        runtimeCaching: [{ urlPattern: /\/api\/entries\/.*\/snapshot/, handler: "StaleWhileRevalidate" }],
+        runtimeCaching: [{ urlPattern: /\/api\/entries\/.*\/snapshot/, handler: "StaleWhileRevalidate", options: { cacheName: "snapshots" } }],
       },
     }),
   ],

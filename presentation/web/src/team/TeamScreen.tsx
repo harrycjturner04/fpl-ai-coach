@@ -7,10 +7,11 @@ import { Issues } from "./Issues";
 import { chipName, deadlineLabel, moves, runLabel, transfersSummary } from "./model";
 import { Pitch } from "./Pitch";
 import "./team.css";
+import "../app.css";
 
 type Tab = { id: "team" | "plan"; label: string; week: Week };
 
-export function TeamScreen({ data, now = new Date() }: { data: SnapshotResponse; now?: Date }) {
+export function TeamScreen({ data, now = new Date(), onSettings }: { data: SnapshotResponse; now?: Date; onSettings: () => void }) {
   const plan = data.plan.weeks[0];
   const tabs: Tab[] = [
     ...(data.current ? [{ id: "team", label: "Your team", week: data.current } as const] : []),
@@ -37,6 +38,7 @@ export function TeamScreen({ data, now = new Date() }: { data: SnapshotResponse;
         <div className="head-row">
           <h1>{data.team_name}</h1>
           <p>{deadlineLabel(data.gameweek, data.deadline, now)}</p>
+          <button className="gear" aria-label="Settings" onClick={onSettings}>⚙</button>
         </div>
         {data.status.stale
           ? <p className="run stale" role="status">{data.status.reason}</p>

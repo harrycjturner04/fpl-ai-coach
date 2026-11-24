@@ -4,6 +4,12 @@ import type { SnapshotResponse } from "./types";
 import App from "./App";
 import fixture from "./test/snapshot.json";
 
+vi.mock("./auth", () => ({
+  accessToken: () => Promise.resolve("tok"),
+  onAuthChange: (cb: (s: boolean) => void) => { cb(true); return () => {}; },
+  signOut: vi.fn(),
+}));
+
 afterEach(() => vi.unstubAllGlobals());
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
