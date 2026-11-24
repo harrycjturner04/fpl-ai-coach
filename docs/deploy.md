@@ -147,11 +147,11 @@ Runs the app against a local Supabase, with runs launched as local processes on 
    in its SQL editor: `insert into app_users (user_id, entry) values ('<user id>', <FPL team ID>);`
 2. api, with these set in the shell:
    `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres`, `SUPABASE_URL=http://127.0.0.1:54321`,
-   `LAUNCHER=local`, and no `FPL_COACH_BUCKET`; then
+   `LAUNCHER=local`; then
    `python -m uvicorn presentation.api.app:app --host 127.0.0.1 --port 8000`. The api also loads `.env`, but shell
-   values win, so set each of these in the shell to override the hosted ones. An empty value does not unset a
-   variable in PowerShell, so comment out `FPL_COACH_BUCKET` in `.env` (or start the api from Git Bash with
-   `FPL_COACH_BUCKET=`).
+   values win, so set each of these in the shell to override the hosted ones. With a local `DATABASE_URL`, jobs
+   automatically ignore `FPL_COACH_BUCKET` and work on local files only, and `python -m orchestration.bucket`
+   refuses to push or pull, because the local database's lock would not protect the live data.
 3. Web: `presentation/web/.env.local` with `VITE_SUPABASE_URL=http://127.0.0.1:54321` and
    `VITE_SUPABASE_ANON_KEY=` the local publishable key from `npx supabase status`; then `npm run dev` in
    `presentation/web`.

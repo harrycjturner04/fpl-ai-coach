@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from urllib.parse import urlparse
 
 import psycopg
 from psycopg.rows import dict_row
@@ -26,6 +27,11 @@ def block_reason(spent_usd: float, cap_gbp: float, usd_per_gbp: float, ai_off: b
     if spent + est > cap_gbp:
         return f"Monthly AI cap: £{spent:.2f} of £{cap_gbp:.2f} spent; a run (about £{est:.2f}) would go over."
     return None
+
+
+def is_local_db(url: str | None) -> bool:
+    """True when the database URL points at this machine (a local Supabase), not the live database."""
+    return urlparse(url or "").hostname in ("127.0.0.1", "localhost", "::1")
 
 
 def _plain(row: dict | None) -> dict | None:

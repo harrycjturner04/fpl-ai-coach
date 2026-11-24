@@ -249,3 +249,29 @@ def test_admin_pause_sets_flag_and_pauses_scheduler():
     admin.set_paused(True, db, run=lambda cmd, check: cmds.append((cmd[1:], check)))
     assert db.settings()["ai_off"] is True
     assert cmds == [(["scheduler", "jobs", "pause", "daily", "--location", "europe-west2"], True)]
+
+
+def test_main_with_local_database_ignores_the_bucket(monkeypatch, capsys):
+    monkeypatch.setattr(job, "load_env", lambda: None)
+    monkeypatch.setenv("FPL_COACH_BUCKET", "live-bucket")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://postgres:postgres@127.0.0.1:54322/postgres")
+    monkeypatch.setattr(job.bucket_sync, "open_bucket", lambda name: pytest.fail("opened the bucket"))
+    monkeypatch.setattr(job, "AppDB", FakeAppDB)
+    seen = []
+    monkeypatch.setattr(job, "run_daily", lambda db, bucket, *a: seen.append(bucket))
+    job.main(["daily"])
+    assert seen == [None]
+    assert "Local database: working on local files only, not the bucket." in capsys.readouterr().out
+
+
+def test_main_with_live_database_opens_the_bucket(monkeypatch):
+    monkeypatch.setattr(job, "load_env", lambda: None)
+    monkeypatch.setenv("FPL_COACH_BUCKET", "live-bucket")
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db.example.com:5432/postgres")
+    fake = FakeBucket()
+    monkeypatch.setattr(job.bucket_sync, "open_bucket", lambda name: fake)
+    monkeypatch.setattr(job, "AppDB", FakeAppDB)
+    seen = []
+    monkeypatch.setattr(job, "run_daily", lambda db, bucket, *a: seen.append(bucket))
+    job.main(["daily"])
+    assert seen == [fake]

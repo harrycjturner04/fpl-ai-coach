@@ -9,6 +9,11 @@ from tests.fake_appdb import FakeAppDB
 from tests.fake_bucket import FakeBucket
 
 
+@pytest.fixture(autouse=True)
+def _live_db_url(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://u:p@db.example.com:5432/postgres")
+
+
 def _write(root, rel, text):
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -123,3 +128,12 @@ def test_pull_over_read_only_file(tmp_path):
         assert target.read_text() == "new"
     finally:
         os.chmod(target, stat.S_IWRITE | stat.S_IREAD)
+
+
+@pytest.mark.parametrize("url", ["postgresql://postgres:postgres@127.0.0.1:54322/postgres", "postgresql://u@localhost/x",
+                                 "postgresql://u@[::1]/x"])
+def test_main_refuses_local_database(tmp_path, monkeypatch, url):
+    monkeypatch.setenv("DATABASE_URL", url)
+    monkeypatch.setattr(sync, "open_bucket", lambda name: pytest.fail("opened the bucket"))
+    with pytest.raises(SystemExit, match="Refusing to sync the bucket with a local database"):
+        sync.main(["push", "--bucket", "b", "--data-dir", str(tmp_path)], db=FakeAppDB())

@@ -18,7 +18,7 @@ from ingestion import storage
 from ingestion.env import load_env
 from orchestration import bucket as bucket_sync
 from orchestration import coach
-from orchestration.appdb import AppDB
+from orchestration.appdb import AppDB, is_local_db
 
 LOCK = "data"
 WINDOW = timedelta(hours=36)
@@ -143,6 +143,9 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
     load_env()
     name = os.environ.get("FPL_COACH_BUCKET")
+    if name and is_local_db(os.environ.get("DATABASE_URL")):
+        print("Local database: working on local files only, not the bucket.")
+        name = None
     bucket, db, now = bucket_sync.open_bucket(name) if name else None, AppDB(), datetime.now(timezone.utc)
     if args.job == "daily":
         run_daily(db, bucket, storage.DATA_DIR, now)

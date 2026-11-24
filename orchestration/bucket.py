@@ -14,7 +14,7 @@ import google_crc32c
 
 from ingestion.env import load_env
 from ingestion.storage import DATA_DIR
-from orchestration.appdb import AppDB
+from orchestration.appdb import AppDB, is_local_db
 
 SKIP_PREFIXES = ("raw/", "logs/")
 
@@ -79,6 +79,9 @@ def main(argv: list[str] | None = None, db=None) -> None:
     args = ap.parse_args(argv)
     if not args.bucket:
         ap.error("set --bucket or FPL_COACH_BUCKET")
+    if is_local_db(os.environ.get("DATABASE_URL")):
+        raise SystemExit("Refusing to sync the bucket with a local database: its lock would not protect the live "
+                         "data. Unset DATABASE_URL's local value first.")
     db, holder = db or AppDB(), f"manual-{args.action}"
     if not db.acquire_lock("data", holder, datetime.now(timezone.utc)):
         raise SystemExit("Data is locked by a running job; try again later.")

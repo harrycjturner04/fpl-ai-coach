@@ -1,16 +1,15 @@
 from datetime import datetime, timedelta, timezone
 import os
 import uuid
-from urllib.parse import urlparse
 
 import psycopg
 import pytest
 
-from orchestration.appdb import AppDB
+from orchestration.appdb import AppDB, is_local_db
 
 pytestmark = pytest.mark.db
 URL = os.environ.get("DATABASE_URL", "")
-LOCAL = urlparse(URL).hostname in ("127.0.0.1", "localhost")
+LOCAL = is_local_db(URL)
 UTC = timezone.utc
 NOW = datetime(2026, 11, 20, 12, 0, tzinfo=UTC)
 
