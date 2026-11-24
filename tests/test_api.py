@@ -118,7 +118,7 @@ def test_fresh_run_not_stale_until_a_later_pull(data, monkeypatch):  # noqa: F81
     """The coach pulls data after its clock starts; only a pull after the run's own pull is new data."""
     after = NOW + timedelta(minutes=1)
 
-    def fresh(entry_id, data_dir, now):
+    def fresh(entry_id, data_dir, now, fetch):
         meta = storage.load_json("metadata", data_dir)
         storage.save_json(meta | {"pulled_at": after.isoformat(), "entries": {"42": after.isoformat()}}, "metadata",
                           data_dir)

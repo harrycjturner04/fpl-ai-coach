@@ -31,10 +31,10 @@ POSITION_ORDER = ["GKP", "DEF", "MID", "FWD"]
 
 
 def ensure_fresh_data(entry_id: int | None, data_dir: Path = storage.DATA_DIR,
-                      refresh=None, now: datetime | None = None) -> str:
-    """Re-pull the data if it's too old to optimise on; returns a one-line status."""
+                      refresh=None, now: datetime | None = None, fetch: bool = True) -> str:
+    """Re-pull the data if it's too old to optimise on (unless `fetch` is False); returns a one-line status."""
     now = now or datetime.now(timezone.utc)
-    reasons = freshness.stale_reasons(storage.load_json_or_none("metadata", data_dir), now, entry_id)
+    reasons = freshness.stale_reasons(storage.load_json_or_none("metadata", data_dir), now, entry_id) if fetch else []
     if reasons:
         print(f"Refreshing data ({'; '.join(reasons)})...")
         (refresh or (lambda: ingestion_cli.run(entry_id=entry_id, data_dir=data_dir)))()

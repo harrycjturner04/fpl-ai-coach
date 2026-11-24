@@ -176,3 +176,39 @@ def test_congestion_uses_the_run_date_and_season_end_exits_clearly(data, monkeyp
     storage.save_table(gws, "gameweeks", data)
     with pytest.raises(SystemExit, match="season has finished"):
         coach.run(42, data, now=NOW, client=FakeClient([]))
+
+
+def test_on_step_reports_each_lap(data):
+    steps = []
+    coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]), on_step=lambda n, s: steps.append((n, s)))
+    assert [n for n, _ in steps] == ["data", "predictions and initial solve", "news",
+                                     "adjusted predictions and headline solve", "chip scan", "write-up"]
+    assert all(s >= 0 for _, s in steps)
+
+
+def test_on_cost_fires_once_on_success(data):
+    costs = []
+    coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]), on_cost=costs.append)
+    assert len(costs) == 1 and costs[0] > 0
+
+
+def test_on_cost_fires_on_failure(data, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("review broke")
+    monkeypatch.setattr(coach, "write_report", boom)
+    costs = []
+    with pytest.raises(RuntimeError):
+        coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]), on_cost=costs.append)
+    assert len(costs) == 1 and costs[0] > 0
+
+
+def test_fetch_false_never_pulls(data, monkeypatch, capsys):
+    from ingestion import cli as ingestion_cli
+    meta = storage.load_json("metadata", data)
+    storage.save_json({**meta, "pulled_at": (NOW - timedelta(days=3)).isoformat()}, "metadata", data)
+
+    def no_pull(*a, **k):
+        raise AssertionError("pulled")
+    monkeypatch.setattr(ingestion_cli, "run", no_pull)
+    coach.run(42, data, now=NOW, client=FakeClient([*NEWS, REVIEW]), fetch=False)
+    assert "Data pulled 4320 min ago" in capsys.readouterr().out
