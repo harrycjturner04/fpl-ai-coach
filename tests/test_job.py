@@ -1,9 +1,10 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import pandas as pd
 import pytest
 
 from ingestion import storage
-from orchestration import job
+from orchestration import admin, job
 from tests.fake_appdb import FakeAppDB
 from tests.fake_bucket import FakeBucket
 
@@ -109,3 +110,93 @@ def test_add_step_failure_does_not_stop_the_run(setup):
         raise ConnectionError("db down")
     db.add_step = broken
     assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=ok_run) == "done"
+
+
+# daily and refresh
+
+def day_setup(tmp_path, hours=20, pulled="2026-11-10T08:00:00", **settings):
+    storage.save_json({"pulled_at": pulled}, "metadata", tmp_path)
+    storage.save_table(pd.DataFrame({"id": [9, 10], "is_next": [False, True],
+                                     "deadline_time": [NOW - timedelta(days=5), NOW + timedelta(hours=hours)]}),
+                       "gameweeks", tmp_path)
+    return FakeAppDB(entries={"u": 42}, **settings), tmp_path
+
+
+def counting(calls):
+    def run(entry, data_dir, **k):
+        calls.append(entry)
+    return run
+
+
+def test_daily_starts_one_auto_run_within_window(tmp_path):
+    db, data = day_setup(tmp_path)
+    calls = []
+    ids = job.run_daily(db, None, data, NOW, coach_run=counting(calls))
+    assert ids == [1] and calls == [42]
+    assert (db.runs[1]["kind"], db.runs[1]["gameweek"], db.runs[1]["status"]) == ("auto", 10, "done")
+
+
+def test_daily_twice_same_gw_runs_once(tmp_path):
+    db, data = day_setup(tmp_path)
+    calls = []
+    job.run_daily(db, None, data, NOW, coach_run=counting(calls))
+    assert job.run_daily(db, None, data, NOW, coach_run=counting(calls)) == [] and calls == [42]
+
+
+@pytest.mark.parametrize("hours", [40, -1])
+def test_daily_outside_window_does_nothing(tmp_path, hours):
+    db, data = day_setup(tmp_path, hours=hours)
+    assert job.run_daily(db, None, data, NOW, coach_run=counting([])) == [] and not db.runs
+
+
+def test_daily_old_data_blocks_once_per_day(tmp_path):
+    db, data = day_setup(tmp_path, pulled="2026-11-09T01:00:00")
+    for _ in range(2):
+        assert job.run_daily(db, None, data, NOW, coach_run=counting([])) == []
+        db.runs[1]["created_at"] = NOW  # the fake stamps real time; align it with the test clock
+    assert [(r["status"], r["error"]) for r in db.runs.values()] == [("blocked", "Data too old: switch on the PC.")]
+
+
+def test_daily_cap_blocks(tmp_path):
+    db, data = day_setup(tmp_path, ai_off=True)
+    calls = []
+    assert job.run_daily(db, None, data, NOW, coach_run=counting(calls)) == [] and not calls
+    assert [r["status"] for r in db.runs.values()] == ["blocked"] and db.runs[1]["error"]
+
+
+def test_daily_auto_runs_off_does_nothing(tmp_path):
+    db, data = day_setup(tmp_path, auto_runs=False)
+    assert job.run_daily(db, None, data, NOW, coach_run=counting([])) == [] and not db.runs
+
+
+def test_daily_retries_after_failed_auto_run(tmp_path):
+    db, data = day_setup(tmp_path)
+    job.run_daily(db, None, data, NOW, coach_run=failing_run)
+    assert db.runs[1]["status"] == "failed"
+    assert job.run_daily(db, None, data, NOW, coach_run=counting([])) == [2]
+
+
+def test_refresh_pulls_ingests_pushes_in_order(tmp_path):
+    db = FakeAppDB(entries={"u": 42})
+    bucket = FakeBucket({"processed/old.json": b"{}"})
+    seen = []
+
+    def ingest(entry_id, data_dir):
+        seen.append((entry_id, (data_dir / "processed/old.json").exists(), "data" in db.locks))
+        (data_dir / "processed/new.json").write_text("{}")
+    job.run_refresh(db, bucket, tmp_path, NOW, ingest=ingest)
+    assert seen == [(42, True, True)] and bucket.uploads == ["processed/new.json"] and "data" not in db.locks
+
+
+def test_refresh_gives_up_when_locked(tmp_path):
+    db = FakeAppDB()
+    db.acquire_lock("data", "other", NOW)
+    with pytest.raises(SystemExit, match="locked"):
+        job.run_refresh(db, None, tmp_path, NOW, ingest=lambda **k: None, wait_s=0)
+
+
+def test_admin_pause_sets_flag_and_pauses_scheduler():
+    db, cmds = FakeAppDB(), []
+    admin.set_paused(True, db, run=lambda cmd, check: cmds.append((cmd[1:], check)))
+    assert db.settings()["ai_off"] is True
+    assert cmds == [(["scheduler", "jobs", "pause", "daily", "--location", "europe-west2"], True)]
