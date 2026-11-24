@@ -8,6 +8,7 @@ export function Settings({ onBack }: { onBack: () => void }) {
   const [s, setS] = useState<S>();
   const [cap, setCap] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     let live = true;
@@ -19,10 +20,12 @@ export function Settings({ onBack }: { onBack: () => void }) {
 
   const save = (p: Parameters<typeof patchSettings>[0]) => {
     setError(null);
-    patchSettings(p).then((v) => { setS(v); setCap(String(v.cap_gbp)); }).catch((e) => setError(e.message));
+    setBusy(true);
+    patchSettings(p).then((v) => { setS(v); setCap(String(v.cap_gbp)); }).catch((e) => setError(e.message)).finally(() => setBusy(false));
   };
   const saveCap = () => {
     const n = Number(cap);
+    if (busy) return;
     if (cap.trim() === "" || !Number.isFinite(n) || n < 0 || n > 50) return setError("Enter a cap from 0 to 50 pounds.");
     if (n !== s?.cap_gbp) save({ cap_gbp: n });
     else setError(null);
@@ -42,8 +45,8 @@ export function Settings({ onBack }: { onBack: () => void }) {
           <input type="number" min={0} max={50} step={0.5} value={cap} onChange={(e) => setCap(e.target.value)} onBlur={saveCap} />
         </label>
         <p className="muted">£{s.spent_gbp.toFixed(2)} spent in {s.month}</p>
-        <Switch label="Automatic runs" on={s.auto_runs} set={(v) => save({ auto_runs: v })} />
-        <Switch label="AI off" on={s.ai_off} set={(v) => save({ ai_off: v })} />
+        <Switch busy={busy} label="Automatic runs" on={s.auto_runs} set={(v) => save({ auto_runs: v })} />
+        <Switch busy={busy} label="AI off" on={s.ai_off} set={(v) => save({ ai_off: v })} />
         {error && <p className="form-error" role="alert">{error}</p>}
       </form>
       <section className="box settings">
@@ -59,11 +62,11 @@ export function Settings({ onBack }: { onBack: () => void }) {
   );
 }
 
-function Switch({ label, on, set }: { label: string; on: boolean; set: (v: boolean) => void }) {
+function Switch({ label, on, set, busy }: { label: string; on: boolean; set: (v: boolean) => void; busy: boolean }) {
   return (
     <div className="switch-row">
       <span>{label}</span>
-      <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={() => set(!on)} />
+      <button type="button" role="switch" aria-checked={on} aria-label={label} disabled={busy} onClick={() => set(!on)} />
     </div>
   );
 }

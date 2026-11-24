@@ -38,7 +38,7 @@ export function TeamScreen({ data, now = new Date(), onSettings }: { data: Snaps
         <div className="head-row">
           <h1>{data.team_name}</h1>
           <p>{deadlineLabel(data.gameweek, data.deadline, now)}</p>
-          <button className="gear" aria-label="Settings" onClick={onSettings}>⚙</button>
+          <button className="gear" aria-label="Settings" onClick={onSettings}>⚙︎</button>
         </div>
         {data.status.stale
           ? <p className="run stale" role="status">{data.status.reason}</p>

@@ -8,6 +8,7 @@ vi.mock("./auth", () => ({
   accessToken: () => Promise.resolve("tok"),
   onAuthChange: (cb: (s: boolean) => void) => { cb(true); return () => {}; },
   signOut: vi.fn(),
+  configured: true,
 }));
 
 afterEach(() => vi.unstubAllGlobals());

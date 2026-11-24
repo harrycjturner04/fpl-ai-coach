@@ -1,4 +1,4 @@
-import { accessToken } from "./auth";
+import { accessToken, signOut } from "./auth";
 import type { Run, SnapshotResponse } from "./types";
 
 export class ApiError extends Error {
@@ -7,8 +7,10 @@ export class ApiError extends Error {
   }
 }
 
-const NO_SERVER = "The coach's server isn't running. Start it with: python -m uvicorn presentation.api.app:app --port 8000";
 const BASE = import.meta.env.VITE_API_BASE ?? "";
+const NO_SERVER = BASE
+  ? "Can't reach the coach's server. Check your connection and try again."
+  : "The coach's server isn't running. Start it with: python -m uvicorn presentation.api.app:app --port 8000";
 
 async function call<T>(path: string, method = "GET", body?: unknown): Promise<T> {
   const token = await accessToken();
@@ -24,6 +26,7 @@ async function call<T>(path: string, method = "GET", body?: unknown): Promise<T>
   }
   const data = await res.json().catch(() => null);
   if (!res.ok) {
+    if (res.status === 401) void signOut();
     const d = data?.detail;
     const detail = typeof d === "string" ? d : Array.isArray(d) ? d.map((x) => x.msg).join("; ") : res.statusText;
     throw new ApiError(res.status, detail, data?.reason);

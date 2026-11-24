@@ -2,7 +2,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { ApiError, getSnapshot, patchSettings } from "./api";
 import fixture from "./test/snapshot.json";
 
-vi.mock("./auth", () => ({ accessToken: () => Promise.resolve("tok") }));
+const signOut = vi.hoisted(() => vi.fn());
+vi.mock("./auth", () => ({ accessToken: () => Promise.resolve("tok"), signOut }));
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -42,4 +43,5 @@ it("joins FastAPI 422 detail arrays", async () => {
 it("maps 401 to ApiError(401)", async () => {
   reply(401, { detail: "Sign in again." });
   await expect(getSnapshot(42)).rejects.toMatchObject({ status: 401, detail: "Sign in again." });
+  expect(signOut).toHaveBeenCalled();
 });
