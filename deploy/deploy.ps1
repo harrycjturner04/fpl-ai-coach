@@ -66,7 +66,7 @@ $ErrorActionPreference = "Continue"
 $active = (& gcloud.cmd config get-value project 2>$null)
 $ErrorActionPreference = "Stop"
 if ($active -ne $Project) { throw "gcloud project is '$active'; run: gcloud config set project $Project" }
-if (& git -C $Repo status --porcelain) { throw "Uncommitted changes: commit first so the image tag (git sha) matches the code." }
+if (& git -C $Repo status --porcelain --untracked-files=no) { throw "Uncommitted changes: commit first so the image tag (git sha) matches the code." }
 $tag = (& git -C $Repo rev-parse --short HEAD)
 if ($LASTEXITCODE -ne 0) { throw "git rev-parse failed" }
 if ($DryRun) { Write-Host "DRY RUN: printing build and cloud-changing commands, not running them." -ForegroundColor Yellow }
