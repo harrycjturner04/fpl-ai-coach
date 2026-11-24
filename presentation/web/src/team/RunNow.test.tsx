@@ -88,6 +88,18 @@ it("shows the cap message with a Settings link on 409", async () => {
   expect(onSettings).toHaveBeenCalled();
 });
 
+it("shows a blocked run's error with a Settings link and no Try again", async () => {
+  m.startRun.mockResolvedValue(run({ status: "queued" }));
+  m.getRun.mockResolvedValue(run({ status: "blocked", error: "AI is off." }));
+  const { onSettings } = setup();
+  await press();
+  await tick();
+  expect(screen.getByText("AI is off.")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Try again" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(onSettings).toHaveBeenCalled();
+});
+
 it("shows a season block without a Settings link", async () => {
   const { ApiError } = await import("../api");
   m.startRun.mockRejectedValue(new ApiError(409, "The season is over.", "season"));

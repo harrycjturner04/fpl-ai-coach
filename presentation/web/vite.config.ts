@@ -21,7 +21,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        runtimeCaching: [{ urlPattern: /\/api\/entries\/\d+\/snapshot/, handler: "StaleWhileRevalidate", options: { cacheName: "snapshots" } }],
+        runtimeCaching: [{ urlPattern: ({ url }) => /^\/api\/entries\/\d+\/snapshot$/.test(url.pathname), handler: "NetworkFirst", options: { cacheName: "snapshots", networkTimeoutSeconds: 5 } }],
       },
     }),
   ],

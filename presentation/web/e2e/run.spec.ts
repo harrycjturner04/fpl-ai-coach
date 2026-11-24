@@ -28,6 +28,6 @@ test("runs the coach, ticks the steps, reloads the team, then shows the cap bloc
 
   await page.getByRole("button", { name: "Run the coach now" }).click();
   await expect(page.getByText("Monthly cap reached.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Settings", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("alert").getByRole("button", { name: "Settings" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });

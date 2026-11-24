@@ -20,13 +20,15 @@ export function RunNow({ entry, onDone, onSettings }: { entry: number; onDone: (
 
   useEffect(() => {
     if (!run || !active(run)) return;
+    let live = true;
     const t = setTimeout(() => {
       getRun(run.id).then((r) => {
+        if (!live) return;
         setRun(r);
         if (r.status === "done") onDone();
-      }, () => setRetry((n) => n + 1));  // network error: keep polling
+      }, () => live && setRetry((n) => n + 1));  // network error: keep polling
     }, POLL_MS);
-    return () => clearTimeout(t);
+    return () => { live = false; clearTimeout(t); };
   }, [run, retry, onDone]);
 
   const start = () => {
@@ -41,18 +43,19 @@ export function RunNow({ entry, onDone, onSettings }: { entry: number; onDone: (
   const running = active(run);
   const done = new Set(run?.steps.map((s) => s.name));
   const current = run?.status === "running" ? run.steps_expected.find((n) => !done.has(n)) : undefined;
+  const blocked = run?.status === "blocked";
   const failure = err ? err.detail : run?.status === "failed" || run?.status === "blocked" ? run.error : null;
   const age = run?.data_age_hours;
 
   return (
     <section className="run-now" aria-label="Run the coach">
       <button onClick={start} disabled={busy || running}>
-        {failure && !(err?.status === 409) ? "Try again" : "Run the coach now"}
+        {failure && !(err?.status === 409) && !blocked ? "Try again" : "Run the coach now"}
       </button>
       {failure && (
         <p className="run-error" role="alert">
           {failure}
-          {err?.status === 409 && (err.reason === "cap" || err.reason === "ai_off") && (
+          {(blocked || (err?.status === 409 && (err.reason === "cap" || err.reason === "ai_off"))) && (
             <> <button className="link" onClick={onSettings}>Settings</button></>
           )}
         </p>
