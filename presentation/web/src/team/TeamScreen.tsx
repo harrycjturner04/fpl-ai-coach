@@ -6,12 +6,13 @@ import { Headline } from "./Headline";
 import { Issues } from "./Issues";
 import { chipName, deadlineLabel, moves, runLabel, transfersSummary } from "./model";
 import { Pitch } from "./Pitch";
+import { RunNow } from "./RunNow";
 import "./team.css";
 import "../app.css";
 
 type Tab = { id: "team" | "plan"; label: string; week: Week };
 
-export function TeamScreen({ data, now = new Date(), onSettings }: { data: SnapshotResponse; now?: Date; onSettings: () => void }) {
+export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { data: SnapshotResponse; now?: Date; onSettings: () => void; onReload: () => void }) {
   const plan = data.plan.weeks[0];
   const tabs: Tab[] = [
     ...(data.current ? [{ id: "team", label: "Your team", week: data.current } as const] : []),
@@ -43,6 +44,7 @@ export function TeamScreen({ data, now = new Date(), onSettings }: { data: Snaps
         {data.status.stale
           ? <p className="run stale" role="status">{data.status.reason}</p>
           : <p className="run">{runLabel(data.generated_at)}</p>}
+        <RunNow entry={data.entry} onDone={onReload} onSettings={onSettings} />
       </header>
       <div className="team-grid">
         <Headline now={data.current?.points ?? null} plan={plan.points} />

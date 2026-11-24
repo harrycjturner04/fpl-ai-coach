@@ -13,7 +13,7 @@
   --s4: 16px;
   --s6: 24px;
   --s8: 32px;
-  --font: "Archivo", system-ui, sans-serif;
+  --font: "Archivo Variable", system-ui, sans-serif;
 }
 * { box-sizing: border-box; }
 body {

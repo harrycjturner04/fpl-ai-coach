@@ -31,13 +31,13 @@ function Main() {
   const [data, setData] = useState<SnapshotResponse>();
   const [error, setError] = useState<ApiError>();
   const [settings, setSettings] = useState(false);
+  const [reload, setReload] = useState(0);
 
   useEffect(() => onAuthChange(setSignedIn), []);
+  useEffect(() => { setData(undefined); setSettings(false); }, [signedIn]);
 
   useEffect(() => {
-    setData(undefined);
     setError(undefined);
-    setSettings(false);
     if (!signedIn) return;
     let live = true;
     getMe()
@@ -45,7 +45,7 @@ function Main() {
       .then((d) => live && setData(d))
       .catch((e) => live && setError(e instanceof ApiError ? e : new ApiError(0, String(e))));
     return () => { live = false; };
-  }, [signedIn]);
+  }, [signedIn, reload]);
 
   if (signedIn === undefined) return <Loading />;
   if (!signedIn) return <SignIn />;
@@ -59,5 +59,5 @@ function Main() {
     );
   }
   if (!data) return <Loading />;
-  return <ErrorBoundary><TeamScreen data={data} onSettings={() => setSettings(true)} /></ErrorBoundary>;
+  return <ErrorBoundary><TeamScreen data={data} onSettings={() => setSettings(true)} onReload={() => setReload((n) => n + 1)} /></ErrorBoundary>;
 }
