@@ -143,3 +143,15 @@ it("omits the data age line when unknown", async () => {
   await press();
   expect(screen.queryByText(/Using data pulled/)).toBeNull();
 });
+
+it("shows a run the api reports as stopped, with Try again", async () => {
+  m.getLatestRun.mockResolvedValue(run());
+  m.getRun.mockResolvedValue(run({ status: "failed", error: "The coach stopped without finishing. Try again." }));
+  setup();
+  await tick(0);
+  await tick();
+  expect(screen.getByText("The coach stopped without finishing. Try again.")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Try again" })).toBeEnabled();
+  await tick(9000);
+  expect(m.getRun).toHaveBeenCalledTimes(1);
+});

@@ -77,9 +77,9 @@ def test_other_entry_forbidden(client):
     assert client.get("/api/entries/7/snapshot").status_code == 403
 
 
-def test_missing_snapshot_404_says_what_to_run(client):
+def test_missing_snapshot_404(client):
     r = client.get("/api/entries/42/snapshot")
-    assert r.status_code == 404 and "python -m orchestration.coach --entry 42" in r.json()["detail"]
+    assert r.status_code == 404 and r.json()["detail"] == "No coach run yet."
 
 
 @pytest.mark.parametrize("over, title, chip, reason", [
@@ -331,6 +331,19 @@ def test_latest_run_null(tmp_path):
     assert r.status_code == 200 and r.json() is None
     c.post("/api/entries/42/runs")
     assert c.get("/api/entries/42/runs/latest").json()["status"] == "queued"
+
+
+@pytest.mark.parametrize("status", ["queued", "running"])
+def test_run_older_than_70_min_shows_failed(tmp_path, status):
+    c, db = runs_client(tmp_path)
+    rid = db.create_run(42, 12, "manual", status=status)
+    db.runs[rid]["created_at"] = utcnow_() - timedelta(minutes=71)
+    stopped = ("failed", "The coach stopped without finishing. Try again.")
+    for r in (c.get(f"/api/runs/{rid}"), c.get("/api/entries/42/runs/latest")):
+        assert (r.json()["status"], r.json()["error"]) == stopped
+    assert db.runs[rid]["status"] == status
+    db.runs[rid]["created_at"] = utcnow_() - timedelta(minutes=69)
+    assert c.get(f"/api/runs/{rid}").json()["status"] == status
 
 
 def utcnow_():

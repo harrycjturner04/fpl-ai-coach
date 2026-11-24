@@ -20,8 +20,11 @@ def block_reason(spent_usd: float, cap_gbp: float, usd_per_gbp: float, ai_off: b
     """Why an AI run must not start now, or None if it may."""
     if ai_off:
         return "AI is switched off in Settings."
-    if (spent_usd + estimate_usd) / usd_per_gbp > cap_gbp:
-        return f"Monthly AI cap reached: £{spent_usd / usd_per_gbp:.2f} of £{cap_gbp:.2f} spent."
+    spent, est = spent_usd / usd_per_gbp, estimate_usd / usd_per_gbp
+    if spent >= cap_gbp:
+        return f"Monthly AI cap reached: £{spent:.2f} of £{cap_gbp:.2f} spent."
+    if spent + est > cap_gbp:
+        return f"Monthly AI cap: £{spent:.2f} of £{cap_gbp:.2f} spent; a run (about £{est:.2f}) would go over."
     return None
 
 

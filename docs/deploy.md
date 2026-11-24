@@ -42,6 +42,18 @@ Service accounts, least privilege (no project-level roles):
 | `fpl-job` | `storage.objectAdmin` on the bucket; `secretAccessor` on `ANTHROPIC_API_KEY`, `FOOTBALL_DATA_API_KEY`, `DATABASE_URL` |
 | `fpl-scheduler` | `run.invoker` on job `coach` (cannot override args, hence the job's default `daily`) |
 
+## Where runs happen
+
+Once live, the bucket is the master copy of `data/`. Run the coach from the app ("Run the coach now") or the cloud
+job. Local CLI runs (`orchestration.coach`, `prediction.cli`, `optimisation.cli`) are for development: their output
+is replaced at the next refresh, since a pull overwrites any local file that differs from the bucket. The
+forward-test logs (`prediction_log`, `plan_log`, `coach_log`) accumulate from cloud runs, manual and the automatic
+one each gameweek.
+
+Use `python -m orchestration.bucket push` only straight after `python -m orchestration.job refresh` or for the first
+upload, never while a run is active. Manual push and pull take the same data lock as the jobs, and stop with "Data is
+locked by a running job; try again later." if one holds it.
+
 ## One-off setup
 
 1. Accounts: Google Cloud (project `fpl-ai-coach`, region `europe-west2`, billing on), Supabase (free plan),
@@ -126,6 +138,30 @@ new secret version only if the bytes differ) and `deploy\deploy.ps1`.
   `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres`). The tests skip unless the host is
   `127.0.0.1` or `localhost`, so they never touch the live database.
 - `presentation/web`: `npm test`, `npm run e2e`, `npm run build`.
+
+## Local mode
+
+Runs the app against a local Supabase, with runs launched as local processes on local `data/`:
+
+1. `npx supabase@latest start`. In local Studio (http://127.0.0.1:54323) add a user (Authentication > Users), then
+   in its SQL editor: `insert into app_users (user_id, entry) values ('<user id>', <FPL team ID>);`
+2. api, with these set in the shell:
+   `DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres`, `SUPABASE_URL=http://127.0.0.1:54321`,
+   `LAUNCHER=local`, and no `FPL_COACH_BUCKET`; then
+   `python -m uvicorn presentation.api.app:app --host 127.0.0.1 --port 8000`. The api also loads `.env`, but shell
+   values win, so set each of these in the shell to override the hosted ones. An empty value does not unset a
+   variable in PowerShell, so comment out `FPL_COACH_BUCKET` in `.env` (or start the api from Git Bash with
+   `FPL_COACH_BUCKET=`).
+3. Web: `presentation/web/.env.local` with `VITE_SUPABASE_URL=http://127.0.0.1:54321` and
+   `VITE_SUPABASE_ANON_KEY=` the local publishable key from `npx supabase status`; then `npm run dev` in
+   `presentation/web`.
+
+## Security checks
+
+Before a release, after `npm run build` in `presentation/web`:
+
+- `grep -rE "sk-ant|sb_secret_[A-Za-z0-9]{8,}|service_role|postgresql://" presentation/web/dist` is empty
+  (supabase-js itself contains the bare `sb_secret_` prefix, so the pattern needs the characters after it).
 
 ## Season end (later)
 

@@ -1,6 +1,11 @@
+import os
+import stat
+from datetime import datetime, timezone
+
 import pytest
 
 from orchestration import bucket as sync
+from tests.fake_appdb import FakeAppDB
 from tests.fake_bucket import FakeBucket
 
 
@@ -85,6 +90,36 @@ def test_main_reads_bucket_from_env_file(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setattr(sync, "load_env", lambda: monkeypatch.setenv("FPL_COACH_BUCKET", "b"))
     monkeypatch.setattr(sync, "open_bucket", lambda name: seen.append(name) or FakeBucket())
-    monkeypatch.setattr("sys.argv", ["bucket", "push", "--data-dir", str(tmp_path)])
-    sync.main()
-    assert seen == ["b"]
+    db = FakeAppDB()
+    sync.main(["push", "--data-dir", str(tmp_path)], db=db)
+    assert seen == ["b"] and "data" not in db.locks
+
+
+@pytest.mark.parametrize("action", ["push", "pull"])
+def test_main_holds_the_data_lock(tmp_path, monkeypatch, action):
+    db, held = FakeAppDB(), []
+    monkeypatch.setattr(sync, action, lambda bucket, data_dir: held.append(db.locks["data"][0]) or [])
+    monkeypatch.setattr(sync, "open_bucket", lambda name: FakeBucket())
+    sync.main([action, "--bucket", "b", "--data-dir", str(tmp_path)], db=db)
+    assert held == [f"manual-{action}"] and "data" not in db.locks
+
+
+def test_main_refuses_when_locked(tmp_path, monkeypatch):
+    db = FakeAppDB()
+    db.acquire_lock("data", "coach-1", datetime.now(timezone.utc))
+    monkeypatch.setattr(sync, "open_bucket", lambda name: FakeBucket())
+    monkeypatch.setattr(sync, "push", lambda *a: pytest.fail("pushed while locked"))
+    with pytest.raises(SystemExit, match="Data is locked by a running job; try again later."):
+        sync.main(["push", "--bucket", "b", "--data-dir", str(tmp_path)], db=db)
+    assert db.locks["data"][0] == "coach-1"
+
+
+def test_pull_over_read_only_file(tmp_path):
+    _write(tmp_path, "processed/a.json", "old")
+    target = tmp_path / "processed/a.json"
+    os.chmod(target, stat.S_IREAD)
+    try:
+        assert sync.pull(FakeBucket({"processed/a.json": b"new"}), tmp_path) == ["processed/a.json"]
+        assert target.read_text() == "new"
+    finally:
+        os.chmod(target, stat.S_IWRITE | stat.S_IREAD)

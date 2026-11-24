@@ -31,3 +31,19 @@ test("runs the coach, ticks the steps, reloads the team, then shows the cap bloc
   await expect(page.getByRole("alert").getByRole("button", { name: "Settings" })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
+
+test("offers Run the coach when there is no run yet, then shows the team", async ({ page }) => {
+  await signedIn(page);
+  await expect(page.getByRole("heading", { name: "Test FC" })).toBeVisible();
+  let snapshots = 0;
+  await page.route("**/api/entries/42/snapshot", (route) =>
+    ++snapshots === 1 ? route.fulfill(json({ detail: "No coach run yet." }, 404)) : route.fallback());
+  await page.route("**/api/entries/42/runs/latest", (route) => route.fulfill(json(null)));
+  await page.route("**/api/entries/42/runs", (route) => route.fulfill(json(run("queued", []), 202)));
+  await page.route("**/api/runs/7", (route) => route.fulfill(json(run("done", EXPECTED))));
+  await page.reload();  // routes added after sign-in take precedence over the mock's catch-all
+  await expect(page.getByRole("heading", { name: "No coach run yet." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign out" })).toBeVisible();
+  await page.getByRole("button", { name: "Run the coach now" }).click();
+  await expect(page.getByRole("heading", { name: "Test FC" })).toBeVisible({ timeout: 10_000 });
+});

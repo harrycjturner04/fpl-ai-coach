@@ -24,15 +24,22 @@ LOCK = "data"
 WINDOW = timedelta(hours=36)
 MAX_DATA_AGE = timedelta(hours=30)
 BUSY = "Another job is using the data. Try again in a few minutes."
+COACH_WAIT_S = 600
 
 
-def run_coach(entry: int, run_id: int, db, bucket, data_dir: Path, now: datetime, coach_run=coach.run) -> str:
+def run_coach(entry: int, run_id: int, db, bucket, data_dir: Path, now: datetime, coach_run=coach.run,
+              sleep=time.sleep) -> str:
     """Run the coach for `entry` as database run `run_id`; returns the final status ("done" or "failed").
-    Spend is recorded whenever the run reported a cost (even 0.0), including on failure."""
+    Waits up to 10 minutes for the data lock (e.g. the PC refresh). Spend is recorded whenever the run
+    reported a cost (even 0.0), including on failure."""
     holder = f"coach-{run_id}"
-    if not db.acquire_lock(LOCK, holder, now):
-        db.finish_run(run_id, "failed", BUSY)
-        return "failed"
+    waited = 0
+    while not db.acquire_lock(LOCK, holder, now + timedelta(seconds=waited)):
+        if waited >= COACH_WAIT_S:
+            db.finish_run(run_id, "failed", BUSY)
+            return "failed"
+        sleep(30)
+        waited += 30
 
     def on_step(name: str, secs: float) -> None:
         try:
@@ -95,7 +102,8 @@ def run_daily(db, bucket, data_dir: Path, now: datetime, coach_run=coach.run) ->
 
 def run_refresh(db, bucket, data_dir: Path, now: datetime, ingest=ingest_cli.run, wait_s: int = 900) -> None:
     """Owner's PC: under the data lock, pull the bucket, fetch fresh FPL data for every entry, push.
-    If finished gameweeks lack market values, fetches once more with player history to fill them."""
+    If finished gameweeks lack market values, fetches once more with player history to fill them, unless
+    the same gaps were already backfilled (stored in `market_backfill.json`)."""
     waited = 0
     while not db.acquire_lock(LOCK, "pc-refresh", now + timedelta(seconds=waited)):
         if waited >= wait_s:
@@ -111,9 +119,13 @@ def run_refresh(db, bucket, data_dir: Path, now: datetime, ingest=ingest_cli.run
         for entry in entries or [None]:
             ingest(entry_id=entry, data_dir=data_dir)
         rows, gws = (storage.load_table_or_none(n, data_dir) for n in ("current_season_rows", "gameweeks"))
-        if rows is not None and gws is not None and ingest_cli.market_gaps(rows, gws):
+        gaps = ingest_cli.market_gaps(rows, gws) if rows is not None and gws is not None else []
+        if gaps and gaps == storage.load_json_or_none("market_backfill", data_dir):
+            print(f"Market values still missing for gameweeks {gaps}, already backfilled: skipping player history.")
+        elif gaps:
             print("Market values missing for finished gameweeks: backfilling with player history.")
-            ingest(entry_id=(entries or [None])[0], data_dir=data_dir, history=True)
+            ingest(entry_id=None, data_dir=data_dir, history=True)
+            storage.save_json(gaps, "market_backfill", data_dir)
         if bucket:
             bucket_sync.push(bucket, data_dir)
     finally:

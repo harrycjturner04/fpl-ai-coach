@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import os
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -25,6 +25,7 @@ load_env()
 
 STEPS_EXPECTED = ["data", "predictions and initial solve", "news", "adjusted predictions and headline solve",
                   "chip scan", "write-up"]
+STALE_RUN = timedelta(minutes=70)  # same cutoff as AppDB.active_run
 
 
 def utcnow() -> datetime:
@@ -73,6 +74,8 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
     def run_view(run: dict | None) -> dict | None:
         if run is None:
             return None
+        if run["status"] in ("queued", "running") and utcnow() - run["created_at"] > STALE_RUN:
+            run = run | {"status": "failed", "error": "The coach stopped without finishing. Try again."}
         pulled = run["data_pulled_at"]
         age = round((utcnow() - pulled).total_seconds() / 3600, 1) if pulled else None
         return run | {"steps_expected": STEPS_EXPECTED, "data_age_hours": age}
@@ -103,7 +106,7 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
             raise HTTPException(403, "Not your team.")
         path = views.latest_snapshot_path(data_dir / "reports", entry)
         if path is None:
-            raise HTTPException(404, f"No coach run yet for team {entry}. Run: python -m orchestration.coach --entry {entry}")
+            raise HTTPException(404, "No coach run yet.")
         snap = json.loads(path.read_text(encoding="utf-8"))
         pulled = (storage.load_json_or_none("metadata", data_dir) or {}).get("pulled_at")
         pulled = datetime.fromisoformat(pulled) if pulled else None

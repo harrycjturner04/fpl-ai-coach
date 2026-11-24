@@ -65,9 +65,30 @@ def test_lock_busy_fails_cleanly(setup):
 
     def never(*a, **k):
         raise AssertionError("coach called")
-    assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=never) == "failed"
+    assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=never, sleep=lambda s: None) == "failed"
     assert db.get_run(rid)["error"] == "Another job is using the data. Try again in a few minutes."
     assert db.locks["data"][0] == "other" and not db.spend
+
+
+def test_coach_waits_for_the_lock(setup):
+    db, rid, bucket, data = setup
+    db.acquire_lock("data", "pc-refresh", NOW)
+    waits = []
+
+    def wait(secs):
+        waits.append(secs)
+        if len(waits) == 3:
+            db.release_lock("data", "pc-refresh")
+    assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=ok_run, sleep=wait) == "done"
+    assert waits == [30, 30, 30]
+
+
+def test_coach_gives_up_after_ten_minutes(setup):
+    db, rid, bucket, data = setup
+    db.acquire_lock("data", "other", NOW)
+    waits = []
+    assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=ok_run, sleep=waits.append) == "failed"
+    assert sum(waits) == 600 and db.get_run(rid)["error"] == job.BUSY
 
 
 def test_lock_released_after_failure(setup):
@@ -198,7 +219,22 @@ def test_refresh_backfills_market_gaps_with_history(tmp_path):
         storage.save_table(pd.DataFrame({"gameweek": [1], "selected": [None if not history else 5.0]}),
                            "current_season_rows", data_dir)
     job.run_refresh(db, None, tmp_path, NOW, ingest=ingest)
-    assert calls == [(42, False), (42, True)]
+    assert calls == [(42, False), (None, True)]
+
+
+def test_refresh_skips_backfill_when_gaps_unchanged(tmp_path, capsys):
+    db = FakeAppDB(entries={"u": 42})
+    calls = []
+
+    def ingest(entry_id, data_dir, history=False):  # history never fills the gap
+        calls.append((entry_id, history))
+        storage.save_table(pd.DataFrame({"id": [1], "finished": [True]}), "gameweeks", data_dir)
+        storage.save_table(pd.DataFrame({"gameweek": [1], "selected": [None]}), "current_season_rows", data_dir)
+    job.run_refresh(db, None, tmp_path, NOW, ingest=ingest)
+    job.run_refresh(db, None, tmp_path, NOW, ingest=ingest)
+    assert calls == [(42, False), (None, True), (42, False)]
+    assert storage.load_json_or_none("market_backfill", tmp_path) == [1]
+    assert "already backfilled" in capsys.readouterr().out
 
 
 def test_refresh_gives_up_when_locked(tmp_path):
