@@ -73,3 +73,39 @@ def test_lock_released_after_failure(setup):
     db, rid, bucket, data = setup
     job.run_coach(42, rid, db, bucket, data, NOW, coach_run=failing_run)
     assert "data" not in db.locks
+
+
+def test_zero_cost_is_still_recorded(setup):
+    db, rid, bucket, data = setup
+    job.run_coach(42, rid, db, bucket, data, NOW, coach_run=lambda e, d, *, fetch, search, on_step, on_cost: on_cost(0.0))
+    assert [s["cost_usd"] for s in db.spend] == [0.0]
+
+
+def test_system_exit_marks_failed_releases_lock_no_push(setup):
+    db, rid, bucket, data = setup
+
+    def finished(entry, data_dir, **k):
+        raise SystemExit("No upcoming gameweek: the season has finished.")
+    assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=finished) == "failed"
+    assert db.get_run(rid)["error"] == "No upcoming gameweek: the season has finished."
+    assert "data" not in db.locks and not blob_names(bucket)
+
+
+def test_spend_db_failure_still_finishes_run_and_releases_lock(setup):
+    db, rid, bucket, data = setup
+
+    def broken(*a, **k):
+        raise ConnectionError("db down")
+    db.record_spend = broken
+    with pytest.raises(ConnectionError):
+        job.run_coach(42, rid, db, bucket, data, NOW, coach_run=ok_run)
+    assert db.get_run(rid)["status"] == "done" and "data" not in db.locks
+
+
+def test_add_step_failure_does_not_stop_the_run(setup):
+    db, rid, bucket, data = setup
+
+    def broken(*a, **k):
+        raise ConnectionError("db down")
+    db.add_step = broken
+    assert job.run_coach(42, rid, db, bucket, data, NOW, coach_run=ok_run) == "done"

@@ -22,29 +22,38 @@ BUSY = "Another job is using the data. Try again in a few minutes."
 
 def run_coach(entry: int, run_id: int, db, bucket, data_dir: Path, now: datetime, coach_run=coach.run) -> str:
     """Run the coach for `entry` as database run `run_id`; returns the final status ("done" or "failed").
-    Spend is recorded whenever the run reported a cost above zero, including on failure."""
+    Spend is recorded whenever the run reported a cost (even 0.0), including on failure."""
     holder = f"coach-{run_id}"
     if not db.acquire_lock(LOCK, holder, now):
         db.finish_run(run_id, "failed", BUSY)
         return "failed"
+
+    def on_step(name: str, secs: float) -> None:
+        try:
+            db.add_step(run_id, name, secs)
+        except Exception as err:  # noqa: BLE001  progress is best effort; never kill a paid run over it
+            print(f"Step not recorded ({type(err).__name__}: {err})")
+
     cost: list[float] = []
     try:
-        if bucket:
-            bucket_sync.pull(bucket, data_dir)
-        pulled_at = (storage.load_json_or_none("metadata", data_dir) or {}).get("pulled_at")
-        db.start_run(run_id, datetime.fromisoformat(pulled_at).replace(tzinfo=timezone.utc) if pulled_at else None)
-        coach_run(entry, data_dir, fetch=False, search=True, on_step=lambda n, s: db.add_step(run_id, n, s),
-                  on_cost=cost.append)
-        if bucket:
-            bucket_sync.push(bucket, data_dir)
-        status, error = "done", None
-    except Exception as err:  # noqa: BLE001  the run row must record any failure
-        status, error = "failed", f"{type(err).__name__}: {err}"
+        try:
+            if bucket:
+                bucket_sync.pull(bucket, data_dir)
+            pulled_at = (storage.load_json_or_none("metadata", data_dir) or {}).get("pulled_at")
+            db.start_run(run_id, datetime.fromisoformat(pulled_at).replace(tzinfo=timezone.utc) if pulled_at else None)
+            coach_run(entry, data_dir, fetch=False, search=True, on_step=on_step, on_cost=cost.append)
+            if bucket:
+                bucket_sync.push(bucket, data_dir)
+            status, error = "done", None
+        except (Exception, SystemExit) as err:  # noqa: BLE001  the run row must record any failure
+            status, error = "failed", str(err) if isinstance(err, SystemExit) else f"{type(err).__name__}: {err}"
+        try:
+            if cost:
+                db.record_spend(run_id, "coach", cost[0], now)
+        finally:
+            db.finish_run(run_id, status, error, cost[0] if cost else None)
     finally:
-        if cost and cost[0] > 0:
-            db.record_spend(run_id, "coach", cost[0], now)
         db.release_lock(LOCK, holder)
-    db.finish_run(run_id, status, error, cost[0] if cost else None)
     return status
 
 
