@@ -170,8 +170,9 @@ if ($pages -notmatch "(^|$cell)$([regex]::Escape($pagesProject))($cell|$)") {
 
 Step "Supabase (run these yourself)"
 $ref = ([Uri]$envVars["SUPABASE_URL"]).Host.Split(".")[0]
+Write-Host "  npx supabase@latest login"
 Write-Host "  npx supabase@latest link --project-ref $ref"
-Write-Host "  npx supabase@latest db push"
+Write-Host "  npx supabase@latest db push --remote"
 Write-Host "Then in the Supabase dashboard SQL editor (user id from Authentication > Users):"
 Write-Host "  insert into app_users (user_id, entry) values ('<your-user-id>', 8298351);"
 Write-Host "`nNext: python -m orchestration.bucket push (first upload), then deploy\deploy.ps1"

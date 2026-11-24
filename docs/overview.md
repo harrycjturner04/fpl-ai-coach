@@ -77,7 +77,8 @@ week before his team plays twice. The whole plan is solved again the following w
 | 5. Machine-learning prediction | Built | LightGBM minutes model (shipped default), LightGBM, Keras, GRU and stacked points models, validated walk-forward against the component model |
 | 6. Reasoning layer | Built | Coach command: news flags with capped adjustments, chip scan and chip call, checked write-up, what-if chat, monitoring report, report grader |
 | 7a. Presentation, local skeleton | Built | Run snapshot, read-only API and a phone-friendly web app (Team screen) on the owner's machine |
-| 7b-7f. Presentation, rest | Planned | Deployment and login, swaps, report and chat, model page, developer analytics |
+| 7b. Deployment and security | Built | Live app behind a login: Cloud Run api and job, Supabase, Cloudflare Pages, PC data refresh through a private bucket |
+| 7c-7f. Presentation, rest | Planned | Swaps, report and chat, model page, developer analytics |
 
 Today the pipeline runs from the command line. `python -m orchestration.coach --entry <your team ID>` refreshes
 the data if needed, predicts five gameweeks, checks the team news, solves the plan and every chip window, and
@@ -102,14 +103,18 @@ flowchart LR
     C["Coach run"] -->|"writes"| S["Run snapshot<br/>data/reports/*.json"]
     S -->|"read by"| A["FastAPI<br/>presentation/api"]
     A -->|"/api/entries/{id}/snapshot"| W["React PWA<br/>presentation/web"]
+    PC["Owner's PC<br/>FPL fetch"] -->|"push data/"| G["Private bucket"]
+    G -->|"pull"| C
+    G -->|"read"| A
 ```
 
 Each coach run writes a structured JSON snapshot beside the Markdown report: squad state, every player's points per
 gameweek and chance of playing 60 minutes, the current squad's best XI with no transfers, the plan for each week,
 flags and adjustments, the chip scan, the report sections and any warnings. The API only reads the latest snapshot
 for an entry; the web app draws it as a pitch where each player's ring shows the 60-minute chance and the number is
-expected points. Nothing in the app computes predictions or plans, so the five layers are unchanged. 7a runs on
-the owner's machine without a login; deployment and security are 7b.
+expected points. Nothing in the app computes predictions or plans, so the five layers are unchanged. Since 7b it
+runs in the cloud behind a login: the owner's PC fetches FPL data (FPL blocks data-centre IPs) and syncs it
+through a private bucket to a Cloud Run job that runs the coach. See [Deploying the coach](deploy.md).
 
 Not yet covered: price changes over the planning horizon, and any measured evidence that news adjustments improve
 the predictions (that waits on the 2026/27 forward test).

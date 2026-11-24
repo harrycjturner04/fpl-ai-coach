@@ -21,7 +21,7 @@ Five layers, each with a single responsibility; only clean, structured output cr
 - ~~Stage 4: Screenshot parsing~~ (dropped: the manager ID gives the same information more reliably)
 - [x] Stage 5: ML prediction models (LightGBM, Keras, GRU, stacker), compared walk-forward; the component model with LightGBM minutes (`ml-minutes`) is the default
 - [x] Stage 6: LLM reasoning layer (coach command, news flags, chip call, checked write-up, what-if chat, monitoring, grader)
-- [ ] Stage 7: Presentation (7a built: local API and phone-friendly web app showing the latest coach run)
+- [ ] Stage 7: Presentation (7a built: API and phone-friendly web app showing the latest coach run; 7b built: deployed behind a login, see [docs/deploy.md](docs/deploy.md))
 
 ## Quick start
 
@@ -235,27 +235,16 @@ post-check of the players and "pts" figures in the text. The report is saved to 
 and logged. Live runs on 2026-11-11 cost $0.081 to $0.095 each with Sonnet 5.5 and took about 3 minutes. News effects
 cannot be backtested; they are evaluated on the 2026/27 forward test. See [docs/reasoning.md](docs/reasoning.md).
 
-## Running the app locally
+## Live app
 
-Stage 7a adds a read-only web app over the latest coach run (Team screen: pitch with minutes rings, the coach's plan,
-news flags, chips worth playing soon). Each coach run now also writes `data/reports/<entry>_gw<N>_<stamp>.json`
-beside the Markdown report; the app reads that file. The API now needs a Supabase login (`SUPABASE_URL`, `DATABASE_URL`; see the 7b deploy notes), so the
-login-free local mode is gone. Run the
-coach once, then start the two servers:
+Stage 7 adds a phone-friendly web app (PWA) behind a login: the Team screen shows the latest coach run as a pitch
+(minutes rings, the coach's plan, news flags, chips worth playing soon), with "Run the coach now" and spend settings.
+It runs on Cloudflare Pages, Cloud Run and Supabase; FPL data is fetched on the owner's PC (FPL blocks data-centre
+IPs) and synced through a private bucket. Each coach run writes `data/reports/<entry>_gw<N>_<stamp>.json` beside
+the Markdown report; the app reads that file. Setup, deploy and operations: [docs/deploy.md](docs/deploy.md).
 
-```bash
-pip install -e ".[api]"
-python -m orchestration.coach --entry 1234567
-python -m uvicorn presentation.api.app:app --host 127.0.0.1 --port 8000
-
-cd presentation/web                      # Node 24
-npm install
-npm run dev                              # http://localhost:5173, proxies /api to the API
-npm run dev:lan                          # phone check; unauthenticated: anyone on your Wi-Fi can open it; home Wi-Fi only, stop it afterwards
-npm test                                 # Vitest
-npx playwright install chromium webkit   # once
-npm run e2e                              # Playwright
-```
+Web app tests (Node 24, in `presentation/web`): `npm install`, `npm test`, `npx playwright install chromium webkit`
+(once), `npm run e2e`.
 
 ## How this project is built
 
