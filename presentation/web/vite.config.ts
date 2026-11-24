@@ -2,12 +2,24 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import type { Plugin } from "vite";
+
+/** Preloads the latin Archivo font so it downloads alongside the CSS, not after it. */
+const preloadFont = (): Plugin => ({
+  name: "preload-font",
+  transformIndexHtml: (_html, ctx) =>
+    Object.keys(ctx.bundle ?? {}).filter((f) => /archivo-latin-wdth-normal-.*\.woff2$/.test(f)).map((f) => ({
+      tag: "link", injectTo: "head", attrs: { rel: "preload", as: "font", type: "font/woff2", crossorigin: "", href: `/${f}` },
+    })),
+});
 
 export default defineConfig({
   plugins: [
     react(),
+    preloadFont(),
     VitePWA({
       registerType: "autoUpdate",
+      injectRegister: "script-defer",
       manifest: {
         name: "FPL AI Coach",
         short_name: "Coach",
