@@ -40,5 +40,5 @@ pythonpath = ["."]
 filterwarnings = [
   "ignore:__array__ implementation doesn.t accept a copy keyword:DeprecationWarning:keras",
 ]
-markers = ["live: calls the real FPL API (run with: pytest -m live)"]
-addopts = "-m 'not live'"
+markers = ["live: calls the real FPL API (run with: pytest -m live)", "db: needs a local Postgres (run with: DATABASE_URL=... pytest -m db)"]
+addopts = "-m 'not live and not db'"

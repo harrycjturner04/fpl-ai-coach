@@ -1,0 +1,113 @@
+"""App state in Postgres (Supabase): settings, coach runs and their steps, AI spend, job lock."""
+
+from __future__ import annotations
+
+import os
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+
+import psycopg
+from psycopg.rows import dict_row
+from psycopg.types.json import Jsonb
+
+RUN_ESTIMATE_USD = 0.15
+LOCK_LEASE = timedelta(minutes=75)
+_SETTINGS = ("cap_gbp", "auto_runs", "ai_off", "usd_per_gbp")
+
+
+def block_reason(spent_usd: float, cap_gbp: float, usd_per_gbp: float, ai_off: bool,
+                 estimate_usd: float = RUN_ESTIMATE_USD) -> str | None:
+    """Why an AI run must not start now, or None if it may."""
+    if ai_off:
+        return "AI is switched off in Settings."
+    if (spent_usd + estimate_usd) / usd_per_gbp > cap_gbp:
+        return f"Monthly AI cap reached: £{spent_usd / usd_per_gbp:.2f} of £{cap_gbp:.2f} spent."
+    return None
+
+
+def _plain(row: dict | None) -> dict | None:
+    return None if row is None else {k: float(v) if isinstance(v, Decimal) else v for k, v in row.items()}
+
+
+class AppDB:
+    def __init__(self, url: str | None = None):
+        self.conn = psycopg.connect(url or os.environ["DATABASE_URL"], autocommit=True, row_factory=dict_row)
+
+    def _one(self, sql: str, args=()) -> dict | None:
+        return _plain(self.conn.execute(sql, args).fetchone())
+
+    def settings(self) -> dict:
+        return self._one(f"select {', '.join(_SETTINGS)} from settings")
+
+    def update_settings(self, **fields) -> dict:
+        bad = set(fields) - set(_SETTINGS)
+        if bad:
+            raise ValueError(f"unknown settings: {sorted(bad)}")
+        sets = ", ".join(f"{k} = %({k})s" for k in fields)
+        self.conn.execute(f"update settings set {sets}", fields)
+        return self.settings()
+
+    def month_spend_usd(self, now: datetime) -> float:
+        now = now.astimezone(timezone.utc)
+        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        end = (start + timedelta(days=32)).replace(day=1)
+        row = self._one("select coalesce(sum(cost_usd), 0) as s from spend where at >= %s and at < %s", (start, end))
+        return row["s"]
+
+    def ai_block_reason(self, now: datetime) -> str | None:
+        s = self.settings()
+        return block_reason(self.month_spend_usd(now), s["cap_gbp"], s["usd_per_gbp"], s["ai_off"])
+
+    def create_run(self, entry: int, gameweek: int, kind: str, status: str = "queued",
+                   error: str | None = None) -> int | None:
+        row = self._one("insert into runs (entry, gameweek, kind, status, error) values (%s, %s, %s, %s, %s) "
+                        "on conflict do nothing returning id", (entry, gameweek, kind, status, error))
+        return row["id"] if row else None
+
+    def start_run(self, run_id: int, data_pulled_at: datetime | None) -> None:
+        self.conn.execute("update runs set status = 'running', started_at = now(), data_pulled_at = %s where id = %s",
+                          (data_pulled_at, run_id))
+
+    def add_step(self, run_id: int, name: str, secs: float) -> None:
+        self.conn.execute("update runs set steps = steps || %s where id = %s",
+                          (Jsonb([{"name": name, "secs": secs}]), run_id))
+
+    def finish_run(self, run_id: int, status: str, error: str | None = None, cost_usd: float | None = None) -> None:
+        self.conn.execute("update runs set status = %s, error = %s, cost_usd = %s, finished_at = now() where id = %s",
+                          (status, error, cost_usd, run_id))
+
+    def record_spend(self, run_id: int | None, kind: str, cost_usd: float, at: datetime) -> None:
+        self.conn.execute("insert into spend (run_id, kind, cost_usd, at) values (%s, %s, %s, %s)",
+                          (run_id, kind, cost_usd, at))
+
+    def get_run(self, run_id: int) -> dict | None:
+        return self._one("select * from runs where id = %s", (run_id,))
+
+    def active_run(self, entry: int) -> dict | None:
+        return self._one("select * from runs where entry = %s and status in ('queued','running') "
+                         "and created_at > now() - interval '70 minutes' order by id desc limit 1", (entry,))
+
+    def latest_run(self, entry: int) -> dict | None:
+        return self._one("select * from runs where entry = %s order by id desc limit 1", (entry,))
+
+    def auto_runs_for(self, entry: int, gameweek: int) -> list[dict]:
+        rows = self.conn.execute("select * from runs where entry = %s and gameweek = %s and kind = 'auto' "
+                                 "order by id desc", (entry, gameweek)).fetchall()
+        return [_plain(r) for r in rows]
+
+    def entries_for(self, user_id: str) -> list[int]:
+        return [r["entry"] for r in self.conn.execute("select entry from app_users where user_id = %s", (user_id,))]
+
+    def all_entries(self) -> list[int]:
+        return [r["entry"] for r in self.conn.execute("select distinct entry from app_users")]
+
+    def acquire_lock(self, name: str, holder: str, now: datetime) -> bool:
+        row = self.conn.execute(
+            "insert into job_lock (name, holder, expires_at) values (%(name)s, %(holder)s, %(exp)s) "
+            "on conflict (name) do update set holder = excluded.holder, expires_at = excluded.expires_at "
+            "where job_lock.expires_at < %(now)s returning holder",
+            {"name": name, "holder": holder, "exp": now + LOCK_LEASE, "now": now}).fetchone()
+        return row is not None
+
+    def release_lock(self, name: str, holder: str) -> None:
+        self.conn.execute("delete from job_lock where name = %s and holder = %s", (name, holder))
