@@ -33,11 +33,11 @@ class SettingsPatch(BaseModel):
 def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, launcher=None,
                allowed_origin: str | None = None) -> FastAPI:
     app = FastAPI(title="FPL AI Coach")
-    db = db or AppDB()
-    verifier = verifier or Verifier(os.environ["SUPABASE_URL"])
     allowed_origin = allowed_origin or os.environ.get("ALLOWED_ORIGIN")
     if allowed_origin == "*":
         raise ValueError("ALLOWED_ORIGIN must be the web app's origin, not '*'.")
+    db = db or AppDB()
+    verifier = verifier or Verifier(os.environ["SUPABASE_URL"])
     general, patches = RateLimiter(60, 60), RateLimiter(20, 3600)
     if allowed_origin:
         app.add_middleware(CORSMiddleware, allow_origins=[allowed_origin], allow_methods=["GET", "POST", "PATCH"],

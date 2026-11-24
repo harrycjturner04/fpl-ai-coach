@@ -147,6 +147,25 @@ def test_api_roles_no_sequence_access(db, role, seq):
             c.execute(f"select nextval('{seq}')")
 
 
-def test_reconnects_after_dropped_connection(db):
+def kill(db):
+    """Terminate the db's backend from a second connection, as a pooler drop would."""
+    with psycopg.connect(URL, autocommit=True) as other:
+        other.execute("select pg_terminate_backend(%s)", (db.conn.info.backend_pid,))
+
+
+def test_read_retries_after_connection_killed(db):
+    kill(db)
+    assert db.settings()["cap_gbp"] == 5.0
+
+
+def test_unsafe_write_not_retried_then_recovers(db):
+    kill(db)
+    with pytest.raises(psycopg.OperationalError):
+        db.record_spend(None, "coach", 1.0, NOW)
+    db.record_spend(None, "coach", 1.0, NOW)
+    assert db.month_spend_usd(NOW) == 1.0
+
+
+def test_closed_connection_reconnects(db):
     db.conn.close()
     assert db.settings()["cap_gbp"] == 5.0
