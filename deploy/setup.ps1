@@ -46,23 +46,49 @@ function Test-Native([string]$Exe, [string[]]$Arguments) {
     $LASTEXITCODE -eq 0
 }
 
-function Write-Stdin([string]$Exe, [string]$Arguments, [string]$Value) {
-    # Sends $Value on stdin with no newline and no BOM (a PowerShell pipe adds a newline; .NET adds a
-    # UTF-8 BOM when the console input code page is 65001). Returns the exit code.
-    $saved = [Console]::InputEncoding
+function Get-Utf8Bytes([string]$Value) { ,(New-Object System.Text.UTF8Encoding $false).GetBytes($Value) }
+
+function Test-SameBytes([byte[]]$A, [byte[]]$B) {
+    if ($A.Length -ne $B.Length) { return $false }
+    for ($i = 0; $i -lt $A.Length; $i++) { if ($A[$i] -ne $B[$i]) { return $false } }
+    $true
+}
+
+function Test-SecretMatches([string]$Name, [string]$Value) {
+    # Byte-exact compare of the latest version with $Value (stdout capture would hide a BOM). False if absent.
+    $tmp = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName())
     try {
-        [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false
+        if (-not (Test-Native gcloud.cmd @("secrets", "versions", "access", "latest", "--secret=$Name", "--out-file=$tmp"))) { return $false }
+        Test-SameBytes ([IO.File]::ReadAllBytes($tmp)) (Get-Utf8Bytes $Value)
+    } finally { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+}
+
+function Add-SecretVersion([string]$Name, [string]$Value) {
+    # stdin with no newline and no BOM (a PowerShell pipe adds a newline; .NET adds a BOM when the
+    # console input code page is 65001). Without a console, a temp file of the exact bytes instead.
+    $gcloud = (Get-Command gcloud.cmd).Source
+    $saved, $tmp = $null, $null
+    try {
+        try { $saved = [Console]::InputEncoding; [Console]::InputEncoding = New-Object System.Text.UTF8Encoding $false }
+        catch { $tmp = Join-Path $env:TEMP ([IO.Path]::GetRandomFileName()) }
         $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = $Exe
-        $psi.Arguments = $Arguments
+        $psi.FileName = $gcloud
         $psi.UseShellExecute = $false
-        $psi.RedirectStandardInput = $true
+        if ($tmp) {
+            [IO.File]::WriteAllBytes($tmp, (Get-Utf8Bytes $Value))
+            $psi.Arguments = "secrets versions add $Name --data-file=`"$tmp`""
+        } else {
+            $psi.Arguments = "secrets versions add $Name --data-file=-"
+            $psi.RedirectStandardInput = $true
+        }
         $proc = [System.Diagnostics.Process]::Start($psi)
-        $proc.StandardInput.Write($Value)
-        $proc.StandardInput.Close()
+        if (-not $tmp) { $proc.StandardInput.Write($Value); $proc.StandardInput.Close() }
         $proc.WaitForExit()
-        $proc.ExitCode
-    } finally { [Console]::InputEncoding = $saved }
+        if ($proc.ExitCode -ne 0) { throw "gcloud secrets versions add $Name failed (exit $($proc.ExitCode))" }
+    } finally {
+        if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        else { [Console]::InputEncoding = $saved }
+    }
 }
 
 function Step([string]$Text) { Write-Host "`n== $Text" -ForegroundColor Cyan }
@@ -102,18 +128,11 @@ foreach ($name in $Secrets) {
     if (-not (Test-Native gcloud.cmd @("secrets", "describe", $name))) {
         Invoke-Native gcloud.cmd @("secrets", "create", $name, "--replication-policy=automatic")
     }
-    $ErrorActionPreference = "Continue"
-    $current = (& gcloud.cmd secrets versions access latest "--secret=$name" 2>$null) -join "`n"
-    $ErrorActionPreference = "Stop"
-    if ($current -ceq $envVars[$name]) { Write-Host "$name unchanged"; continue }
+    if (Test-SecretMatches $name $envVars[$name]) { Write-Host "$name unchanged"; continue }
     Write-Host "> gcloud secrets versions add $name --data-file=-  (value on stdin)"
     if ($DryRun) { continue }
-    $code = Write-Stdin (Get-Command gcloud.cmd).Source "secrets versions add $name --data-file=-" $envVars[$name]
-    if ($code -ne 0) { throw "gcloud secrets versions add $name failed (exit $code)" }
-    $ErrorActionPreference = "Continue"
-    $stored = (& gcloud.cmd secrets versions access latest "--secret=$name" 2>$null) -join "`n"
-    $ErrorActionPreference = "Stop"
-    if ($stored -cne $envVars[$name]) { throw "$name read back from Secret Manager does not match .env (value not shown)." }
+    Add-SecretVersion $name $envVars[$name]
+    if (-not (Test-SecretMatches $name $envVars[$name])) { throw "$name read back from Secret Manager does not match .env (value not shown)." }
 }
 
 Step "Service accounts"
