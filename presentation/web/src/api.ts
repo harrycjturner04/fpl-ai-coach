@@ -45,8 +45,8 @@ export const getLatestRun = (entry: number) => call<Run | null>(`/api/entries/${
 
 export async function getSnapshot(entry: number): Promise<SnapshotResponse> {
   const data = await call<SnapshotResponse>(`/api/entries/${entry}/snapshot`);
-  if (data.schema !== 1) {
-    throw new ApiError(0, `This snapshot uses schema ${data.schema}, but this app reads schema 1. Update the app.`);
+  if (data.schema !== 1 && data.schema !== 2) {
+    throw new ApiError(0, `This snapshot uses schema ${data.schema}, but this app reads schema 1 and 2. Update the app.`);
   }
   return data;
 }

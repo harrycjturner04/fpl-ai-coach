@@ -64,7 +64,7 @@ export interface ChipRow {
 }
 
 export interface Snapshot {
-  schema: 1;
+  schema: 1 | 2;
   entry: number;
   team_name: string;
   gameweek: number;

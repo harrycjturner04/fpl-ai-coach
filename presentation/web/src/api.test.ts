@@ -24,7 +24,7 @@ it("reports a missing server with the uvicorn hint", async () => {
 });
 
 it("rejects another schema version", async () => {
-  reply(200, { ...fixture, schema: 2 });
+  reply(200, { ...fixture, schema: 3 });
   await expect(getSnapshot(42)).rejects.toThrow(/schema/);
 });
 
