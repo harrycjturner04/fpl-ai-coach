@@ -122,6 +122,7 @@ def test_spend_db_failure_still_finishes_run_and_releases_lock(setup):
     with pytest.raises(ConnectionError):
         job.run_coach(42, rid, db, bucket, data, NOW, coach_run=ok_run)
     assert db.get_run(rid)["status"] == "done" and "data" not in db.locks
+    assert db.month_spend_usd(datetime.now(timezone.utc)) == 0.09
 
 
 def test_add_step_failure_does_not_stop_the_run(setup):

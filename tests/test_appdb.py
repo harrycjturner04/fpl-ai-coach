@@ -36,6 +36,18 @@ def test_month_spend_is_utc_month(db):
     assert db.month_spend_usd(datetime(2026, 10, 31, 23, 59, 30, tzinfo=UTC)) == 2.0
 
 
+def test_month_spend_counts_unrecorded_run_cost_once(db):
+    orphan = db.create_run(1, 1, "manual")
+    db.finish_run(orphan, "done", None, 1.0)
+    both = db.create_run(1, 2, "manual")
+    db.finish_run(both, "done", None, 2.0)
+    db.record_spend(both, "coach", 2.0, datetime.now(UTC))
+    old = db.create_run(1, 3, "manual")
+    db.finish_run(old, "done", None, 4.0)
+    db.conn.execute("update runs set finished_at = now() - interval '40 days', created_at = now() - interval '40 days' where id = %s", (old,))
+    assert db.month_spend_usd(datetime.now(UTC)) == 3.0
+
+
 def test_ai_block_reason(db):
     assert db.ai_block_reason(NOW) is None
     db.record_spend(None, "coach", 7.0, NOW)

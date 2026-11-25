@@ -81,7 +81,12 @@ class AppDB:
         now = now.astimezone(timezone.utc)
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         end = (start + timedelta(days=32)).replace(day=1)
-        row = self._one("select coalesce(sum(cost_usd), 0) as s from spend where at >= %s and at < %s", (start, end))
+        # runs whose spend row failed to save still count (cost_usd on the run)
+        row = self._one("select coalesce(sum(c), 0) as s from ("
+                        "select cost_usd as c from spend where at >= %s and at < %s union all "
+                        "select cost_usd from runs r where cost_usd is not null "
+                        "and coalesce(finished_at, created_at) >= %s and coalesce(finished_at, created_at) < %s "
+                        "and not exists (select 1 from spend s where s.run_id = r.id)) t", (start, end, start, end))
         return row["s"]
 
     def ai_block_reason(self, now: datetime) -> str | None:

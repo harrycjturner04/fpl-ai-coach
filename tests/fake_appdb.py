@@ -27,7 +27,11 @@ class FakeAppDB:
 
     def month_spend_usd(self, now: datetime) -> float:
         now = now.astimezone(timezone.utc)
-        return sum(s["cost_usd"] for s in self.spend if (s["at"].year, s["at"].month) == (now.year, now.month))
+        same = lambda t: (t.year, t.month) == (now.year, now.month)  # noqa: E731
+        paid = {s["run_id"] for s in self.spend}
+        return (sum(s["cost_usd"] for s in self.spend if same(s["at"]))
+                + sum(r["cost_usd"] for r in self.runs.values() if r["cost_usd"] is not None and r["id"] not in paid
+                      and same((r["finished_at"] or r["created_at"]).astimezone(timezone.utc))))
 
     def ai_block_reason(self, now: datetime) -> str | None:
         s = self._settings

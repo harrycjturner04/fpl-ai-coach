@@ -73,7 +73,7 @@ locked by a running job; try again later." if one holds it.
    ```
    Create the owner's login in Supabase (Authentication > Users), then in the SQL editor:
    `insert into app_users (user_id, entry) values ('<user id>', <FPL team ID>);`
-6. First data upload: `python -m ingestion.cli --history --entry <team ID>`, then `python -m orchestration.bucket push`.
+6. On the PC install with `pip install -e ".[dev]"` (includes the bucket client). First data upload: `python -m ingestion.cli --history --entry <team ID>`, then `python -m orchestration.bucket push`.
 7. `powershell -File deploy\deploy.ps1`.
 8. `powershell -File deploy\register_pc_task.ps1` (no admin needed).
 
