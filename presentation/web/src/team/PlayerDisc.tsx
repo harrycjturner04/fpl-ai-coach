@@ -4,7 +4,7 @@ import { statusOf, type Slot } from "./model";
 const R = 21;
 const C = 2 * Math.PI * R;
 
-export function PlayerDisc({ slot }: { slot: Slot }) {
+export function PlayerDisc({ slot, onPick }: { slot: Slot; onPick?: (id: number) => void }) {
   const { player, flag, points, p60, captain, vice, isNew } = slot;
   const { status, label, chance } = statusOf(player, flag);
   const fill = p60 ?? 0;
@@ -27,8 +27,10 @@ export function PlayerDisc({ slot }: { slot: Slot }) {
     .filter(Boolean)
     .join(", ");
 
+  const Tag = onPick ? "button" : "div";
+  const props = onPick ? { type: "button" as const, onClick: () => onPick(player.id) } : { role: "img" };
   return (
-    <div className={`slot ${status}`} role="img" aria-label={aria}>
+    <Tag className={`slot ${status}${onPick ? " pick" : ""}`} aria-label={aria} {...props}>
       <div className="disc" aria-hidden="true">
         <svg viewBox="0 0 48 48">
           <circle className="track" cx="24" cy="24" r={R} />
@@ -42,6 +44,6 @@ export function PlayerDisc({ slot }: { slot: Slot }) {
         <span className="name">{player.name}</span>
         {label && <span className="label">{label}</span>}
       </span>
-    </div>
+    </Tag>
   );
 }
