@@ -3,8 +3,12 @@ import fixture from "../src/test/snapshot.json" with { type: "json" };
 
 const json = (body: unknown, status = 200) => ({ status, contentType: "application/json", body: JSON.stringify(body) });
 
-/** Mocks Supabase sign-in and the api (override /api/me with `me`), then signs in through the form. */
-export async function signedIn(page: Page, me: { status: number; body: unknown } = { status: 200, body: { entry: 42, entries: [42] } }) {
+type Reply = { status?: number; body: unknown };
+
+/** Mocks Supabase sign-in and the api (override /api/me with `me`; `routes` answers "METHOD /path" first), then signs
+ * in through the form. No adopted plan unless `routes` gives one. */
+export async function signedIn(page: Page, me: { status: number; body: unknown } = { status: 200, body: { entry: 42, entries: [42] } },
+  routes: Record<string, Reply> = {}) {
   await page.route("**/auth/v1/**", (route) => {
     const url = route.request().url();
     if (url.includes("/token")) {
@@ -17,6 +21,9 @@ export async function signedIn(page: Page, me: { status: number; body: unknown }
   });
   await page.route("**/api/**", (route) => {
     const path = new URL(route.request().url()).pathname;
+    const own = routes[`${route.request().method()} ${path}`];
+    if (own) return route.fulfill(json(own.body, own.status));
+    if (path.endsWith("/user-plan")) return route.fulfill(json(null));
     if (path === "/api/me") return route.fulfill(json(me.body, me.status));
     if (path === "/api/settings") return route.fulfill(json({ cap_gbp: 5, auto_runs: true, ai_off: false, spent_gbp: 0.4, month: "November 2026" }));
     return route.fulfill(json(fixture));

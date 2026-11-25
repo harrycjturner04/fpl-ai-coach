@@ -4,7 +4,7 @@ import fixture from "../test/snapshot.json";
 import type { SnapshotResponse } from "../types";
 import { TeamScreen } from "./TeamScreen";
 
-vi.mock("../api", () => ({ getLatestRun: () => Promise.resolve(null), getRun: vi.fn(), startRun: vi.fn(), ApiError: class extends Error {} }));
+vi.mock("../api", () => ({ getLatestRun: () => Promise.resolve(null), getUserPlan: () => Promise.resolve(null), postPlanCheck: vi.fn(), getRun: vi.fn(), startRun: vi.fn(), ApiError: class extends Error {} }));
 
 const snap = () => structuredClone(fixture) as SnapshotResponse;
 const NOW = new Date("2026-11-12T21:00:00Z");
