@@ -348,3 +348,160 @@ def test_run_older_than_70_min_shows_failed(tmp_path, status):
 
 def utcnow_():
     return datetime.now(timezone.utc)
+
+
+# --- plan checks and adopted plans (Stage 7c) ---
+
+SNAP_A, SNAP_B = "42_gw10_20261110-1200.json", "42_gw10_20261111-0900.json"
+
+
+def plans_client(tmp_path, db=None, user="u1", names=(SNAP_A,), deadline="2026-11-14T11:00:00+00:00"):
+    from tests.test_swaps import _snap
+    body, _ = _snap()
+    for n in names:
+        write(tmp_path, n, body | {"entry": 42, "gameweek": 10, "deadline": deadline})
+    db = db or FakeAppDB({"u1": 42, "u2": 7})
+    return make(tmp_path, user=user, db=db), db
+
+
+def at(monkeypatch, now):
+    monkeypatch.setattr("presentation.api.app.utcnow", lambda: now)
+
+
+def check(c, swaps=([1006, 1012],), chip=None, snapshot=SNAP_A):
+    return c.post("/api/entries/42/plan-checks", json={"snapshot": snapshot, "swaps": list(swaps), "chip": chip})
+
+
+def test_check_returns_verdict(tmp_path):
+    c, db = plans_client(tmp_path)
+    r = check(c)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"] == 1 and body["sold"] == [1006] and body["bought"] == [1012]
+    assert {"weeks", "objective", "points", "chip", "chips", "coach", "seconds"} <= set(body)
+    row = db.get_check(1)
+    assert (row["entry"], row["gameweek"], row["snapshot"], row["swaps"], row["chip"]) == (42, 10, SNAP_A, [[1006, 1012]], None)
+    assert row["deadline"] == datetime(2026, 11, 14, 11, tzinfo=timezone.utc) and row["adopted_at"] is None
+    assert row["result"]["objective"] == body["objective"]
+
+
+def test_check_busy_409(tmp_path, monkeypatch):
+    import threading
+    started, release = threading.Event(), threading.Event()
+
+    def slow(snap, swaps, chip):
+        started.set()
+        release.wait(5)
+        return {"objective": 1.0}
+
+    monkeypatch.setattr("presentation.api.app.swaps.check", slow)
+    c, db = plans_client(tmp_path)
+    out = []
+    t = threading.Thread(target=lambda: out.append(check(c)))
+    t.start()
+    assert started.wait(5)
+    r = check(c)
+    assert r.status_code == 409 and r.json()["reason"] == "busy"
+    release.set()
+    t.join()
+    assert out[0].status_code == 200 and check(c).status_code == 200   # the lock is released afterwards
+
+
+def test_check_rate_limit_429(tmp_path, monkeypatch):
+    monkeypatch.setattr("presentation.api.app.swaps.check", lambda snap, swaps, chip: {"objective": 1.0})
+    c, db = plans_client(tmp_path)
+    assert all(check(c).status_code == 200 for _ in range(10))
+    assert check(c).status_code == 429
+
+
+def test_check_swap_error_422(tmp_path):
+    c, db = plans_client(tmp_path)
+    r = check(c, swaps=([1006, 1023],))
+    assert r.status_code == 422 and r.json()["detail"] == "Swap like for like: P1006 is a DEF, P1023 a MID."
+    assert db.get_check(1) is None
+
+
+@pytest.mark.parametrize("name", ["42_gw10_20261109-1200.json", "../42_gw10_20261110-1200.json",
+                                  "7_gw10_20261110-1200.json", "42_gw10_20261110-1200.md"])
+def test_check_unknown_snapshot_404(tmp_path, name):
+    c, db = plans_client(tmp_path, names=(SNAP_A, "7_gw10_20261110-1200.json"))
+    assert check(c, snapshot=name).status_code == 404
+
+
+def test_check_old_schema_422(tmp_path):
+    c, db = plans_client(tmp_path)
+    write(tmp_path, SNAP_B, snap(entry=42, gameweek=10))
+    r = check(c, swaps=(), snapshot=SNAP_B)
+    assert r.status_code == 422 and "run the coach again" in r.json()["detail"]
+
+
+def test_check_other_entry_403(tmp_path):
+    c, db = plans_client(tmp_path)
+    r = c.post("/api/entries/7/plan-checks", json={"snapshot": SNAP_A, "swaps": [], "chip": None})
+    assert r.status_code == 403
+
+
+def test_adopt_replaces_previous(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
+    c, db = plans_client(tmp_path)
+    first, second = check(c).json()["id"], check(c, swaps=()).json()["id"]
+    a = c.post(f"/api/plan-checks/{first}/adopt")
+    assert a.status_code == 200 and a.json()["id"] == first and a.json()["stale"] is False
+    b = c.post(f"/api/plan-checks/{second}/adopt").json()
+    assert b["id"] == second and b["swaps"] == [] and b["result"]["sold"] == []
+    assert db.get_check(first)["replaced_at"] == T0 and db.get_check(second)["replaced_at"] is None
+    assert c.get("/api/entries/42/user-plan").json()["id"] == second
+
+
+def test_adopt_after_restart(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
+    c, db = plans_client(tmp_path)
+    cid = check(c).json()["id"]
+    again = make(tmp_path, db=db)          # a new app instance (api restarted), same database
+    assert again.post(f"/api/plan-checks/{cid}/adopt").status_code == 200
+    assert again.get("/api/entries/42/user-plan").json()["id"] == cid
+
+
+def test_adopt_after_deadline_409(tmp_path, monkeypatch):
+    c, db = plans_client(tmp_path)
+    cid = check(c).json()["id"]
+    at(monkeypatch, datetime(2026, 11, 14, 11, 1, tzinfo=timezone.utc))
+    assert c.post(f"/api/plan-checks/{cid}/adopt").status_code == 409
+    assert db.get_check(cid)["adopted_at"] is None
+
+
+def test_user_plan_stale_flag(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
+    c, db = plans_client(tmp_path)
+    assert c.get("/api/entries/42/user-plan").json() is None
+    c.post(f"/api/plan-checks/{check(c).json()['id']}/adopt")
+    assert c.get("/api/entries/42/user-plan").json()["stale"] is False
+    write(tmp_path, SNAP_B, json.loads((tmp_path / "reports" / SNAP_A).read_text(encoding="utf-8")))
+    plan = c.get("/api/entries/42/user-plan").json()
+    assert plan["stale"] is True and plan["snapshot"] == SNAP_A
+
+
+def test_user_plan_null_without_snapshot(tmp_path):
+    c, db = plans_client(tmp_path, names=())
+    assert c.get("/api/entries/42/user-plan").json() is None
+    assert c.get("/api/entries/7/user-plan").status_code == 403
+
+
+def test_user_plan_cleared_after_deadline(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
+    c, db = plans_client(tmp_path)
+    c.post(f"/api/plan-checks/{check(c).json()['id']}/adopt")
+    at(monkeypatch, datetime(2026, 11, 14, 11, 0, tzinfo=timezone.utc))
+    assert c.get("/api/entries/42/user-plan").json() is None
+    assert db.get_check(1)["adopted_at"] == T0            # kept as the owner's log
+
+
+def test_other_users_check_404(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
+    db = FakeAppDB({"u1": 42, "u2": 7})
+    c, _ = plans_client(tmp_path, db=db)
+    cid = check(c).json()["id"]
+    other = make(tmp_path, user="u2", db=db)
+    assert other.post(f"/api/plan-checks/{cid}/adopt").status_code == 404
+    assert other.post("/api/plan-checks/999/adopt").status_code == 404
+    assert db.get_check(cid)["adopted_at"] is None

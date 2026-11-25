@@ -17,6 +17,7 @@ class FakeAppDB:
         self.runs: dict[int, dict] = {}
         self.spend: list[dict] = []
         self.locks: dict[str, tuple[str, datetime]] = {}
+        self.plans: dict[int, dict] = {}
 
     def settings(self) -> dict:
         return deepcopy(self._settings)
@@ -93,3 +94,26 @@ class FakeAppDB:
     def release_lock(self, name, holder):
         if self.locks.get(name, (None,))[0] == holder:
             del self.locks[name]
+
+    def save_check(self, entry, gameweek, snapshot, deadline, swaps, chip, result):
+        cid = len(self.plans) + 1
+        self.plans[cid] = deepcopy({"id": cid, "entry": entry, "gameweek": gameweek, "snapshot": snapshot,
+                                    "deadline": deadline, "swaps": swaps, "chip": chip, "result": result,
+                                    "checked_at": datetime.now(timezone.utc), "adopted_at": None, "replaced_at": None})
+        return cid
+
+    def get_check(self, check_id):
+        return deepcopy(self.plans.get(check_id))
+
+    def adopt(self, check_id, now):
+        row = self.plans[check_id]
+        for p in self.plans.values():
+            if (p["entry"], p["gameweek"]) == (row["entry"], row["gameweek"]) and p["adopted_at"] and not p["replaced_at"]:
+                p["replaced_at"] = now
+        row.update(adopted_at=now, replaced_at=None)
+        return deepcopy(row)
+
+    def active_plan(self, entry, gameweek, now):
+        live = [p for p in self.plans.values() if (p["entry"], p["gameweek"]) == (entry, gameweek)
+                and p["adopted_at"] and not p["replaced_at"] and p["deadline"] > now]
+        return deepcopy(live[0] if live else None)
