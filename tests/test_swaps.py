@@ -67,8 +67,13 @@ def test_free_hit_reverts():
 
 def test_carried_chips_drop_duplicate():
     snap, _ = _snap(headline_chips={10: "bboost", 12: "wildcard"})
-    assert swaps.check(snap, [], "wildcard")["chips"] == {"10": "wildcard"}
-    assert swaps.check(snap, [], None)["chips"] == {"12": "wildcard"}
+    assert swaps.check(snap, [], "wildcard")["chips"] == {"10": "wildcard"}      # toggle replaces week-1 bboost
+    assert swaps.check(snap, [], None)["chips"] == {"10": "bboost", "12": "wildcard"}  # week-1 bboost kept
+
+
+def test_headline_week1_wildcard_dropped_without_toggle():
+    snap, _ = _snap(headline_chips={10: "wildcard", 11: "3xc"})
+    assert swaps.check(snap, [], None)["chips"] == {"11": "3xc"}
 
 
 def test_unlimited_free_transfers_no_hits():

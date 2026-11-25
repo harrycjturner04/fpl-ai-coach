@@ -49,8 +49,8 @@ def net_swaps(owned: set[int], swaps: list[tuple[int, int]], names: dict[int, st
 
 
 def check(snap: dict, swaps: list[tuple[int, int]], chip: str | None) -> dict:
-    """Exact solve with week one's squad forced to the current squad after `swaps`, the headline's later chips
-    kept and `chip` (Wildcard/Free Hit) in week one. SwapError for illegal input."""
+    """Exact solve with week one's squad forced to the current squad after `swaps`, the headline's chips
+    carried and `chip` (Wildcard/Free Hit) in week one. SwapError for illegal input."""
     ctx, table = context_from_snapshot(snap)
     names = {p["id"]: p["name"] for p in snap["players"]}
     unknown = sorted({i for s in swaps for i in s} - set(names))
@@ -62,7 +62,7 @@ def check(snap: dict, swaps: list[tuple[int, int]], chip: str | None) -> dict:
             raise SwapError(f"Swap like for like: {names[out]} is a {info.at[out, 'position']}, "
                             f"{names[inn]} a {info.at[inn, 'position']}.")
     sold, bought = net_swaps(set(ctx.owned), swaps, names)
-    forced = (set(ctx.owned) - set(sold)) | set(bought)
+    forced = (set(ctx.owned) - set(sold)) | set(bought)   # no swaps holds the squad: matches only a holding headline
     clubs = info.loc[sorted(forced), "team"].value_counts()
     if clubs.max() > ctx.rules.max_per_club:
         raise SwapError(f"More than {ctx.rules.max_per_club} players from {clubs.idxmax()}.")
@@ -78,7 +78,10 @@ def check(snap: dict, swaps: list[tuple[int, int]], chip: str | None) -> dict:
         raise SwapError(f"At most {max_hits} hits a week: play a Wildcard or Free Hit, or make fewer swaps.")
 
     gw1 = snap["gameweeks"][0]
-    chips = {w["gameweek"]: w["chip"] for w in snap["plan"]["weeks"][1:] if w["chip"] and w["chip"] != chip}
+    # Headline chips carried, deduped by name only; a week-1 Wildcard/Free Hit goes (the swaps are made without it),
+    # a week-1 Bench Boost/Triple Captain stays unless the toggle replaces it.
+    chips = {w["gameweek"]: w["chip"] for w in snap["plan"]["weeks"]
+             if w["chip"] and w["chip"] != chip and not (w["gameweek"] == gw1 and w["chip"] in CHIP_NAMES)}
     if chip:
         chips[gw1] = chip
     start = time.perf_counter()
