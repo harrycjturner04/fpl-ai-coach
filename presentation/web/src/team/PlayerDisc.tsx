@@ -31,7 +31,7 @@ export function PlayerDisc({ slot, onPick }: { slot: Slot; onPick?: (id: number)
   const props = onPick ? { type: "button" as const, onClick: () => onPick(player.id) } : { role: "img" };
   return (
     <Tag className={`slot ${status}${onPick ? " pick" : ""}`} aria-label={aria} {...props}>
-      <div className="disc" aria-hidden="true">
+      <span className="disc" aria-hidden="true">
         <svg viewBox="0 0 48 48">
           <circle className="track" cx="24" cy="24" r={R} />
           <circle className="ring" cx="24" cy="24" r={R} strokeDasharray={C} strokeDashoffset={C * (1 - shown)} />
@@ -39,7 +39,7 @@ export function PlayerDisc({ slot, onPick }: { slot: Slot; onPick?: (id: number)
         <span className="pts num">{pts}</span>
         {(captain || vice) && <span className="arm">{captain ? "C" : "V"}</span>}
         {isNew && <span className="new">New</span>}
-      </div>
+      </span>
       <span className="chip" aria-hidden="true">
         <span className="name">{player.name}</span>
         {label && <span className="label">{label}</span>}

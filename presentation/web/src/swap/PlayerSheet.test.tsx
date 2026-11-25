@@ -29,9 +29,19 @@ function Harness({ onSwap }: { onSwap: (n: number) => void }) {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button onClick={() => setOpen(true)}>disc</button>
+      <main><button onClick={() => setOpen(true)}>disc</button></main>
       {open && <PlayerSheet snap={snap} player={target} swaps={[]} chip={null} onSwap={onSwap} onClose={() => setOpen(false)} />}
     </>
+  );
+}
+
+function Gone({ show }: { show: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <main>
+      {show && <button onClick={() => setOpen(true)}>disc</button>}
+      {open && <PlayerSheet snap={snap} player={target} swaps={[]} chip={null} onSwap={() => {}} onClose={() => setOpen(false)} />}
+    </main>
   );
 }
 
@@ -78,6 +88,37 @@ describe("PlayerSheet", () => {
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(disc).toHaveFocus();
+  });
+
+  it("keeps Tab inside the sheet on the phone layout", () => {
+    render(<Harness onSwap={() => {}} />);
+    fireEvent.click(screen.getByText("disc"));
+    const d = screen.getByRole("dialog");
+    expect(d).toHaveAttribute("aria-modal", "true");
+    const buttons = within(d).getAllByRole("button");
+    buttons[buttons.length - 1].focus();
+    fireEvent.keyDown(buttons[buttons.length - 1], { key: "Tab" });
+    expect(buttons[0]).toHaveFocus();
+    fireEvent.keyDown(buttons[0], { key: "Tab", shiftKey: true });
+    expect(buttons[buttons.length - 1]).toHaveFocus();
+  });
+
+  it("is a non-modal panel at laptop width", () => {
+    const mm = vi.fn().mockReturnValue({ matches: true, addEventListener() {}, removeEventListener() {} });
+    vi.stubGlobal("matchMedia", mm);
+    render(<Harness onSwap={() => {}} />);
+    fireEvent.click(screen.getByText("disc"));
+    expect(screen.getByRole("dialog")).not.toHaveAttribute("aria-modal");
+    vi.unstubAllGlobals();
+  });
+
+  it("lands on the page when the opener is gone", () => {
+    const { rerender } = render(<Gone show />);
+    screen.getByText("disc").focus();
+    fireEvent.click(screen.getByText("disc"));
+    rerender(<Gone show={false} />);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(document.querySelector("main")).toHaveFocus();
   });
 
   it("closes with the close button", () => {
