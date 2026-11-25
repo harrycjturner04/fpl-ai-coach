@@ -219,3 +219,14 @@ def test_one_active_plan_per_gw(db):
     assert db.active_plan(1, 12, DEADLINE) is None                # cleared once the deadline has passed
     with pytest.raises(psycopg.errors.UniqueViolation):          # the index backs the rule
         db.conn.execute("update user_plans set replaced_at = null where id = %s", (a,))
+
+
+def test_concurrent_adopts_leave_one_active(db):
+    from concurrent.futures import ThreadPoolExecutor
+    ids = [save(db) for _ in range(8)]
+    with ThreadPoolExecutor(8) as pool:
+        plans = list(pool.map(lambda i: db.adopt(i, NOW), ids))
+    assert sorted(p["id"] for p in plans) == ids
+    active = db.conn.execute("select count(*) as n from user_plans where adopted_at is not null "
+                             "and replaced_at is null").fetchone()["n"]
+    assert active == 1 and db.active_plan(1, 12, NOW)["id"] in ids

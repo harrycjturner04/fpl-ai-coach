@@ -105,6 +105,20 @@ def test_illegal_inputs_raise(args, message):
         swaps.check(snap, *args)
 
 
+def test_infeasible_solve_with_affordable_swaps(monkeypatch):
+    snap, _ = _snap()
+
+    def infeasible(*a, **k):
+        raise swaps.InfeasibleError("no plan")
+
+    monkeypatch.setattr(swaps.planning, "plan", infeasible)
+    with pytest.raises(swaps.SwapError, match="^The optimiser found no legal plan with these swaps. "
+                                             "Try fewer swaps or another chip.$"):
+        swaps.check(snap, [(1006, 1012)], None)
+    with pytest.raises(swaps.SwapError, match="^Not affordable with your bank and selling prices.$"):
+        swaps.check(snap, [(1018, 2000)], None)          # budget checked before the solve
+
+
 def test_chip_not_available_or_unlimited_week_raises():
     snap, _ = _snap(chips_available=("bboost",))
     with pytest.raises(swaps.SwapError, match="Wildcard is not available"):

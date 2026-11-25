@@ -66,6 +66,9 @@ def check(snap: dict, swaps: list[tuple[int, int]], chip: str | None) -> dict:
     clubs = info.loc[sorted(forced), "team"].value_counts()
     if clubs.max() > ctx.rules.max_per_club:
         raise SwapError(f"More than {ctx.rules.max_per_club} players from {clubs.idxmax()}.")
+    budget = round(10 * (ctx.state["bank"] + sum(ctx.owned.values())))      # tenths, as the ILP
+    if round(10 * sum(ctx.owned.get(i, info.at[i, "price"]) for i in forced)) > budget:
+        raise SwapError("Not affordable with your bank and selling prices.")
     if chip is not None:
         if chip not in CHIP_NAMES:
             raise SwapError("Only a Wildcard or Free Hit can be toggled here.")
@@ -88,7 +91,7 @@ def check(snap: dict, swaps: list[tuple[int, int]], chip: str | None) -> dict:
     try:
         result = planning.plan(ctx, table, chips=chips, forced=forced, gap=0.0)
     except InfeasibleError:
-        raise SwapError("Not affordable with your bank and selling prices.") from None
+        raise SwapError("The optimiser found no legal plan with these swaps. Try fewer swaps or another chip.") from None
     seconds = time.perf_counter() - start
     weeks = [week_dict(w, table) for w in result.weeks]
     coach = snap["plan"]

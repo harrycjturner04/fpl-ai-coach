@@ -7,6 +7,7 @@ import os
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -27,6 +28,7 @@ load_env()
 
 STEPS_EXPECTED = ["data", "predictions and initial solve", "news", "adjusted predictions and headline solve",
                   "chip scan", "write-up"]
+DEADLINE_PASSED = "This gameweek's deadline has passed."
 STALE_RUN = timedelta(minutes=70)  # same cutoff as AppDB.active_run
 
 
@@ -36,9 +38,9 @@ def utcnow() -> datetime:
 
 class CheckBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    snapshot: str
-    swaps: list[tuple[int, int]]
-    chip: str | None = None
+    snapshot: str = Field(max_length=64)
+    swaps: list[tuple[int, int]] = Field(max_length=15)
+    chip: Literal["wildcard", "freehit"] | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -179,20 +181,23 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
         m, path = views._NAME.match(body.snapshot), data_dir / "reports" / body.snapshot
         if not (m and int(m[1]) == entry and path.is_file()):
             raise HTTPException(404, "No such coach run.")
+        snap = json.loads(path.read_text(encoding="utf-8"))
+        if snap.get("schema", 1) < 2:
+            raise HTTPException(422, "This coach run is too old to check: run the coach again.")
+        deadline = datetime.fromisoformat(snap["deadline"])
+        if deadline <= utcnow():
+            raise HTTPException(409, DEADLINE_PASSED)
         lock = busy.setdefault(user[0], threading.Lock())
         if not lock.acquire(blocking=False):
             return JSONResponse({"detail": "A check is already running.", "reason": "busy"}, status_code=409)
         try:
             if not checks.allow(user[0]):
                 raise HTTPException(429, "Too many checks. Try again later.")
-            snap = json.loads(path.read_text(encoding="utf-8"))
-            if snap.get("schema", 1) < 2:
-                raise HTTPException(422, "This coach run is too old to check: run the coach again.")
             try:
                 result = swaps.check(snap, body.swaps, body.chip)
             except swaps.SwapError as exc:
                 raise HTTPException(422, str(exc)) from None
-            check_id = db.save_check(entry, snap["gameweek"], body.snapshot, datetime.fromisoformat(snap["deadline"]),
+            check_id = db.save_check(entry, snap["gameweek"], body.snapshot, deadline,
                                      [list(s) for s in body.swaps], body.chip, result)
         finally:
             lock.release()
@@ -204,7 +209,7 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
         if row is None or row["entry"] not in user[1]:
             raise HTTPException(404, "No such check.")
         if row["deadline"] <= utcnow():
-            raise HTTPException(409, "This gameweek's deadline has passed.")
+            raise HTTPException(409, DEADLINE_PASSED)
         return plan_view(db.adopt(check_id, utcnow()))
 
     @app.get("/api/entries/{entry}/user-plan")

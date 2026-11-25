@@ -40,11 +40,23 @@ it("updates the headline and the pitch after a swap", () => {
   expect(check()).toBeEnabled();
 });
 
-it("says but when this week is up and the five weeks are down", () => {
+it("says but when this week is up and the later weeks are down, naming the weeks this run covers", () => {
   show();
   swap("P1036", "P1030");
   expect(screen.getByText("+2.0 this week")).toBeInTheDocument();
-  expect(screen.getByText("but −2.0 over the next 5 GWs (no further transfers)")).toBeInTheDocument();
+  expect(screen.getByText("but −2.0 over the next 2 GWs (no further transfers)")).toBeInTheDocument();
+});
+
+it("labels the horizon from a 3-GW snapshot", () => {
+  show(snap((s) => { s.gameweeks = [...s.gameweeks, 11]; }));
+  swap("P1036", "P1030");
+  expect(screen.getByText("but −2.0 over the next 3 GWs (no further transfers)")).toBeInTheDocument();
+});
+
+it("hides the Wildcard and Free Hit toggles in a week of unlimited free transfers", () => {
+  show(snap((s) => { s.state.chips_available = ["wildcard", "freehit"]; s.state.free_transfers = null; }));
+  expect(screen.queryByRole("button", { name: "Wildcard" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Free Hit" })).toBeNull();
 });
 
 it("stacks swaps with a hit, undoes one and resets", () => {

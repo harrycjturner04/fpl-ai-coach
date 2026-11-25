@@ -56,6 +56,16 @@ describe("PlayerSheet", () => {
     expect(within(d).getByText("Knock, 75%")).toBeInTheDocument();
     expect(within(d).getByText(/ARS \(H\)/)).toBeInTheDocument();
     expect(within(d).getByText(/CHE \(A\)/)).toBeInTheDocument();
+    expect(within(d).getAllByText(/^[+−]\d+\.\d over 6$/).length).toBeGreaterThan(0);   // the 6 gameweeks this snapshot covers
+  });
+
+  it("shows a fixture with no difficulty without a difficulty class", () => {
+    snap.fixtures[target.team].push({ gameweek: 14, opponent: "LIV", home: true, fdr: null });
+    try {
+      render(<Harness onSwap={() => {}} />);
+      fireEvent.click(screen.getByText("disc"));
+      expect(within(screen.getByRole("dialog")).getByText("LIV (H)")).toHaveAttribute("class", "fdr");
+    } finally { snap.fixtures[target.team].pop(); }
   });
 
   it("names the best legal swap first and greys the illegal one with its reason", () => {

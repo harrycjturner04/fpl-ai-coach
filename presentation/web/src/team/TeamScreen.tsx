@@ -175,9 +175,10 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
 }
 
 /** The owner's week-1 squad re-scored on this run's predictions, net of its hits like the coach's figure; hidden when
- * this run has no swap rules or does not cover that gameweek. */
+ * this run has no swap rules, does not cover that gameweek or the squad no longer makes an XI. */
 function Rescored({ snap, week, coach }: { snap: Snapshot; week: Week; coach: number }) {
-  const row = swappable(snap) ? rescore(snap, [week])[0] : undefined;
+  let row;
+  try { row = swappable(snap) ? rescore(snap, [week])[0] : undefined; } catch { return null; }
   if (!swappable(snap) || !row) return null;
   const net = row.points - week.hits * snap.rules.hit_cost;
   return <p>{`Re-scored on the latest predictions: ${net.toFixed(1)} this week vs the coach's new plan ${coach.toFixed(1)}`}</p>;

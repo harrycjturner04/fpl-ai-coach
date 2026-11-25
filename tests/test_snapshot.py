@@ -161,6 +161,14 @@ def test_fixtures_by_team_double_and_blank():
     assert [f["gameweek"] for f in out["CCC"]] == [12] and out["CCC"][0]["fdr"] == 4
 
 
+def test_fixtures_by_team_missing_fdr_is_none():
+    teams = pd.DataFrame({"id": [1, 2], "short_name": ["AAA", "BBB"]})
+    fx = pd.DataFrame({"event": [11], "team_h": [1], "team_a": [2], "team_h_difficulty": [float("nan")],
+                       "team_a_difficulty": [4.0], "kickoff_time": pd.to_datetime(["2026-11-14"], utc=True)})
+    out = snapshot.fixtures_by_team(fx, teams, [11])
+    assert out["AAA"][0]["fdr"] is None and out["BBB"][0]["fdr"] == 4
+
+
 def test_points_unrounded(session):
     s = _owned(session)
     pid = next(iter(s.ctx.owned))

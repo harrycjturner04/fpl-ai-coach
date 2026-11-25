@@ -117,7 +117,8 @@ export interface Fixture {
   gameweek: number;
   opponent: string;
   home: boolean;
-  fdr: number;
+  /** null when FPL has no difficulty for the fixture. */
+  fdr: number | null;
 }
 
 /** A schema-2 snapshot: everything the swap preview and plan check need. */

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { ApiError, adoptPlan } from "../api";
 import { chipName } from "../team/model";
 import { swappable } from "./SwapTab";
-import { preview, type Swap } from "./swap";
+import { nextGws, preview, type Swap } from "./swap";
 import type { Chip, PlanCheck, Snapshot, UserPlan } from "../types";
 
 const KEY = "planCheckSeconds";
@@ -100,7 +100,7 @@ function Verdict({ snap, swaps, chip, result, onKeep, onAdopted }: Omit<Props, "
   const [adopting, setAdopting] = useState(false);
   const [error, setError] = useState<string>();
   const sending = useRef(false);
-  const coachChip = snap.plan.weeks[0].chip;
+  const coachChip = snap.plan.weeks[0].chip, weeks = snap.gameweeks.length;
   const likeForLike = (coachChip === "wildcard" || coachChip === "freehit") && result.chip !== coachChip;
   let five: number | null = null;
   try {
@@ -127,8 +127,8 @@ function Verdict({ snap, swaps, chip, result, onKeep, onAdopted }: Omit<Props, "
       <h3>The optimiser's verdict</h3>
       <p className="num">{`This week: ${f1(result.points)} vs coach ${f1(result.coach.points)}`}</p>
       <p>{`Optimiser's planning value: ${f1(result.objective)} vs coach ${f1(result.coach.objective)}${result.coach.exact ? "" : " (coach's plan not exact)"}`}</p>
-      {five !== null && <p>{`Quick estimate: ${signed(five)} over the next 5 GWs (no further transfers)`}</p>}
-      <p className="explain">The planning value is the optimiser's score for 5 weeks with later transfers planned. The quick estimate keeps your squad fixed.</p>
+      {five !== null && <p>{`Quick estimate: ${signed(five)} over ${nextGws(snap)} (no further transfers)`}</p>}
+      <p className="explain">{`The planning value is the optimiser's score for ${weeks} week${weeks === 1 ? "" : "s"} with later transfers planned. The quick estimate keeps your squad fixed.`}</p>
       {likeForLike && <p className="like">{`The coach plays a ${chipName(coachChip!)} this week; turn on ${chipName(coachChip!)} to compare like for like.`}</p>}
       {error && <p className="check-error" role="alert">{`Couldn't adopt this plan. ${error}`}</p>}
       <div className="verdict-actions">

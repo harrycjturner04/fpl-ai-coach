@@ -162,10 +162,12 @@ class AppDB:
         return self._one("select * from user_plans where id = %s", (check_id,))
 
     def adopt(self, check_id: int, now: datetime) -> dict:
-        """Make the check the active plan for its entry and gameweek, replacing the previous one, in one transaction."""
-        conn = self._live()
-        with conn.transaction():
-            row = conn.execute("select entry, gameweek from user_plans where id = %s for update", (check_id,)).fetchone()
+        """Make the check the active plan for its entry and gameweek, replacing the previous one, in one transaction on
+        its own connection (the shared one may be in use on another thread). An advisory lock on (entry, gameweek)
+        serialises concurrent adopts, so they never both clear and set (no unique violation)."""
+        with psycopg.connect(self.url, row_factory=dict_row) as conn:
+            row = conn.execute("select entry, gameweek from user_plans where id = %s", (check_id,)).fetchone()
+            conn.execute("select pg_advisory_xact_lock(%s, %s)", (row["entry"], row["gameweek"]))
             conn.execute("update user_plans set replaced_at = %s where entry = %s and gameweek = %s and id <> %s "
                          "and adopted_at is not null and replaced_at is null",
                          (now, row["entry"], row["gameweek"], check_id))

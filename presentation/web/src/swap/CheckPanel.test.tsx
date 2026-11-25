@@ -1,7 +1,8 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import fixture from "../test/snapshot.json";
-import type { PlanCheck, SnapshotResponse, UserPlan } from "../types";
+import type { PlanCheck, Snapshot2, SnapshotResponse, UserPlan } from "../types";
+import { bestXI } from "./swap";
 import { TeamScreen } from "../team/TeamScreen";
 import { CheckPanel, type CheckState } from "./CheckPanel";
 
@@ -67,11 +68,18 @@ it("shows the verdict with the planning value never called points", () => {
   panel({ kind: "done", result: result() });
   expect(screen.getByText("This week: 31.0 vs coach 29.0")).toBeInTheDocument();
   expect(screen.getByText("Optimiser's planning value: 66.2 vs coach 64.7")).toBeInTheDocument();
-  expect(screen.getByText(/^Quick estimate: [+−]\d+\.\d over the next 5 GWs \(no further transfers\)$/)).toBeInTheDocument();
+  expect(screen.getByText(/^Quick estimate: [+−]\d+\.\d over the next 2 GWs \(no further transfers\)$/)).toBeInTheDocument();
+  expect(screen.getByText(/score for 2 weeks with later transfers planned/)).toBeInTheDocument();
   expect(screen.queryByText(/not exact/)).toBeNull();
   expect(screen.queryByText(/planning value.*points/i)).toBeNull();
   expect(screen.getByRole("button", { name: "Adopt this plan" })).toBeEnabled();
   expect(screen.getByRole("button", { name: "Keep trying" })).toBeEnabled();
+});
+
+it("labels the horizon from a 3-GW snapshot", () => {
+  panel({ kind: "done", result: result() }, snap((s) => { s.gameweeks = [...s.gameweeks, 11]; }));
+  expect(screen.getByText(/^Quick estimate: [+−]\d+\.\d over the next 3 GWs \(no further transfers\)$/)).toBeInTheDocument();
+  expect(screen.getByText(/score for 3 weeks with later transfers planned/)).toBeInTheDocument();
 });
 
 it("says when the coach's plan is not exact", () => {
@@ -217,6 +225,32 @@ it("re-scores a stale plan net of its hits, and hides the line for a gameweek th
   const q = userPlan({ stale: true });
   q.result.weeks[0].gameweek = 99;
   m.getUserPlan.mockResolvedValue(q);
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  expect(screen.getByText("Based on an older run")).toBeInTheDocument();
+  expect(screen.queryByText(/Re-scored/)).toBeNull();
+});
+
+it("re-scores a stale Bench Boost plan with its bench, as the plan's points", async () => {
+  const p = userPlan({ stale: true });
+  p.result.weeks[0].chip = "bboost";
+  m.getUserPlan.mockResolvedValue(p);
+  const s = snap();
+  const xi = bestXI(s as Snapshot2, p.result.weeks[0].squad, 0);
+  const bench = xi.bench.reduce((t, id) => t + s.players.find((q) => q.id === id)!.points[0], 0);
+  expect(bench).toBeGreaterThan(0);
+  show(s);
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  expect(screen.getByText(`Re-scored on the latest predictions: ${(31 + bench).toFixed(1)} this week vs the coach's new plan 29.0`)).toBeInTheDocument();
+});
+
+it("hides the re-scored line instead of failing when the stored squad makes no XI", async () => {
+  const p = userPlan({ stale: true });
+  const gkp = new Set(fixture.players.filter((q) => q.position === "GKP").map((q) => q.id));
+  p.result.weeks[0].squad = p.result.weeks[0].squad.filter((id) => !gkp.has(id));
+  m.getUserPlan.mockResolvedValue(p);
   show();
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));

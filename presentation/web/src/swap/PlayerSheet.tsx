@@ -84,7 +84,7 @@ export function PlayerSheet({ snap, player, swaps, chip, onSwap, onClose }: Prop
             <tr className="fix">
               {snap.gameweeks.map((gw) => {
                 const f = fixtures.filter((x) => x.gameweek === gw);
-                return <td key={gw}>{f.length ? f.map((x, k) => <span key={k} className={`fdr fdr${x.fdr}`}>{x.opponent} ({x.home ? "H" : "A"})</span>) : "-"}</td>;
+                return <td key={gw}>{f.length ? f.map((x, k) => <span key={k} className={x.fdr === null ? "fdr" : `fdr fdr${x.fdr}`}>{x.opponent} ({x.home ? "H" : "A"})</span>) : "-"}</td>;
               })}
             </tr>
           </tbody>
@@ -108,7 +108,7 @@ export function PlayerSheet({ snap, player, swaps, chip, onSwap, onClose }: Prop
                 </span>
                 <span className="gains num">
                   <span className={tone(r.gainWeek)}>{signed(r.gainWeek)}</span>
-                  <span className="sub">{signed(r.gainFive)} over 5</span>
+                  <span className="sub">{signed(r.gainFive)} over {snap.gameweeks.length}</span>
                 </span>
               </button>
             </li>

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Pitch } from "../team/Pitch";
 import { chipName } from "../team/model";
 import { PlayerSheet } from "./PlayerSheet";
-import { preview, type Swap } from "./swap";
+import { nextGws, preview, type Swap } from "./swap";
 import type { Chip, Snapshot, Snapshot2 } from "../types";
 import "./swap.css";
 
@@ -54,7 +54,8 @@ export function SwapTab({ snap, swaps, chip, onChange, onCheck, checking }: Prop
   return (
     <div className="swap">
       <div className="swap-bar">
-        {s.state.chips_available.filter((c): c is Chip => CHIPS.includes(c as Chip)).map((c) => (
+        {/* Unlimited free transfers this week: no chip needed (the check would refuse one). */}
+        {s.state.free_transfers !== null && s.state.chips_available.filter((c): c is Chip => CHIPS.includes(c as Chip)).map((c) => (
           <button key={c} type="button" className="toggle" aria-pressed={chip === c} onClick={() => onChange(swaps, chip === c ? null : c)}>
             {chipName(c)}
           </button>
@@ -79,7 +80,7 @@ export function SwapTab({ snap, swaps, chip, onChange, onCheck, checking }: Prop
             {week !== null && five !== null && (
               <div className="impact">
                 <p className={`num ${week >= 0 ? "gain" : "loss"}`}>{`${signed(week)} this week`}</p>
-                <p className="five">{`${week * five < 0 ? "but " : ""}${signed(five)} over the next 5 GWs (no further transfers)`}</p>
+                <p className="five">{`${week * five < 0 ? "but " : ""}${signed(five)} over ${nextGws(s)} (no further transfers)`}</p>
               </div>
             )}
           </>

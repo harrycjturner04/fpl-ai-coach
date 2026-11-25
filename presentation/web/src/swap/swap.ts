@@ -4,6 +4,12 @@ import type { Chip, Player, Position, Snapshot2 } from "../types";
 
 export type Swap = [out: number, inn: number];
 
+/** "the next 5 GWs" for the gameweeks a snapshot covers (fewer near the season's end). */
+export const nextGws = (snap: { gameweeks: number[] }) => {
+  const n = snap.gameweeks.length;
+  return `the next ${n} GW${n === 1 ? "" : "s"}`;
+};
+
 export interface XI { starting: number[]; bench: number[]; captain: number; vice: number; points: number }
 
 interface Info { byId: Map<number, Player>; owned: number[]; budget: number; positions: Position[]; formations: number[][] }
@@ -165,9 +171,14 @@ export function options(snap: Snapshot2, swaps: Swap[], chip: Chip | null, out: 
   return rows.sort((a, b) => Number(a.reason !== null) - Number(b.reason !== null) || b.gainWeek - a.gainWeek);
 }
 
-/** Best XI points of a stored plan's squads on this snapshot's predictions; weeks not in the snapshot are skipped,
- * as are players no longer in it. */
-export function rescore(snap: Snapshot2, weeks: { gameweek: number; squad: number[] }[]): { gameweek: number; points: number }[] {
-  return weeks.filter((w) => snap.gameweeks.includes(w.gameweek))
-    .map((w) => ({ gameweek: w.gameweek, points: bestXI(snap, w.squad.filter((i) => byId(snap).has(i)), snap.gameweeks.indexOf(w.gameweek)).points }));
+/** Best XI points of a stored plan's squads on this snapshot's predictions, plus the bench on a Bench Boost week (as
+ * the plan's points); weeks not in the snapshot are skipped, as are players no longer in it. Throws when no formation
+ * fits. */
+export function rescore(snap: Snapshot2, weeks: { gameweek: number; squad: number[]; chip?: string | null }[]): { gameweek: number; points: number }[] {
+  return weeks.filter((w) => snap.gameweeks.includes(w.gameweek)).map((w) => {
+    const week = snap.gameweeks.indexOf(w.gameweek), m = byId(snap);
+    const xi = bestXI(snap, w.squad.filter((i) => m.has(i)), week);
+    const bench = w.chip === "bboost" ? xi.bench.reduce((s, i) => s + (m.get(i)!.points[week] ?? 0), 0) : 0;
+    return { gameweek: w.gameweek, points: xi.points + bench };
+  });
 }

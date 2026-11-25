@@ -372,7 +372,8 @@ def check(c, swaps=([1006, 1012],), chip=None, snapshot=SNAP_A):
     return c.post("/api/entries/42/plan-checks", json={"snapshot": snapshot, "swaps": list(swaps), "chip": chip})
 
 
-def test_check_returns_verdict(tmp_path):
+def test_check_returns_verdict(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
     c, db = plans_client(tmp_path)
     r = check(c)
     assert r.status_code == 200
@@ -394,6 +395,7 @@ def test_check_busy_409(tmp_path, monkeypatch):
         release.wait(5)
         return {"objective": 1.0}
 
+    at(monkeypatch, T0)
     monkeypatch.setattr("presentation.api.app.swaps.check", slow)
     c, db = plans_client(tmp_path)
     out = []
@@ -408,13 +410,15 @@ def test_check_busy_409(tmp_path, monkeypatch):
 
 
 def test_check_rate_limit_429(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
     monkeypatch.setattr("presentation.api.app.swaps.check", lambda snap, swaps, chip: {"objective": 1.0})
     c, db = plans_client(tmp_path)
     assert all(check(c).status_code == 200 for _ in range(10))
     assert check(c).status_code == 429
 
 
-def test_check_swap_error_422(tmp_path):
+def test_check_swap_error_422(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
     c, db = plans_client(tmp_path)
     r = check(c, swaps=([1006, 1023],))
     assert r.status_code == 422 and r.json()["detail"] == "Swap like for like: P1006 is a DEF, P1023 a MID."
@@ -463,11 +467,38 @@ def test_adopt_after_restart(tmp_path, monkeypatch):
 
 
 def test_adopt_after_deadline_409(tmp_path, monkeypatch):
+    at(monkeypatch, T0)
     c, db = plans_client(tmp_path)
     cid = check(c).json()["id"]
     at(monkeypatch, datetime(2026, 11, 14, 11, 1, tzinfo=timezone.utc))
     assert c.post(f"/api/plan-checks/{cid}/adopt").status_code == 409
     assert db.get_check(cid)["adopted_at"] is None
+
+
+def test_check_after_deadline_409_uses_no_allowance(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr("presentation.api.app.swaps.check", lambda *a: calls.append(a) or {"objective": 1.0})
+    c, db = plans_client(tmp_path)
+    at(monkeypatch, datetime(2026, 11, 14, 11, 0, tzinfo=timezone.utc))
+    for _ in range(11):
+        r = check(c)
+        assert r.status_code == 409 and r.json()["detail"] == "This gameweek's deadline has passed."
+    assert calls == [] and db.get_check(1) is None
+    at(monkeypatch, T0)
+    assert check(c).status_code == 200                    # no rate-limit slot was taken
+
+
+@pytest.mark.parametrize("body", [
+    {"snapshot": SNAP_A, "swaps": [[1006, 1012]] * 16, "chip": None},
+    {"snapshot": "x" * 65, "swaps": [], "chip": None},
+    {"snapshot": SNAP_A, "swaps": [], "chip": "bboost"},
+])
+def test_check_body_limits_422(tmp_path, monkeypatch, body):
+    at(monkeypatch, T0)
+    monkeypatch.setattr("presentation.api.app.swaps.check", lambda *a: {"objective": 1.0})   # only the body is checked
+    c, db = plans_client(tmp_path)
+    assert c.post("/api/entries/42/plan-checks", json=body).status_code == 422
+    assert db.get_check(1) is None
 
 
 def test_user_plan_stale_flag(tmp_path, monkeypatch):

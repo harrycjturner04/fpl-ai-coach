@@ -57,6 +57,10 @@ def _players(session: Session) -> list[dict]:
             for i, r in cols.iterrows()]
 
 
+def _fdr(v) -> int | None:
+    return None if pd.isna(v) else int(v)
+
+
 def fixtures_by_team(fixtures: pd.DataFrame, teams: pd.DataFrame, gameweeks: list[int]) -> dict:
     """{team short name: [{gameweek, opponent, home, fdr}]} for `gameweeks`, kickoff order (doubles give two rows,
     blanks none)."""
@@ -65,9 +69,9 @@ def fixtures_by_team(fixtures: pd.DataFrame, teams: pd.DataFrame, gameweeks: lis
     out: dict[str, list[dict]] = {n: [] for n in short}
     for r in f.itertuples():
         out[short[r.team_h]].append({"gameweek": int(r.event), "opponent": short[r.team_a], "home": True,
-                                     "fdr": int(r.team_h_difficulty)})
+                                     "fdr": _fdr(r.team_h_difficulty)})
         out[short[r.team_a]].append({"gameweek": int(r.event), "opponent": short[r.team_h], "home": False,
-                                     "fdr": int(r.team_a_difficulty)})
+                                     "fdr": _fdr(r.team_a_difficulty)})
     return out
 
 
