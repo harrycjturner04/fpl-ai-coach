@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import "./team/pitch.css";
 import "./team/team.css";
 
@@ -34,11 +35,12 @@ export function Loading() {
   );
 }
 
-export function ErrorState({ title, detail }: { title: string; detail: string }) {
+export function ErrorState({ title, detail, children }: { title: string; detail: string; children?: ReactNode }) {
   return (
     <main className="error" role="alert">
       <h2>{title}</h2>
       <p>{detail}</p>
+      {children}
     </main>
   );
 }

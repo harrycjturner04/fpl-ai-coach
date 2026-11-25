@@ -1,0 +1,15 @@
+data/
+presentation/web/
+**/.env*
+**/*.env
+**/*.local
+private/
+.git/
+.superpowers/
+supabase/.temp/
+docs/plans/
+node_modules
+.venv
+**/__pycache__
+**/*.parquet
+tests/

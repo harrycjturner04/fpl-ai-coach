@@ -63,3 +63,15 @@
   .team-grid > :nth-child(4) { grid-area: issues; }
   .team-grid > :nth-child(5) { grid-area: chips; }
 }
+
+.run-now { margin-top: var(--s2); display: flex; flex-direction: column; align-items: flex-start; gap: var(--s2); font-size: 13px; color: var(--muted); }
+.run-now button { font: inherit; font-weight: 600; color: var(--light); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: var(--s2) var(--s4); min-height: 44px; cursor: pointer; }
+.run-now button:disabled { color: var(--muted); cursor: default; }
+.run-now button.link { min-height: 44px; border: 0; background: none; padding: 0 var(--s2); text-decoration: underline; }
+.run-error { color: var(--light); }
+.run-error::before { content: "! "; font-weight: 800; }
+.steps { margin: 0; padding: 0; list-style: none; width: 100%; max-width: 320px; }
+.steps li { display: flex; gap: var(--s2); padding: 2px 0; color: var(--muted); }
+.steps .done { color: var(--fit); }
+.steps .now { color: var(--light); font-weight: 600; }
+.steps .state { margin-left: auto; font-variant-numeric: tabular-nums; }

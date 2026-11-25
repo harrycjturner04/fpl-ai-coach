@@ -1,12 +1,14 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import fixture from "../test/snapshot.json";
 import type { SnapshotResponse } from "../types";
 import { TeamScreen } from "./TeamScreen";
 
+vi.mock("../api", () => ({ getLatestRun: () => Promise.resolve(null), getRun: vi.fn(), startRun: vi.fn(), ApiError: class extends Error {} }));
+
 const snap = () => structuredClone(fixture) as SnapshotResponse;
 const NOW = new Date("2026-11-12T21:00:00Z");
-const show = (s: SnapshotResponse) => render(<TeamScreen data={s} now={NOW} />);
+const show = (s: SnapshotResponse) => render(<TeamScreen data={s} now={NOW} onSettings={() => {}} onReload={() => {}} />);
 const CAPTION = "Predicted points for your team now, and with the coach's plan";
 const headline = () => screen.getByRole("group", { name: "Predicted points" });
 const planTab = () => screen.getByRole("tab", { name: "Coach's plan" });
@@ -167,6 +169,6 @@ it("lists plan moves paired by position", () => {
 it("falls back to the first tab when the selected one disappears", () => {
   const s = snap();
   const { rerender } = show(s);
-  rerender(<TeamScreen data={{ ...s, current: null }} now={NOW} />);
+  rerender(<TeamScreen data={{ ...s, current: null }} now={NOW} onSettings={() => {}} onReload={() => {}} />);
   expect(planTab()).toHaveAttribute("aria-selected", "true");
 });

@@ -1,0 +1,24 @@
+.panel { display: flex; flex-direction: column; gap: var(--s4); padding-top: var(--s8); }
+.panel h1 { font-size: 18px; margin: 0; }
+.panel h2 { font-size: 14px; margin: 0 0 var(--s2); }
+.panel form { display: flex; flex-direction: column; gap: var(--s3); }
+.panel label { display: flex; flex-direction: column; gap: var(--s1); font-size: 13px; color: var(--muted); }
+.panel input { font: inherit; font-size: 16px; color: var(--light); background: var(--turf); border: 1px solid var(--line); border-radius: 8px; padding: var(--s3); min-width: 0; }
+.panel button, .error button { font: inherit; font-weight: 600; color: var(--light); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: var(--s3) var(--s4); min-height: 44px; cursor: pointer; }
+.panel button.primary { background: var(--fit); color: var(--turf); border-color: var(--fit); }
+.panel button:disabled, .error button:disabled { opacity: 0.6; }
+.form-error { color: var(--out); font-size: 13px; margin: 0; }
+.form-error::before { content: "! "; font-weight: 800; }
+.muted { color: var(--muted); font-size: 13px; margin: 0; }
+.bar { display: flex; align-items: center; gap: var(--s3); }
+.settings { padding: var(--s4); }
+.settings ul { margin: 0; padding-left: var(--s6); color: var(--muted); font-size: 13px; }
+.switch-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
+.panel button[role="switch"] { position: relative; width: 52px; min-height: 32px; height: 32px; padding: 0; border-radius: 16px; flex: none; }
+.panel button[role="switch"]::after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: var(--muted); transition: transform 0.15s; }
+.panel button[role="switch"][aria-checked="true"] { background: var(--fit); border-color: var(--fit); }
+.panel button[role="switch"][aria-checked="true"]::after { transform: translateX(20px); background: var(--turf); }
+.error button { margin: var(--s4) var(--s2) 0 0; }
+.team-head { position: relative; }
+.team-head .head-row { padding-right: 36px; }
+.gear { position: absolute; top: -8px; right: -10px; font: inherit; font-size: 20px; line-height: 1; color: var(--muted); background: none; border: 0; min-width: 44px; min-height: 44px; cursor: pointer; }

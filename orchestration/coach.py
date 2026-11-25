@@ -12,6 +12,7 @@ import time
 from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 
@@ -70,19 +71,34 @@ def _log(row: dict, data_dir: Path) -> None:
 
 
 def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False, search: bool = True,
-        horizon: int | None = None, chip_gap: float = 0.0, now: datetime | None = None, client=None) -> Path:
+        horizon: int | None = None, chip_gap: float = 0.0, now: datetime | None = None, client=None,
+        fetch: bool = True, on_step: Callable[[str, float], None] | None = None,
+        on_cost: Callable[[float], None] | None = None) -> Path:
     """The coach pipeline; returns the saved report's path. If Claude is unavailable at the news step or the
     write-up, the optimiser's plan is printed and saved with a note instead (headline from raw predictions if
-    the news step never ran). `client` is an Anthropic client (default: the SDK's, from the environment)."""
+    the news step never ran). `client` is an Anthropic client (default: the SDK's, from the environment).
+    `fetch=False` never re-pulls FPL data. `on_step(name, secs)` follows each step; `on_cost(total_usd)` fires
+    once when the run ends, whether it succeeded or raised."""
+    usages = {"news": Usage(), "review": Usage()}
+    try:
+        return _run(entry_id, data_dir, usages, chat, search, horizon, chip_gap, now, client, fetch, on_step)
+    finally:
+        if on_cost:
+            on_cost(sum(usages.values(), Usage()).cost_usd)
+
+
+def _run(entry_id, data_dir, usages, chat, search, horizon, chip_gap, now, client, fetch, on_step) -> Path:
     now = now or datetime.now(timezone.utc)
     clock = [time.perf_counter()]
 
     def lap(step: str) -> None:
         t = time.perf_counter()
         print(f"  {step}: {t - clock[0]:.1f} s")
+        if on_step:
+            on_step(step, t - clock[0])
         clock[0] = t
 
-    print(ensure_fresh_data(entry_id, data_dir, now=now))
+    print(ensure_fresh_data(entry_id, data_dir, now=now, fetch=fetch))
     pulled_at = (storage.load_json_or_none("metadata", data_dir) or {}).get("pulled_at")
     ctx = planning.load_context(entry_id, data_dir)
     horizon = horizon or ctx.settings.horizon
@@ -101,7 +117,6 @@ def run(entry_id: int, data_dir: Path = storage.DATA_DIR, *, chat: bool = False,
     lap("predictions and initial solve")
 
     settings = Settings.load(data_dir)
-    usages = {"news": Usage(), "review": Usage()}
     notes, flags, adjustments, windows, scan, report = [], [], [], [], None, None
     pred, calls, role = pred_raw, [], "news"
     session = None
