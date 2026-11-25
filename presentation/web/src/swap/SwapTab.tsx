@@ -7,7 +7,7 @@ import type { Chip, Snapshot, Snapshot2 } from "../types";
 import "./swap.css";
 
 const CHIPS: Chip[] = ["wildcard", "freehit"];
-const signed = (n: number) => `${n >= 0 ? "+" : "-"}${Math.abs(n).toFixed(1)}`;
+const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}`;
 
 /** Swaps need schema 2 (rules) and a selling price for every current squad player. */
 export function swappable(snap: Snapshot): snap is Snapshot2 {
@@ -16,12 +16,14 @@ export function swappable(snap: Snapshot): snap is Snapshot2 {
     && snap.current.squad.every((id) => byId.get(id)?.selling_price != null);
 }
 
-/** Adds out -> inn, kept net: selling a player bought earlier rewrites that swap (A->B, B->C is A->C; A->B, B->A is
- * nothing), so every swap is independent and any one can be undone. */
+/** Adds out -> inn, kept net so every swap is independent and any one can be undone: selling a player bought earlier
+ * extends that swap (A->B, B->C is A->C), buying back one sold earlier joins that swap (A->B, C->A is C->B), and a
+ * chain that comes back to its start is nothing (A->B, B->A). */
 export function addSwap(swaps: Swap[], out: number, inn: number): Swap[] {
-  const prev = swaps.find(([, i]) => i === out);
-  if (!prev) return [...swaps, [out, inn]];
-  return prev[0] === inn ? swaps.filter((s) => s !== prev) : swaps.map((s) => (s === prev ? [prev[0], inn] : s));
+  const prev = swaps.find(([, i]) => i === out), back = swaps.find(([o]) => o === inn);
+  const start = prev ? prev[0] : out, end = back && back !== prev ? back[1] : inn;
+  const rest = swaps.filter((s) => s !== prev && s !== back);
+  return start === end ? rest : [...rest, [start, end]];
 }
 
 interface Props {

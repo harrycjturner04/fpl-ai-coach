@@ -44,7 +44,7 @@ it("says but when this week is up and the five weeks are down", () => {
   show();
   swap("P1036", "P1030");
   expect(screen.getByText("+2.0 this week")).toBeInTheDocument();
-  expect(screen.getByText("but -2.0 over the next 5 GWs (no further transfers)")).toBeInTheDocument();
+  expect(screen.getByText("but −2.0 over the next 5 GWs (no further transfers)")).toBeInTheDocument();
 });
 
 it("stacks swaps with a hit, undoes one and resets", () => {
@@ -142,4 +142,55 @@ it("ticks the headline to the new value, instantly under reduced motion", () => 
   fireEvent.click(screen.getByRole("button", { name: "Reset" }));
   expect(plan()).toHaveTextContent("29.0");
   vi.unstubAllGlobals();
+});
+
+it("nets buying back a player sold earlier, and each swap undoes cleanly", () => {
+  show();
+  swap("P1036", "P1030");
+  swap("P1037", "P1036");
+  expect(screen.getByText("1 transfer, free")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo P1037 → P1030" }));
+  expect(screen.queryByText(/^\d+ transfers?,/)).toBeNull();
+  swap("P1036", "P1030");
+  swap("P1037", "P1031");
+  swap("P1031", "P1037");
+  expect(screen.getByText("1 transfer, free")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Undo P1036 → P1030" }));
+  expect(screen.getByRole("button", { name: /^P1036,/ })).toBeInTheDocument();
+});
+
+it("keeps Your team's figure as the swap tab's now figure", () => {
+  const s = snap((x) => { x.current!.points = 30; });
+  render(<TeamScreen data={s} now={NOW} onSettings={() => {}} onReload={() => {}} />);
+  const now = () => headline().querySelector(".now")!.textContent;
+  expect(now()).toBe("30.0");
+  fireEvent.click(screen.getByRole("tab", { name: "Try a swap" }));
+  expect(now()).toBe("30.0");
+  swap("P1036", "P1030");
+  expect(now()).toBe("30.0");
+  expect(within(headline()).getByText("32.0")).toHaveClass("gain");
+});
+
+it("clears the swaps when a new run arrives or the squad changes", () => {
+  const s = snap();
+  const { rerender } = render(<TeamScreen data={s} now={NOW} onSettings={() => {}} onReload={() => {}} />);
+  fireEvent.click(screen.getByRole("tab", { name: "Try a swap" }));
+  swap("P1036", "P1030");
+  const sold = (x: SnapshotResponse) => {
+    const c = x.current!;
+    c.squad = c.squad.map((id) => (id === 1036 ? 1032 : id));
+    c.starting = c.starting.map((id) => (id === 1036 ? 1032 : id));
+    x.players.find((p) => p.id === 1032)!.selling_price = 4.5;
+    x.players.find((p) => p.id === 1036)!.selling_price = null;
+  };
+  // Same run, squad no longer holds the sold player: dropped, not thrown.
+  rerender(<TeamScreen data={snap(sold)} now={NOW} onSettings={() => {}} onReload={() => {}} />);
+  expect(screen.queryByText(/^\d+ transfers?,/)).toBeNull();
+  rerender(<TeamScreen data={s} now={NOW} onSettings={() => {}} onReload={() => {}} />);
+  swap("P1036", "P1030");
+  expect(screen.getByText("1 transfer, free")).toBeInTheDocument();
+  // A new run, even with the same squad, starts empty.
+  rerender(<TeamScreen data={snap((x) => { x.generated_at = "2026-11-11T12:00:00+00:00"; })} now={NOW} onSettings={() => {}} onReload={() => {}} />);
+  expect(screen.queryByText(/^\d+ transfers?,/)).toBeNull();
+  expect(screen.getByRole("button", { name: /^P1036,/ })).toBeInTheDocument();
 });

@@ -5,7 +5,7 @@ import "./swap.css";
 
 const MAX_ROWS = 30;
 const WIDE = "(min-width: 960px)";
-const signed = (n: number) => `${n >= 0 ? "+" : "-"}${Math.abs(n).toFixed(1)}`;
+const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}`;
 const tone = (n: number) => (n >= 0 ? "gain" : "loss");
 
 interface Props {

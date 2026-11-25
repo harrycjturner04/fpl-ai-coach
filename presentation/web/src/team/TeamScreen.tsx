@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { SwapTab, swappable } from "../swap/SwapTab";
-import { preview, type Swap } from "../swap/swap";
-import type { Chip, Snapshot, SnapshotResponse, Week } from "../types";
+import { preview, squadAfter, type Swap } from "../swap/swap";
+import type { Chip, Snapshot, Snapshot2, SnapshotResponse, Week } from "../types";
 import { Chips } from "./Chips";
 import { CoachCall } from "./CoachCall";
 import { Headline } from "./Headline";
@@ -11,6 +11,10 @@ import { Pitch } from "./Pitch";
 import { RunNow } from "./RunNow";
 import "./team.css";
 import "../app.css";
+
+const fits = (snap: Snapshot2, swaps: Swap[]) => {
+  try { squadAfter(snap, swaps); return true; } catch { return false; }
+};
 
 type Tab = { id: "team" | "plan" | "swap"; label: string; week?: Week };
 
@@ -24,12 +28,19 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
   const [tabId, setTabId] = useState(tabs[0].id);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0];
-  // Kept here, not in the tab, so the headline follows the swaps and they survive a tab switch.
-  const [{ swaps, chip }, setSwap] = useState<{ swaps: Swap[]; chip: Chip | null }>({ swaps: [], chip: null });
+  // Kept here, not in the tab, so the headline follows the swaps and they survive a tab switch. Tied to the run that
+  // produced them: a new snapshot starts empty, and a set that no longer fits the squad is dropped rather than thrown.
+  const empty = { run: data.generated_at, swaps: [], chip: null };
+  const [stored, setStored] = useState<{ run: string; swaps: Swap[]; chip: Chip | null }>(empty);
+  const stale = stored.run !== data.generated_at || (swappable(data) && !fits(data, stored.swaps));
+  if (stale) setStored(empty);
+  const { swaps, chip } = stale || !swappable(data) ? empty : stored;
+  const setSwap = (s: { swaps: Swap[]; chip: Chip | null }) => setStored({ run: data.generated_at, ...s });
+  // Your team's figure, plus the preview's change, so the "now" number never moves between tabs.
   const mine = useMemo(() => {
-    if (tab.id !== "swap" || !swappable(data)) return null;
+    if (tab.id !== "swap" || !data.current || !swappable(data)) return null;
     const [base, now] = [preview(data, [], null), preview(data, swaps, chip)];
-    return { now: base.weekPoints!, plan: now.weekPoints ?? base.weekPoints! };
+    return { now: data.current.points, plan: data.current.points + (now.weekPoints ?? base.weekPoints!) - base.weekPoints! };
   }, [tab.id, data, swaps, chip]);
 
   const select = (i: number) => {
