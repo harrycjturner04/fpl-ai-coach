@@ -31,7 +31,7 @@ def _write_data(tmp_path):
         chance_of_playing_next_round=float("nan"), news="", news_added=pd.NaT, can_select=True,
         selected_by_percent="1.0", transfers_in_event=0, transfers_out_event=0)
     players["news_added"] = pd.to_datetime(players["news_added"], utc=True)
-    fixtures = pd.DataFrame([{"id": 100 * gw + k, "event": gw, "team_h": 2 * k - 1, "team_a": 2 * k,
+    fixtures = pd.DataFrame([{"id": 100 * gw + k, "event": gw, "team_h": 2 * k - 1, "team_a": 2 * k, "team_h_difficulty": 3, "team_a_difficulty": 2,
                               "kickoff_time": pd.Timestamp(f"2026-11-{14 + 7 * (gw - 9)}T15:00Z"), "finished": False}
                              for gw in (9, 10) for k in range(1, 11)])
     gameweeks = pd.DataFrame({"id": [9, 10], "deadline_time": pd.to_datetime(["2026-11-14T11:00Z", "2026-11-21T11:00Z"]),

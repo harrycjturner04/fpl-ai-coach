@@ -7,15 +7,12 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Callable
 
-import math
-from datetime import date
-
-import numpy as np
 import pandas as pd
 
 from optimisation import planning
 from optimisation.model import Plan
 from optimisation.planning import PlanContext
+from orchestration.plan_json import clean as _clean  # noqa: F401  (re-exported)
 from reasoning.adjust import Adjustment
 from reasoning.client import Tool, resolve_player
 from reasoning.flags import Flag
@@ -83,21 +80,6 @@ TOOLS = [
 
 def _r(x: float) -> float:
     return round(float(x), 1)
-
-
-def _clean(x):
-    """JSON-safe copy: numpy scalars to Python, NaN/NA to None, dates to ISO strings, tuples to lists."""
-    if isinstance(x, dict):
-        return {str(k): _clean(v) for k, v in x.items()}
-    if isinstance(x, (list, tuple, np.ndarray)):
-        return [_clean(v) for v in x]
-    if isinstance(x, np.generic):
-        x = x.item()
-    if isinstance(x, date):
-        return x.isoformat()
-    if x is pd.NA or x is pd.NaT or (isinstance(x, float) and not math.isfinite(x)):
-        return None
-    return x
 
 
 def _safe(f: Callable[[dict], dict]) -> Callable[[dict], dict]:

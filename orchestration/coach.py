@@ -170,7 +170,8 @@ def _run(entry_id, data_dir, usages, chat, search, horizon, chip_gap, now, clien
     try:
         snapshot.write(snapshot.build(session, entry_id=entry_id, deadline=deadline_time, now=now, report=report,
                                       notes=notes, report_name=path.name, model=SHIPPED_MODEL,
-                                      data_pulled_at=pulled_at), path)
+                                      data_pulled_at=pulled_at,
+                                      fixtures=snapshot.fixtures_by_team(fixtures, teams, [int(g) for g in table.columns])), path)
     except Exception as err:  # the app's copy only: never lose the report, chat or log over it
         print(f"Snapshot not saved ({type(err).__name__}: {err}); the app will show the previous run.")
     print(md if report else "\n".join([plan_text, "", NO_LLM, *(f"- {n}" for n in notes)]))
