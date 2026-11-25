@@ -1,5 +1,7 @@
-import { useRef, useState, type KeyboardEvent } from "react";
-import type { Snapshot, SnapshotResponse, Week } from "../types";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { SwapTab, swappable } from "../swap/SwapTab";
+import { preview, type Swap } from "../swap/swap";
+import type { Chip, Snapshot, SnapshotResponse, Week } from "../types";
 import { Chips } from "./Chips";
 import { CoachCall } from "./CoachCall";
 import { Headline } from "./Headline";
@@ -10,17 +12,25 @@ import { RunNow } from "./RunNow";
 import "./team.css";
 import "../app.css";
 
-type Tab = { id: "team" | "plan"; label: string; week: Week };
+type Tab = { id: "team" | "plan" | "swap"; label: string; week?: Week };
 
 export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { data: SnapshotResponse; now?: Date; onSettings: () => void; onReload: () => void }) {
   const plan = data.plan.weeks[0];
   const tabs: Tab[] = [
     ...(data.current ? [{ id: "team", label: "Your team", week: data.current } as const] : []),
     { id: "plan", label: "Coach's plan", week: plan },
+    { id: "swap", label: "Try a swap" },
   ];
   const [tabId, setTabId] = useState(tabs[0].id);
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const tab = tabs.find((t) => t.id === tabId) ?? tabs[0];
+  // Kept here, not in the tab, so the headline follows the swaps and they survive a tab switch.
+  const [{ swaps, chip }, setSwap] = useState<{ swaps: Swap[]; chip: Chip | null }>({ swaps: [], chip: null });
+  const mine = useMemo(() => {
+    if (tab.id !== "swap" || !swappable(data)) return null;
+    const [base, now] = [preview(data, [], null), preview(data, swaps, chip)];
+    return { now: base.weekPoints!, plan: now.weekPoints ?? base.weekPoints! };
+  }, [tab.id, data, swaps, chip]);
 
   const select = (i: number) => {
     setTabId(tabs[i].id);
@@ -47,7 +57,7 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
         <RunNow entry={data.entry} onDone={onReload} onSettings={onSettings} />
       </header>
       <div className="team-grid">
-        <Headline now={data.current?.points ?? null} plan={plan.points} />
+        {mine ? <Headline now={mine.now} plan={mine.plan} by="your swaps" /> : <Headline now={data.current?.points ?? null} plan={plan.points} />}
         <section className="team-pitch" aria-label="Pitch">
           <div className="tabs" role="tablist" aria-label="Which team to show">
             {tabs.map((t, i) => (
@@ -67,11 +77,13 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
             ))}
           </div>
           <div id="team-panel" role="tabpanel" aria-labelledby={`tab-${tab.id}`}>
-            <Pitch snap={data} week={tab.week} />
+            {tab.week
+              ? <Pitch snap={data} week={tab.week} />
+              : <SwapTab snap={data} swaps={swaps} chip={chip} onChange={(swaps, chip) => setSwap({ swaps, chip })} onCheck={() => {}} />}
             {tab.id === "plan" && <PlanMoves snap={data} week={plan} />}
           </div>
         </section>
-        <CoachCall call={data.call} onSee={() => select(tabs.length - 1)} />
+        <CoachCall call={data.call} onSee={() => select(tabs.findIndex((t) => t.id === "plan"))} />
         <Issues snap={data} />
         <Chips snap={data} />
       </div>

@@ -25,8 +25,11 @@ export function statusOf(p: Player, flag?: Flag): StatusInfo {
 
 export const flagsById = (snap: Snapshot) => new Map(snap.flags.map((f) => [f.player_id, f]));
 
+/** The fields of a week the pitch draws; a swap preview builds one from its best XI. */
+export type Lineup = Pick<Week, "gameweek" | "starting" | "bench" | "captain" | "vice_captain" | "transfers_in">;
+
 /** Starters grouped GKP, DEF, MID, FWD (render reversed for attack at the top), and the bench in order. */
-export function lineup(snap: Snapshot, week: Week): { rows: Slot[][]; bench: Slot[] } {
+export function lineup(snap: Snapshot, week: Lineup): { rows: Slot[][]; bench: Slot[] } {
   const byId = new Map(snap.players.map((p) => [p.id, p]));
   const flags = flagsById(snap);
   const gw = snap.gameweeks.indexOf(week.gameweek);

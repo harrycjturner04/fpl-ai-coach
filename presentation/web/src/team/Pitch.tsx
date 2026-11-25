@@ -1,6 +1,6 @@
-import { lineup } from "./model";
+import { lineup, type Lineup } from "./model";
 import { PlayerDisc } from "./PlayerDisc";
-import type { Snapshot, Week } from "../types";
+import type { Snapshot } from "../types";
 import "./pitch.css";
 
 const W = 300;
@@ -40,7 +40,7 @@ function Turf() {
   );
 }
 
-export function Pitch({ snap, week }: { snap: Snapshot; week: Week }) {
+export function Pitch({ snap, week, onPick }: { snap: Snapshot; week: Lineup; onPick?: (id: number) => void }) {
   const { rows, bench } = lineup(snap, week);
   return (
     <div className="pitch-wrap">
@@ -49,7 +49,7 @@ export function Pitch({ snap, week }: { snap: Snapshot; week: Week }) {
         <div className="rows" role="group" aria-label="Starting eleven">
           {[...rows].reverse().map((row, i) => (
             <div className="row" key={i}>
-              {row.map((s) => <PlayerDisc key={s.player.id} slot={s} />)}
+              {row.map((s) => <PlayerDisc key={s.player.id} slot={s} onPick={onPick} />)}
             </div>
           ))}
         </div>
@@ -57,7 +57,7 @@ export function Pitch({ snap, week }: { snap: Snapshot; week: Week }) {
       <div className="bench" role="group" aria-label="Bench">
         <span className="bench-title">Bench</span>
         <div className="row">
-          {bench.map((s) => <PlayerDisc key={s.player.id} slot={s} />)}
+          {bench.map((s) => <PlayerDisc key={s.player.id} slot={s} onPick={onPick} />)}
         </div>
       </div>
       <p className="key">Ring = chance of playing 60+ minutes. Number = predicted points.</p>

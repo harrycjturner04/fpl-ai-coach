@@ -30,3 +30,26 @@
 }
 @keyframes sheet-in { from { transform: translateX(24px); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+
+/* Try a swap tab */
+.swap-empty { padding: var(--s6) var(--s4); background: var(--surface); border-radius: 8px; color: var(--muted); font-size: 15px; text-align: center; }
+.swap :is(p, ul) { margin: 0; }
+.swap-bar { display: flex; flex-wrap: wrap; gap: var(--s2); }
+.swap-bar:not(:empty) { margin-bottom: var(--s3); }
+.swap-bar button, .pill, .check { min-height: 44px; padding: 0 var(--s4); border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--light); font: inherit; font-size: 14px; cursor: pointer; }
+.toggle[aria-pressed="true"] { background: var(--light); color: var(--turf); border-color: var(--light); font-weight: 700; }
+.swap-bar .reset { margin-left: auto; background: none; }
+.swap-note { margin-bottom: var(--s3); font-size: 13px; color: var(--muted); }
+.swap-sum { margin-top: var(--s3); font-size: 14px; }
+.swap-hint { color: var(--muted); }
+.tally { font-weight: 600; }
+.impact { margin-top: var(--s1); }
+.impact .num { font-size: 22px; line-height: 1.1; }
+.impact .five { font-size: 13px; color: var(--muted); }
+.reasons { margin-top: var(--s2); padding: 0; list-style: none; color: var(--light); }
+.reasons li::before { content: "! "; font-weight: 800; color: var(--out); }
+.pills { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); padding: 0; list-style: none; }
+.pill { padding: 0 var(--s3); font-size: 13px; }
+.check { display: block; width: 100%; margin-top: var(--s4); background: var(--light); color: var(--turf); border-color: var(--light); font-weight: 700; }
+.check:disabled { background: var(--surface); color: var(--muted); border-color: var(--line); cursor: not-allowed; }
+:is(.swap-bar button, .pill, .check):focus-visible { outline-offset: 3px; }
