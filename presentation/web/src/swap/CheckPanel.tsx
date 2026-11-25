@@ -7,6 +7,7 @@ import type { Chip, PlanCheck, Snapshot, UserPlan } from "../types";
 
 const KEY = "planCheckSeconds";
 const DEFAULT_SECONDS = 30;
+const DEADLINE_TEXT = "This gameweek's deadline has passed. Swaps for the next gameweek open after the coach's next run.";
 const f1 = (n: number) => n.toFixed(1);
 const signed = (n: number) => `${n >= 0 ? "+" : "−"}${Math.abs(n).toFixed(1)}`;
 
@@ -81,7 +82,8 @@ function Progress({ started, estimate }: { started: number; estimate: number }) 
 
 function Failure({ error, recheck, onRetry }: { error: ApiError; recheck?: boolean; onRetry: () => void }) {
   const [title, detail, retry] =
-    error.status === 409 ? ["Already checking", `${error.detail} Wait for it to finish, then try again.`, true]
+    error.status === 409 && error.reason !== "busy" ? ["Deadline passed", DEADLINE_TEXT, false]
+    : error.status === 409 ? ["Already checking", `${error.detail} Wait for it to finish, then try again.`, true]
     : error.status === 422 ? [recheck ? "This plan may no longer be legal on the latest run" : "Can't check these swaps",
       `${error.detail} ${recheck ? "Make new swaps in Try a swap." : "Change your swaps and check again."}`, false]
     : error.status === 429 ? ["Too many checks", "Too many checks this hour. Try again later.", false]
@@ -98,8 +100,9 @@ function Failure({ error, recheck, onRetry }: { error: ApiError; recheck?: boole
 
 function Verdict({ snap, swaps, chip, result, onKeep, onAdopted }: Omit<Props, "state" | "recheck" | "onRetry"> & { result: PlanCheck }) {
   const [adopting, setAdopting] = useState(false);
-  const [error, setError] = useState<string>();
+  const [error, setError] = useState<ApiError | string>();
   const sending = useRef(false);
+  const passed = typeof error === "object" && error.status === 409 && error.reason !== "busy";
   const coachChip = snap.plan.weeks[0].chip, weeks = snap.gameweeks.length;
   const likeForLike = (coachChip === "wildcard" || coachChip === "freehit") && result.chip !== coachChip;
   let five: number | null = null;
@@ -116,7 +119,7 @@ function Verdict({ snap, swaps, chip, result, onKeep, onAdopted }: Omit<Props, "
     setAdopting(true);
     setError(undefined);
     adoptPlan(result.id).then(onAdopted, (e) => {
-      setError(e instanceof ApiError ? e.detail : String(e));
+      setError(e instanceof ApiError ? e : String(e));
       sending.current = false;
       setAdopting(false);
     });
@@ -130,9 +133,11 @@ function Verdict({ snap, swaps, chip, result, onKeep, onAdopted }: Omit<Props, "
       {five !== null && <p>{`Quick estimate: ${signed(five)} over ${nextGws(snap)} (no further transfers)`}</p>}
       <p className="explain">{`The planning value is the optimiser's score for ${weeks} week${weeks === 1 ? "" : "s"} with later transfers planned. The quick estimate keeps your squad fixed.`}</p>
       {likeForLike && <p className="like">{`The coach plays a ${chipName(coachChip!)} this week; turn on ${chipName(coachChip!)} to compare like for like.`}</p>}
-      {error && <p className="check-error" role="alert">{`Couldn't adopt this plan. ${error}`}</p>}
+      {error && (passed
+        ? <div className="check-error" role="alert"><h3>Deadline passed</h3><p>{DEADLINE_TEXT}</p></div>
+        : <p className="check-error" role="alert">{`Couldn't adopt this plan. ${typeof error === "string" ? error : error.detail}`}</p>)}
       <div className="verdict-actions">
-        <button type="button" className="adopt" disabled={adopting} onClick={adopt}>Adopt this plan</button>
+        {!passed && <button type="button" className="adopt" disabled={adopting} onClick={adopt}>Adopt this plan</button>}
         <button type="button" onClick={onKeep}>Keep trying</button>
       </div>
     </div>

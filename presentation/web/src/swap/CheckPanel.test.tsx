@@ -96,6 +96,7 @@ it("asks for the coach's chip to compare like for like", () => {
 
 it.each([
   [err(409, "A check is already running.", "busy"), "A check is already running.", true],
+  [err(409, "This gameweek's deadline has passed."), "Swaps for the next gameweek open after the coach's next run.", false],
   [err(422, "Swap like for like: P1 is a GKP, P2 a DEF."), "Swap like for like: P1 is a GKP, P2 a DEF.", false],
   [err(429, "Rate limited"), "Too many checks this hour. Try again later.", false],
   [err(0, "Can't reach the coach's server. Check your connection and try again."), "Can't reach the coach's server.", true],
@@ -130,11 +131,19 @@ it("adopts once, however often it is tapped", async () => {
 });
 
 it("shows why an adopt failed", async () => {
-  m.adoptPlan.mockRejectedValue(new ApiError(409, "The deadline has passed."));
+  m.adoptPlan.mockRejectedValue(new ApiError(409, "Another check is running.", "busy"));
   panel({ kind: "done", result: result() });
   fireEvent.click(screen.getByRole("button", { name: "Adopt this plan" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("The deadline has passed.");
+  expect(await screen.findByRole("alert")).toHaveTextContent("Another check is running.");
   expect(screen.getByRole("button", { name: "Adopt this plan" })).toBeEnabled();
+});
+
+it("shows a deadline state, without adopt, when the deadline has passed", async () => {
+  m.adoptPlan.mockRejectedValue(new ApiError(409, "This gameweek's deadline has passed."));
+  panel({ kind: "done", result: result() });
+  fireEvent.click(screen.getByRole("button", { name: "Adopt this plan" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Deadline passed");
+  expect(screen.queryByRole("button", { name: "Adopt this plan" })).toBeNull();
 });
 
 // On the Team screen

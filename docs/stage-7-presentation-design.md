@@ -108,6 +108,8 @@ Instant preview (decided): the browser receives the week's prediction table (all
 Correctness (flagged per CLAUDE.md section 6): this duplicates rules that live in Python (squad composition, club cap, budget, formation, hit cost, XI/captain choice). The preview is a preview, never a plan; the Python side stays the authority. Required: golden test cases generated from the Python code (`optimisation/validate.py` legality, best-XI/captain selection, hit cost) checked by the TypeScript tests, so the two cannot drift silently; rules values come from `game_rules.json` via the API, never hard-coded in the front end.
 
 ## 7. Architecture (stack A)
+
+Amendment (7c, see `docs/stage-7c-swaps-design.md`): the swap check solves inside the api, so there is no engine service for 7c; 7d decides whether chat needs an engine.
 ```
 Phone / laptop browser (React PWA, Cloudflare Pages)
    | HTTPS + Supabase login token
