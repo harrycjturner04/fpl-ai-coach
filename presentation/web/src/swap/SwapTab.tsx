@@ -32,11 +32,13 @@ interface Props {
   chip: Chip | null;
   onChange: (swaps: Swap[], chip: Chip | null) => void;
   onCheck: (swaps: Swap[], chip: Chip | null) => void;
+  /** A check of these swaps is in progress: a second tap would only get "already checking". */
+  checking?: boolean;
 }
 
 /** Try a swap: the previewed pitch, tally, impact, undo/reset, chip toggle and the check button. State lives in the
  * Team screen so the headline can follow it and the stack survives a tab switch. */
-export function SwapTab({ snap, swaps, chip, onChange, onCheck }: Props) {
+export function SwapTab({ snap, swaps, chip, onChange, onCheck, checking }: Props) {
   const [open, setOpen] = useState<number | null>(null);
   const view = useMemo(() => (swappable(snap) ? { s: snap, base: preview(snap, [], null), now: preview(snap, swaps, chip) } : null),
     [snap, swaps, chip]);
@@ -101,7 +103,7 @@ export function SwapTab({ snap, swaps, chip, onChange, onCheck }: Props) {
         </ul>
       )}
 
-      <button type="button" className="check" disabled={n === 0 || !legal} onClick={() => onCheck(swaps, chip)}>
+      <button type="button" className="check" disabled={n === 0 || !legal || checking} onClick={() => onCheck(swaps, chip)}>
         Check against the coach's plan
       </button>
 

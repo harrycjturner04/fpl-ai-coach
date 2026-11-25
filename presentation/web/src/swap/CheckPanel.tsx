@@ -24,7 +24,7 @@ function estimate() {
 }
 
 /** One check at a time, tagged with the key (run, swaps, chip) it was made for so a caller shows it only while that
- * key is current; a later start or `clear` drops an older answer. */
+ * key is current. Swap checks and re-checks share it: a newer check replaces an older one's answer, as does `clear`. */
 export function useCheck() {
   const [state, setState] = useState<{ key: string; s: CheckState } | null>(null);
   const seq = useRef(0);

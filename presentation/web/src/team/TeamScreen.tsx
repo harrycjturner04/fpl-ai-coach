@@ -55,16 +55,21 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
   // The owner's adopted plan for this gameweek, and the check verdicts. A verdict is shown only while its key (run,
   // swaps, chip; or run and plan for a re-check) is current, so a changed set or a new run never shows a stale one.
   const [userPlan, setUserPlan] = useState<UserPlan | null>(null);
+  const [planFailed, setPlanFailed] = useState(false);
+  const [planTry, setPlanTry] = useState(0);
   const [whose, setWhose] = useState<"coach" | "yours">("coach");
   useEffect(() => {
     let live = true;
-    getUserPlan(data.entry).then((p) => live && setUserPlan(p), () => {});
+    setUserPlan(null);
+    setPlanFailed(false);
+    getUserPlan(data.entry).then((p) => live && setUserPlan(p), () => live && setPlanFailed(true));
     return () => { live = false; };
-  }, [data.entry, data.generated_at]);
+  }, [data.entry, data.generated_at, planTry]);
   const check = useCheck();
   const snapName = data.report.replace(/\.md$/, ".json");
   const swapKey = JSON.stringify([data.generated_at, swaps, chip]);
   const recheckKey = JSON.stringify([data.generated_at, "recheck", userPlan?.id]);
+  const checking = (key: string) => check.state?.key === key && check.state.s.kind === "checking";
   const runCheck = () => check.start(swapKey, () => postPlanCheck(data.entry, snapName, swaps, chip));
   const runRecheck = (p: UserPlan) => check.start(recheckKey, () => postPlanCheck(data.entry, snapName, p.swaps, p.chip));
   const adopted = (p: UserPlan) => {
@@ -120,6 +125,12 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
             ))}
           </div>
           <div id="team-panel" role="tabpanel" aria-labelledby={`tab-${tab.id}`}>
+            {tab.id === "plan" && planFailed && (
+              <p className="plan-note" role="alert">
+                Couldn't load your plan. Try again shortly.{" "}
+                <button type="button" onClick={() => setPlanTry((n) => n + 1)}>Try again</button>
+              </p>
+            )}
             {tab.id === "plan" && userPlan && (
               <div className="whose" role="group" aria-label="Whose plan">
                 <button type="button" aria-pressed={whose === "coach"} onClick={() => setWhose("coach")}>Coach's</button>
@@ -132,10 +143,8 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
                 {yours.stale && (
                   <div className="stale-plan">
                     <p className="stale-title">Based on an older run</p>
-                    {swappable(data) && (
-                      <p>{`Re-scored on the latest predictions: ${(rescore(data, yours.result.weeks.slice(0, 1))[0]?.points ?? 0).toFixed(1)} this week vs the coach's new plan ${plan.points.toFixed(1)}`}</p>
-                    )}
-                    <button type="button" disabled={check.state?.key === recheckKey && check.state.s.kind === "checking"} onClick={() => runRecheck(yours)}>
+                    <Rescored snap={data} week={yours.result.weeks[0]} coach={plan.points} />
+                    <button type="button" disabled={checking(recheckKey)} onClick={() => runRecheck(yours)}>
                       Re-check on latest run
                     </button>
                   </div>
@@ -144,12 +153,12 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
                   <CheckPanel snap={data} swaps={yours.swaps} chip={yours.chip} state={check.state.s} recheck
                     onRetry={() => runRecheck(yours)} onKeep={check.clear} onAdopted={adopted} />
                 )}
-                <Pitch snap={data} week={known(data, yours.result.weeks[0])} />
+                {data.gameweeks.includes(yours.result.weeks[0].gameweek) && <Pitch snap={data} week={known(data, yours.result.weeks[0])} />}
                 <PlanMoves snap={data} week={known(data, yours.result.weeks[0])} />
               </>
             ) : tab.week
               ? <Pitch snap={data} week={tab.week} />
-              : <SwapTab snap={data} swaps={swaps} chip={chip} onChange={(swaps, chip) => setSwap({ swaps, chip })} onCheck={runCheck} />}
+              : <SwapTab snap={data} swaps={swaps} chip={chip} onChange={(swaps, chip) => setSwap({ swaps, chip })} onCheck={runCheck} checking={checking(swapKey)} />}
             {tab.id === "swap" && check.state?.key === swapKey && (
               <CheckPanel snap={data} swaps={swaps} chip={chip} state={check.state.s}
                 onRetry={runCheck} onKeep={check.clear} onAdopted={adopted} />
@@ -163,6 +172,15 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
       </div>
     </main>
   );
+}
+
+/** The owner's week-1 squad re-scored on this run's predictions, net of its hits like the coach's figure; hidden when
+ * this run has no swap rules or does not cover that gameweek. */
+function Rescored({ snap, week, coach }: { snap: Snapshot; week: Week; coach: number }) {
+  const row = swappable(snap) ? rescore(snap, [week])[0] : undefined;
+  if (!swappable(snap) || !row) return null;
+  const net = row.points - week.hits * snap.rules.hit_cost;
+  return <p>{`Re-scored on the latest predictions: ${net.toFixed(1)} this week vs the coach's new plan ${coach.toFixed(1)}`}</p>;
 }
 
 function PlanMoves({ snap, week }: { snap: Snapshot; week: Week }) {

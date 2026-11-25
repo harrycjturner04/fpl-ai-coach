@@ -204,3 +204,59 @@ it("has no switch without an adopted plan", async () => {
   await waitFor(() => expect(m.getUserPlan).toHaveBeenCalledWith(42));
   expect(screen.queryByRole("button", { name: "Yours" })).toBeNull();
 });
+
+it("re-scores a stale plan net of its hits, and hides the line for a gameweek this run does not cover", async () => {
+  const p = userPlan({ stale: true });
+  p.result.weeks[0].hits = 1;
+  m.getUserPlan.mockResolvedValue(p);
+  const { unmount } = show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  expect(screen.getByText("Re-scored on the latest predictions: 27.0 this week vs the coach's new plan 29.0")).toBeInTheDocument();
+  unmount();
+  const q = userPlan({ stale: true });
+  q.result.weeks[0].gameweek = 99;
+  m.getUserPlan.mockResolvedValue(q);
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  expect(screen.getByText("Based on an older run")).toBeInTheDocument();
+  expect(screen.queryByText(/Re-scored/)).toBeNull();
+});
+
+it("disables Check and Re-check while that check runs", async () => {
+  m.postPlanCheck.mockReturnValue(new Promise(() => {}));
+  m.getUserPlan.mockResolvedValue(userPlan({ stale: true }));
+  show();
+  swap();
+  check();
+  expect(screen.getByRole("button", { name: "Check against the coach's plan" })).toBeDisabled();
+  expect(m.postPlanCheck).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  const recheck = screen.getByRole("button", { name: "Re-check on latest run" });
+  expect(recheck).toBeEnabled();
+  fireEvent.click(recheck);
+  expect(recheck).toBeDisabled();
+  expect(m.postPlanCheck).toHaveBeenCalledTimes(2);
+});
+
+it("drops the plan on a new run until it reloads", async () => {
+  m.getUserPlan.mockResolvedValueOnce(userPlan()).mockReturnValueOnce(new Promise(() => {}));
+  const { rerender } = show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  await screen.findByRole("button", { name: "Yours" });
+  rerender(<TeamScreen data={snap((s) => { s.generated_at = "2026-11-11T12:00:00+00:00"; })} now={NOW} onSettings={() => {}} onReload={() => {}} />);
+  expect(screen.queryByRole("button", { name: "Yours" })).toBeNull();
+  expect(m.getUserPlan).toHaveBeenCalledTimes(2);
+});
+
+it("says when the plan could not load and retries", async () => {
+  m.getUserPlan.mockRejectedValueOnce(new ApiError(0, "down")).mockResolvedValueOnce(userPlan());
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("Couldn't load your plan. Try again shortly.");
+  fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  expect(await screen.findByRole("button", { name: "Yours" })).toBeInTheDocument();
+  expect(screen.queryByRole("alert")).toBeNull();
+});

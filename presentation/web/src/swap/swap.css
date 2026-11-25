@@ -77,3 +77,6 @@
 .stale-plan p { margin: 0; }
 .stale-plan .stale-title { font-weight: 700; }
 .stale-plan button { margin-top: var(--s2); }
+.plan-note { margin: 0 0 var(--s3); font-size: 14px; }
+.plan-note button { min-height: 44px; padding: 0 var(--s3); border: 1px solid var(--line); border-radius: 8px; background: none; color: var(--light); font: inherit; font-size: 14px; cursor: pointer; }
+.plan-note button:focus-visible { outline-offset: 3px; }

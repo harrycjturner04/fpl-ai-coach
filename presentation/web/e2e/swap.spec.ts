@@ -43,14 +43,17 @@ test("checks a swap against the coach's plan and adopts it", async ({ page }) =>
 });
 
 test("shows a stale plan and re-checks it on the latest run", async ({ page }) => {
+  const stale = plan(true);
+  stale.result = { ...result, weeks: [{ ...week, hits: 1 }] };
   await signedIn(page, ME, {
-    "GET /api/entries/42/user-plan": { body: plan(true) },
+    "GET /api/entries/42/snapshot": { body: snapshot },
+    "GET /api/entries/42/user-plan": { body: stale },
     "POST /api/entries/42/plan-checks": { body: { id: 8, ...result } },
   });
   await page.getByRole("tab", { name: "Coach's plan" }).click();
   await page.getByRole("button", { name: "Yours" }).click();
   await expect(page.getByText("Based on an older run")).toBeVisible();
-  await expect(page.getByText(/^Re-scored on the latest predictions: \d+\.\d this week vs the coach's new plan 29\.0$/)).toBeVisible();
+  await expect(page.getByText("Re-scored on the latest predictions: 27.0 this week vs the coach's new plan 29.0")).toBeVisible();
   await page.getByRole("button", { name: "Re-check on latest run" }).click();
   await expect(page.getByText("This week: 29.4 vs coach 29.0")).toBeVisible();
   await expect(page.getByRole("button", { name: "Adopt this plan" })).toBeEnabled();
