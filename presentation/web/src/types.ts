@@ -74,7 +74,7 @@ export interface Snapshot {
   report: string;
   model: string;
   exact: boolean;
-  state: { bank: number; free_transfers: number; chips_available: string[]; hit_cost: number };
+  state: { bank: number; free_transfers: number | null; chips_available: string[]; hit_cost: number };
   gameweeks: number[];
   players: Player[];
   current: Week | null;
@@ -85,6 +85,74 @@ export interface Snapshot {
   sections: Record<string, string>;
   notes: string[];
   warnings: string[];
+  rules?: Rules;
+  settings?: PlanSettings;
+  fixtures?: Record<string, Fixture[]>;
+}
+
+export type Position = Player["position"];
+
+export interface Rules {
+  composition: Record<Position, number>;
+  xi_min: Record<Position, number>;
+  xi_max: Record<Position, number>;
+  starting_xi: number;
+  max_per_club: number;
+  hit_cost: number;
+  max_free_transfers: number;
+}
+
+export interface PlanSettings {
+  horizon: number;
+  discount: number;
+  bench_weight: number;
+  leftover_values: number[];
+  hit_margin: number;
+  max_hits: number | null;
+  summed: boolean;
+  hold: boolean;
+}
+
+export interface Fixture {
+  gameweek: number;
+  opponent: string;
+  home: boolean;
+  fdr: number;
+}
+
+/** A schema-2 snapshot: everything the swap preview and plan check need. */
+export type Snapshot2 = Snapshot & { schema: 2; rules: Rules; settings: PlanSettings; fixtures: Record<string, Fixture[]> };
+
+export type Chip = "wildcard" | "freehit";
+
+/** POST /api/entries/{entry}/plan-checks: the exact solve with the owner's swaps forced in week one. */
+export interface PlanCheck {
+  id: number;
+  weeks: Week[];
+  objective: number;
+  points: number;
+  sold: number[];
+  bought: number[];
+  chip: Chip | null;
+  chips: Record<string, string>;
+  coach: { points: number; objective: number; exact: boolean };
+  seconds: number;
+}
+
+/** An adopted (or checked) owner's plan, from adopt and GET /api/entries/{entry}/user-plan. */
+export interface UserPlan {
+  id: number;
+  entry: number;
+  gameweek: number;
+  snapshot: string;
+  deadline: string;
+  swaps: [number, number][];
+  chip: Chip | null;
+  result: Omit<PlanCheck, "id">;
+  checked_at: string;
+  adopted_at: string | null;
+  replaced_at: string | null;
+  stale: boolean;
 }
 
 export type SnapshotResponse = Snapshot & {
