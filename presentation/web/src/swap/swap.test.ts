@@ -110,9 +110,10 @@ describe("timing", () => {
     }
     const snap = snapshotOf(players, 2, 1);
     const out = players.find((p) => p.position === "MID" && p.selling_price !== null)!.id;
-    expect(options(snap, [], null, out).length).toBe(275);   // also warms up
-    const runs = Array.from({ length: 5 }, () => { const t = performance.now(); options(snap, [], null, out); return performance.now() - t; });
-    const ms = Math.min(...runs);   // best of five: a tap's cost, not a GC pause
+    expect(options(snap, [], null, out).length).toBe(275);
+    options(snap, [], null, out);   // two warm-up runs
+    const time = () => { const t = performance.now(); options(snap, [], null, out); return performance.now() - t; };
+    const ms = Array.from({ length: 9 }, time).sort((x, y) => x - y)[4];   // median of nine: a tap's cost, not a GC pause
     expect(ms).toBeLessThan(16);
   });
 });
