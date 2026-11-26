@@ -29,11 +29,13 @@ const check = () => screen.getByRole("button", { name: "Check against the coach'
 
 it("updates the headline and the pitch after a swap", () => {
   show();
-  expect(within(headline()).getAllByText("29.0")).toHaveLength(2);
-  expect(screen.getByText("Predicted points for your team now, and with your swaps")).toBeInTheDocument();
+  expect(within(headline()).getByText("29.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("same as your team")).toBeInTheDocument();
+  expect(screen.getByText("Predicted points this week for the team shown")).toBeInTheDocument();
   expect(check()).toBeDisabled();
   swap("P1036", "P1030");
-  expect(within(headline()).getByText("31.0")).toHaveClass("gain");
+  expect(within(headline()).getByText("31.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("+2.0 vs your team")).toHaveClass("gain");
   expect(screen.queryByRole("button", { name: /^P1036,/ })).toBeNull();
   expect(screen.getByRole("button", { name: /^P1030,.*new/ })).toBeInTheDocument();
   expect(screen.getByText("1 transfer, free")).toBeInTheDocument();
@@ -69,7 +71,7 @@ it("stacks swaps with a hit, undoes one and resets", () => {
   expect(screen.getByRole("button", { name: /^P1036,/ })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Reset" }));
   expect(screen.queryByText(/^\d+ transfers?,/)).toBeNull();
-  expect(within(headline()).getAllByText("29.0")).toHaveLength(2);
+  expect(within(headline()).getByText("29.0")).toBeInTheDocument();
 });
 
 it("nets a swap of a player bought earlier into one transfer", () => {
@@ -141,7 +143,7 @@ it("ticks the headline to the new value, instantly under reduced motion", () => 
   const motion = (reduce: boolean) => vi.stubGlobal("matchMedia", () => ({ matches: reduce, addEventListener() {}, removeEventListener() {} }));
   vi.stubGlobal("requestAnimationFrame", (f: FrameRequestCallback) => frames.push(f));
   vi.stubGlobal("cancelAnimationFrame", () => {});
-  const plan = () => headline().querySelector(".plan")!;
+  const plan = () => headline().querySelector(".points")!;
   motion(false);
   show();
   swap("P1036", "P1030");
@@ -171,16 +173,14 @@ it("nets buying back a player sold earlier, and each swap undoes cleanly", () =>
   expect(screen.getByRole("button", { name: /^P1036,/ })).toBeInTheDocument();
 });
 
-it("keeps Your team's figure as the swap tab's now figure", () => {
+it("starts the swap tab from Your team's figure and follows each swap", () => {
   const s = snap((x) => { x.current!.points = 30; });
   render(<TeamScreen data={s} now={NOW} onSettings={() => {}} onReload={() => {}} />);
-  const now = () => headline().querySelector(".now")!.textContent;
-  expect(now()).toBe("30.0");
   fireEvent.click(screen.getByRole("tab", { name: "Try a swap" }));
-  expect(now()).toBe("30.0");
+  expect(within(headline()).getByText("30.0")).toBeInTheDocument();
   swap("P1036", "P1030");
-  expect(now()).toBe("30.0");
-  expect(within(headline()).getByText("32.0")).toHaveClass("gain");
+  expect(within(headline()).getByText("32.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("+2.0 vs your team")).toHaveClass("gain");
 });
 
 it("clears the swaps when a new run arrives or the squad changes", () => {

@@ -45,11 +45,12 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
   if (stale) setStored(empty);
   const { swaps, chip } = stale || !swappable(data) ? empty : stored;
   const setSwap = (s: { swaps: Swap[]; chip: Chip | null }) => setStored({ run: data.generated_at, ...s });
-  // Your team's figure, plus the preview's change, so the "now" number never moves between tabs.
-  const mine = useMemo(() => {
-    if (tab.id !== "swap" || !data.current || !swappable(data)) return null;
+  // The swap tab's figure: your team's, plus the preview's change, so it follows each swap.
+  const swapPoints = useMemo(() => {
+    if (tab.id !== "swap" || !swappable(data)) return null;
     const [base, now] = [preview(data, [], null), preview(data, swaps, chip)];
-    return { now: data.current.points, plan: data.current.points + (now.weekPoints ?? base.weekPoints!) - base.weekPoints! };
+    const change = (now.weekPoints ?? base.weekPoints!) - base.weekPoints!;
+    return data.current ? data.current.points + change : now.weekPoints ?? base.weekPoints!;
   }, [tab.id, data, swaps, chip]);
 
   // The owner's adopted plan for this gameweek, and the check verdicts. A verdict is shown only while its key (run,
@@ -79,6 +80,8 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
     setTabId("plan");
   };
   const yours = tab.id === "plan" && userPlan && whose === "yours" ? userPlan : null;
+  // The headline is this week's points for the team on show, against your current team.
+  const shownPoints = swapPoints ?? (tab.id === "team" ? data.current!.points : yours ? yours.result.weeks[0].points : plan.points);
 
   const select = (i: number) => {
     setTabId(tabs[i].id);
@@ -105,7 +108,7 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
         <RunNow entry={data.entry} onDone={onReload} onSettings={onSettings} />
       </header>
       <div className="team-grid">
-        {mine ? <Headline now={mine.now} plan={mine.plan} by="your swaps" /> : <Headline now={data.current?.points ?? null} plan={plan.points} />}
+        <Headline points={shownPoints} vs={tab.id === "team" ? null : data.current?.points} />
         <section className="team-pitch" aria-label="Pitch">
           <div className="tabs" role="tablist" aria-label="Which team to show">
             {tabs.map((t, i) => (

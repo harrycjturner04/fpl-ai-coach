@@ -47,3 +47,7 @@ Consequence for 7d (to settle there): chat's tools are solves plus Anthropic cal
 
 ## 6. Left to the builder
 Exact endpoint and `user_plans` shapes; sheet and list component structure; how the timed progress state is drawn; golden-case generator sampling; how the owner-log row is stored (Parquet beside `plan_log` vs Postgres); api CPU setting if the deployed solve is slow.
+
+## Amendment (C3, 2026-11-26)
+
+The Team screen headline follows the team shown: it is this week's predicted points for the team on the active tab (Your team, the coach's plan or yours, or the swap preview), with the difference from your current team beneath it (`same as your team` when equal; none on Your team or when there is no current team). This replaces Stage 7 spec section 5's `now -> plan` headline. It is never the planning objective.

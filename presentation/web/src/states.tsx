@@ -12,8 +12,8 @@ export function Loading() {
       </header>
       <div className="team-grid" aria-hidden="true">
         <div className="headline">
-          <p className="figures num"><span className="now sk">00.0</span></p>
-          <p className="caption">Predicted points for your team now, and with the coach's plan</p>
+          <p className="figures num"><span className="points sk">00.0</span></p>
+          <p className="caption">Predicted points this week for the team shown</p>
         </div>
         <div className="team-pitch">
           <div className="tabs sk" />

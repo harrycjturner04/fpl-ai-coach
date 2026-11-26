@@ -16,9 +16,8 @@
 
 .headline { margin-top: var(--s4); }
 .figures { display: flex; align-items: baseline; gap: 10px; line-height: 0.9; }
-.figures .now { font-size: clamp(52px, 16vw, 64px); }
-.figures .arrow { font-size: 22px; font-weight: 400; color: var(--muted); }
-.figures .plan { font-size: clamp(36px, 11vw, 44px); }
+.figures .points { font-size: clamp(52px, 16vw, 64px); }
+.delta { margin-top: var(--s1); font-size: 16px; font-weight: 600; }
 .caption { margin-top: var(--s1); font-size: 13px; color: var(--muted); text-wrap: pretty; }
 
 .team-pitch { margin-top: var(--s4); }

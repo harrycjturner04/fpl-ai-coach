@@ -24,13 +24,14 @@ test("checks a swap against the coach's plan and adopts it", async ({ page }) =>
   });
   await page.getByRole("tab", { name: "Try a swap" }).click();
   const headline = page.getByRole("group", { name: "Predicted points" });
-  await expect(headline).toContainText("with your swaps");
-  await expect(headline.locator(".plan")).toHaveText("29.0");
+  await expect(headline).toContainText("for the team shown");
+  await expect(headline.locator(".points")).toHaveText("29.0");
   await page.getByRole("button", { name: /^P1036,/ }).click();
   await expect(page.getByRole("dialog").locator(".opt").first()).toContainText("P1030");
   await page.getByRole("dialog").locator(".opt").first().click();
   await expect(page.getByText("1 transfer, free")).toBeVisible();
-  await expect(headline.locator(".plan")).toHaveText("31.0");
+  await expect(headline.locator(".points")).toHaveText("31.0");
+  await expect(headline).toContainText("+2.0 vs your team");
   await page.getByRole("button", { name: "Check against the coach's plan" }).click();
   await expect(page.getByText("This week: 29.4 vs coach 29.0")).toBeVisible();
   await expect(page.getByText("Optimiser's planning value: 65.1 vs coach 64.7")).toBeVisible();

@@ -22,27 +22,17 @@ function useTick(target: number) {
   return shown;
 }
 
-/** This week's predicted points now and with the plan (the coach's, or your swaps); the plan figure is coloured by
- * gain or loss. */
-export function Headline({ now, plan, by = "the coach's plan" }: { now: number | null; plan: number; by?: string }) {
-  const [a, b] = [now?.toFixed(1), plan.toFixed(1)];
-  const shown = useTick(plan).toFixed(1);
-  const tone = a === undefined || a === b ? "" : Number(b) > Number(a) ? "gain" : "loss";
+/** This week's predicted points for the team shown, and how far it is from your current team (none when there is no
+ * current team to compare with, or the shown team is it). */
+export function Headline({ points, vs }: { points: number; vs?: number | null }) {
+  const shown = useTick(points).toFixed(1);
+  const d = vs == null ? null : Math.round((points - vs) * 10) / 10;
+  const tone = d === null || d === 0 ? "" : d > 0 ? "gain" : "loss";
   return (
     <div className="headline" role="group" aria-label="Predicted points">
-      <p className="figures num">
-        {a !== undefined && (
-          <>
-            <span className="now">{a}</span>
-            <span className="arrow" aria-hidden="true">→</span>
-            <span className="sr-only">to</span>
-          </>
-        )}
-        <span className={`plan ${tone}`}>{shown}</span>
-      </p>
-      <p className="caption">
-        {a !== undefined ? `Predicted points for your team now, and with ${by}` : `Predicted points with ${by}`}
-      </p>
+      <p className="figures num"><span className="points">{shown}</span></p>
+      {d !== null && <p className={`delta num ${tone}`}>{d === 0 ? "same as your team" : `${d > 0 ? "+" : "−"}${Math.abs(d).toFixed(1)} vs your team`}</p>}
+      <p className="caption">Predicted points this week for the team shown</p>
     </div>
   );
 }
