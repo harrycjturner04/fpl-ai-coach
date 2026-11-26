@@ -192,7 +192,7 @@ function rescoredNet(snap: Snapshot, week: Week): number | null {
 
 /** The headline shows the re-scored figure; this line only sets it beside the coach's new plan. */
 function Rescored({ net, coach }: { net: number | null; coach: number }) {
-  return net === null ? null : <p>{`Re-scored on the latest predictions. The coach's new plan: ${coach.toFixed(1)} this week`}</p>;
+  return net === null ? null : <p>{`Your plan re-scored on the latest predictions (shown above). The coach's new plan: ${coach.toFixed(1)} this week`}</p>;
 }
 
 function PlanMoves({ snap, week }: { snap: Snapshot; week: Week }) {

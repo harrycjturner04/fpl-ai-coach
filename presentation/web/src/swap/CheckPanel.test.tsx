@@ -210,7 +210,7 @@ it("shows a stale plan re-scored beside the coach's new plan and re-checks it on
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
   expect(screen.getByText("Based on an older run")).toBeInTheDocument();
-  expect(screen.getByText("Re-scored on the latest predictions. The coach's new plan: 29.0 this week")).toBeInTheDocument();
+  expect(screen.getByText("Your plan re-scored on the latest predictions (shown above). The coach's new plan: 29.0 this week")).toBeInTheDocument();
   expect(within(headline()).getByText("31.0")).toBeInTheDocument();
   expect(within(headline()).getByText("+2.0 vs your team")).toBeInTheDocument();
   expect(screen.getAllByText("31.0")).toHaveLength(1);
@@ -254,7 +254,7 @@ it("re-scores a stale plan net of its hits, and hides the line for a gameweek th
   const { unmount } = show();
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
-  expect(screen.getByText("Re-scored on the latest predictions. The coach's new plan: 29.0 this week")).toBeInTheDocument();
+  expect(screen.getByText("Your plan re-scored on the latest predictions (shown above). The coach's new plan: 29.0 this week")).toBeInTheDocument();
   expect(within(headline()).getByText("27.0")).toBeInTheDocument();
   expect(within(headline()).getByText("−2.0 vs your team")).toBeInTheDocument();
   expect(screen.getAllByText("27.0")).toHaveLength(1);
@@ -282,7 +282,7 @@ it("re-scores a stale Bench Boost plan with its bench, as the plan's points", as
   show(s);
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
-  expect(screen.getByText(`Re-scored on the latest predictions. The coach's new plan: 29.0 this week`)).toBeInTheDocument();
+  expect(screen.getByText(`Your plan re-scored on the latest predictions (shown above). The coach's new plan: 29.0 this week`)).toBeInTheDocument();
   expect(within(headline()).getByText((31 + bench).toFixed(1))).toBeInTheDocument();
   expect(within(headline()).getByText(`+${(2 + bench).toFixed(1)} vs your team`)).toBeInTheDocument();
 });
