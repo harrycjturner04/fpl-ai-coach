@@ -1,5 +1,5 @@
 import { accessToken, signOut } from "./auth";
-import type { Run, SnapshotResponse } from "./types";
+import type { Chip, PlanCheck, Run, SnapshotResponse, UserPlan } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, public detail: string, public reason?: string) {
@@ -42,11 +42,15 @@ export const patchSettings = (p: Partial<Pick<Settings, "cap_gbp" | "auto_runs" 
 export const startRun = (entry: number) => call<Run>(`/api/entries/${entry}/runs`, "POST");
 export const getRun = (id: number) => call<Run>(`/api/runs/${id}`);
 export const getLatestRun = (entry: number) => call<Run | null>(`/api/entries/${entry}/runs/latest`);
+export const postPlanCheck = (entry: number, snapshot: string, swaps: [number, number][], chip: Chip | null) =>
+  call<PlanCheck>(`/api/entries/${entry}/plan-checks`, "POST", { snapshot, swaps, chip });
+export const adoptPlan = (id: number) => call<UserPlan>(`/api/plan-checks/${id}/adopt`, "POST");
+export const getUserPlan = (entry: number) => call<UserPlan | null>(`/api/entries/${entry}/user-plan`);
 
 export async function getSnapshot(entry: number): Promise<SnapshotResponse> {
   const data = await call<SnapshotResponse>(`/api/entries/${entry}/snapshot`);
-  if (data.schema !== 1) {
-    throw new ApiError(0, `This snapshot uses schema ${data.schema}, but this app reads schema 1. Update the app.`);
+  if (data.schema !== 1 && data.schema !== 2) {
+    throw new ApiError(0, `This snapshot uses schema ${data.schema}, but this app reads schema 1 and 2. Update the app.`);
   }
   return data;
 }

@@ -4,7 +4,7 @@ import { statusOf, type Slot } from "./model";
 const R = 21;
 const C = 2 * Math.PI * R;
 
-export function PlayerDisc({ slot }: { slot: Slot }) {
+export function PlayerDisc({ slot, onPick }: { slot: Slot; onPick?: (id: number) => void }) {
   const { player, flag, points, p60, captain, vice, isNew } = slot;
   const { status, label, chance } = statusOf(player, flag);
   const fill = p60 ?? 0;
@@ -27,9 +27,11 @@ export function PlayerDisc({ slot }: { slot: Slot }) {
     .filter(Boolean)
     .join(", ");
 
+  const Tag = onPick ? "button" : "div";
+  const props = onPick ? { type: "button" as const, onClick: () => onPick(player.id) } : { role: "img" };
   return (
-    <div className={`slot ${status}`} role="img" aria-label={aria}>
-      <div className="disc" aria-hidden="true">
+    <Tag className={`slot ${status}${onPick ? " pick" : ""}`} aria-label={aria} {...props}>
+      <span className="disc" aria-hidden="true">
         <svg viewBox="0 0 48 48">
           <circle className="track" cx="24" cy="24" r={R} />
           <circle className="ring" cx="24" cy="24" r={R} strokeDasharray={C} strokeDashoffset={C * (1 - shown)} />
@@ -37,11 +39,11 @@ export function PlayerDisc({ slot }: { slot: Slot }) {
         <span className="pts num">{pts}</span>
         {(captain || vice) && <span className="arm">{captain ? "C" : "V"}</span>}
         {isNew && <span className="new">New</span>}
-      </div>
+      </span>
       <span className="chip" aria-hidden="true">
         <span className="name">{player.name}</span>
         {label && <span className="label">{label}</span>}
       </span>
-    </div>
+    </Tag>
   );
 }

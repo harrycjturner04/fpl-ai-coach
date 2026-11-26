@@ -78,7 +78,8 @@ week before his team plays twice. The whole plan is solved again the following w
 | 6. Reasoning layer | Built | Coach command: news flags with capped adjustments, chip scan and chip call, checked write-up, what-if chat, monitoring report, report grader |
 | 7a. Presentation, local skeleton | Built | Run snapshot, read-only API and a phone-friendly web app (Team screen) on the owner's machine |
 | 7b. Deployment and security | Built | Live app behind a login: Cloud Run api and job, Supabase, Cloudflare Pages, PC data refresh through a private bucket |
-| 7c-7f. Presentation, rest | Planned | Swaps, report and chat, model page, developer analytics |
+| 7c. Try a swap | Built | Preview swaps instantly in the app, check them against the coach's plan with a real solve, adopt a plan |
+| 7d-7f. Presentation, rest | Planned | Report and chat, model page, developer analytics |
 
 Today the pipeline runs from the command line. `python -m orchestration.coach --entry <your team ID>` refreshes
 the data if needed, predicts five gameweeks, checks the team news, solves the plan and every chip window, and

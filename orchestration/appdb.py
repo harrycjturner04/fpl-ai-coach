@@ -1,4 +1,4 @@
-"""App state in Postgres (Supabase): settings, coach runs and their steps, AI spend, job lock."""
+"""App state in Postgres (Supabase): settings, coach runs and their steps, AI spend, job lock, owner plans."""
 
 from __future__ import annotations
 
@@ -46,13 +46,17 @@ class AppDB:
     def _connect(self):
         return psycopg.connect(self.url, autocommit=True, row_factory=dict_row)
 
+    def _live(self):
+        if self.conn.closed or self.conn.broken:
+            self.conn.close()
+            self.conn = self._connect()
+        return self.conn
+
     def _exec(self, sql: str, args=(), retry: bool = False):
         """Run one statement on a live connection. Retry once after a connection-level failure only if the statement
         is safe to repeat (the server may have applied it before the reply was lost); otherwise the error propagates
         and the next call reconnects."""
-        if self.conn.closed or self.conn.broken:
-            self.conn.close()
-            self.conn = self._connect()
+        self._live()
         try:
             return self.conn.execute(sql, args)
         except psycopg.OperationalError:
@@ -147,3 +151,29 @@ class AppDB:
 
     def release_lock(self, name: str, holder: str) -> None:
         self._exec("delete from job_lock where name = %s and holder = %s", (name, holder), retry=True)
+
+    def save_check(self, entry: int, gameweek: int, snapshot: str, deadline: datetime, swaps: list, chip: str | None,
+                   result: dict) -> int:
+        return self._one("insert into user_plans (entry, gameweek, snapshot, deadline, swaps, chip, result) "
+                         "values (%s, %s, %s, %s, %s, %s, %s) returning id",
+                         (entry, gameweek, snapshot, deadline, Jsonb(swaps), chip, Jsonb(result)), retry=False)["id"]
+
+    def get_check(self, check_id: int) -> dict | None:
+        return self._one("select * from user_plans where id = %s", (check_id,))
+
+    def adopt(self, check_id: int, now: datetime) -> dict:
+        """Make the check the active plan for its entry and gameweek, replacing the previous one, in one transaction on
+        its own connection (the shared one may be in use on another thread). An advisory lock on (entry, gameweek)
+        serialises concurrent adopts, so they never both clear and set (no unique violation)."""
+        with psycopg.connect(self.url, row_factory=dict_row) as conn:
+            row = conn.execute("select entry, gameweek from user_plans where id = %s", (check_id,)).fetchone()
+            conn.execute("select pg_advisory_xact_lock(%s, %s)", (row["entry"], row["gameweek"]))
+            conn.execute("update user_plans set replaced_at = %s where entry = %s and gameweek = %s and id <> %s "
+                         "and adopted_at is not null and replaced_at is null",
+                         (now, row["entry"], row["gameweek"], check_id))
+            return _plain(conn.execute("update user_plans set adopted_at = %s, replaced_at = null where id = %s "
+                                       "returning *", (now, check_id)).fetchone())
+
+    def active_plan(self, entry: int, gameweek: int, now: datetime) -> dict | None:
+        return self._one("select * from user_plans where entry = %s and gameweek = %s and adopted_at is not null "
+                         "and replaced_at is null and deadline > %s", (entry, gameweek, now))

@@ -19,7 +19,7 @@ def db():
     if not LOCAL:
         pytest.skip("DATABASE_URL must point at a local database (127.0.0.1 or localhost)")
     d = AppDB(URL)
-    d.conn.execute("truncate runs, spend, job_lock, app_users cascade")
+    d.conn.execute("truncate runs, spend, job_lock, app_users, user_plans cascade")
     d.conn.execute("update settings set cap_gbp = 5, auto_runs = true, ai_off = false, usd_per_gbp = 1.25")
     return d
 
@@ -180,3 +180,53 @@ def test_unsafe_write_not_retried_then_recovers(db):
 def test_closed_connection_reconnects(db):
     db.conn.close()
     assert db.settings()["cap_gbp"] == 5.0
+
+
+DEADLINE = NOW + timedelta(days=2)
+
+
+def save(db, entry=1, gameweek=12, snap="1_gw12_20261120-1200.json"):
+    return db.save_check(entry, gameweek, snap, DEADLINE, [[1, 2]], None, {"objective": 1.5, "chips": {"12": "bboost"}})
+
+
+@pytest.mark.parametrize("role", ["anon", "authenticated"])
+def test_user_plans_rls_no_grants(db, role):
+    for sql in ("select * from user_plans", "select nextval('user_plans_id_seq')"):
+        with psycopg.connect(URL, autocommit=True) as c:
+            c.execute(f"set role {role}")
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                c.execute(sql)
+
+
+def test_check_saved_and_read(db):
+    cid = save(db)
+    row = db.get_check(cid)
+    assert (row["entry"], row["gameweek"], row["swaps"], row["chip"], row["deadline"]) == (1, 12, [[1, 2]], None, DEADLINE)
+    assert row["result"] == {"objective": 1.5, "chips": {"12": "bboost"}} and row["adopted_at"] is None
+    assert db.get_check(cid + 1000) is None
+    assert db.active_plan(1, 12, NOW) is None
+
+
+def test_one_active_plan_per_gw(db):
+    a, b, other = save(db), save(db), save(db, entry=2)
+    assert db.adopt(a, NOW)["id"] == a
+    db.adopt(other, NOW)
+    later = NOW + timedelta(minutes=1)
+    plan = db.adopt(b, later)
+    assert plan["id"] == b and plan["adopted_at"] == later
+    assert db.get_check(a)["replaced_at"] == later
+    assert db.active_plan(1, 12, NOW)["id"] == b and db.active_plan(2, 12, NOW)["id"] == other
+    assert db.active_plan(1, 12, DEADLINE) is None                # cleared once the deadline has passed
+    with pytest.raises(psycopg.errors.UniqueViolation):          # the index backs the rule
+        db.conn.execute("update user_plans set replaced_at = null where id = %s", (a,))
+
+
+def test_concurrent_adopts_leave_one_active(db):
+    from concurrent.futures import ThreadPoolExecutor
+    ids = [save(db) for _ in range(8)]
+    with ThreadPoolExecutor(8) as pool:
+        plans = list(pool.map(lambda i: db.adopt(i, NOW), ids))
+    assert sorted(p["id"] for p in plans) == ids
+    active = db.conn.execute("select count(*) as n from user_plans where adopted_at is not null "
+                             "and replaced_at is null").fetchone()["n"]
+    assert active == 1 and db.active_plan(1, 12, NOW)["id"] in ids

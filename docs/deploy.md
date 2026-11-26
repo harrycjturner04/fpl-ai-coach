@@ -82,8 +82,20 @@ locked by a running job; try again later." if one holds it.
 Commit first (the script refuses a dirty tree; untracked files are ignored), then
 `powershell -File deploy\deploy.ps1`. It builds and pushes both images, deploys the api and job, applies the job IAM,
 creates or updates the scheduler, builds the web app with the api URL and writes its security headers (CSP,
-HSTS, nosniff, Referrer-Policy, Permissions-Policy), and deploys it to Pages. Database changes: a new file in
-`supabase/migrations/`, then `npx supabase@latest db push --remote`.
+HSTS, nosniff, Referrer-Policy, Permissions-Policy), and deploys it to Pages.
+
+### Releasing a migration
+
+Whenever `supabase/migrations/` changes (7c adds `20261125000000_user_plans.sql`), run
+`npx supabase@latest db push --remote` BEFORE `deploy\deploy.ps1`, so the new api never runs against an old schema.
+Then check the table exists with row-level security on (expect one row, `rowsecurity` true):
+
+```sql
+select relname, relrowsecurity from pg_class where relname = 'user_plans';
+```
+
+Since 7c the api image includes the solver (`pulp`, `highspy`): "Check against the coach's plan" solves inside the
+api. One check runs at a time (a second gets a 409 "busy") and each user is limited to 10 checks per hour.
 
 Manual job runs: `gcloud run jobs execute coach --region europe-west2` (daily logic).
 

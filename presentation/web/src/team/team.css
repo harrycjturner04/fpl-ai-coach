@@ -5,7 +5,7 @@
 .loss { color: var(--out); }
 
 .head-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s1) var(--s3); min-height: 25px; }
-.team-head h1 { font-size: 18px; font-weight: 700; line-height: 1.4; }
+.team-head h1 { font-size: 24px; font-weight: 700; line-height: 1.25; }
 .team-head p { font-size: 13px; color: var(--muted); }
 .team-head .run { margin-top: 2px; font-size: 12px; }
 @media (max-width: 479px) { .head-row { flex-direction: column; align-items: stretch; gap: 0; } }
@@ -16,9 +16,8 @@
 
 .headline { margin-top: var(--s4); }
 .figures { display: flex; align-items: baseline; gap: 10px; line-height: 0.9; }
-.figures .now { font-size: clamp(52px, 16vw, 64px); }
-.figures .arrow { font-size: 22px; font-weight: 400; color: var(--muted); }
-.figures .plan { font-size: clamp(36px, 11vw, 44px); }
+.figures .points { font-size: clamp(52px, 16vw, 64px); }
+.delta { margin-top: var(--s1); font-size: 16px; font-weight: 600; }
 .caption { margin-top: var(--s1); font-size: 13px; color: var(--muted); text-wrap: pretty; }
 
 .team-pitch { margin-top: var(--s4); }

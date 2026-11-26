@@ -1,5 +1,5 @@
 {
-  "schema": 1,
+  "schema": 2,
   "entry": 42,
   "team_name": "Test FC",
   "gameweek": 9,
@@ -14,6 +14,327 @@
     "free_transfers": 1,
     "chips_available": [],
     "hit_cost": 4
+  },
+  "rules": {
+    "composition": {
+      "GKP": 2,
+      "DEF": 5,
+      "MID": 5,
+      "FWD": 3
+    },
+    "xi_min": {
+      "GKP": 1,
+      "DEF": 3,
+      "MID": 2,
+      "FWD": 1
+    },
+    "xi_max": {
+      "GKP": 1,
+      "DEF": 5,
+      "MID": 5,
+      "FWD": 3
+    },
+    "starting_xi": 11,
+    "max_per_club": 3,
+    "hit_cost": 4,
+    "max_free_transfers": 5
+  },
+  "settings": {
+    "horizon": 2,
+    "discount": 1.0,
+    "bench_weight": 0.1,
+    "leftover_values": [
+      1.5,
+      1.5,
+      1.5,
+      1.5
+    ],
+    "hit_margin": 0.0,
+    "max_hits": 2,
+    "summed": false,
+    "hold": false
+  },
+  "fixtures": {
+    "C1": [
+      {
+        "gameweek": 9,
+        "opponent": "C2",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C2",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C2": [
+      {
+        "gameweek": 9,
+        "opponent": "C1",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C1",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C3": [
+      {
+        "gameweek": 9,
+        "opponent": "C4",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C4",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C4": [
+      {
+        "gameweek": 9,
+        "opponent": "C3",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C3",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C5": [
+      {
+        "gameweek": 9,
+        "opponent": "C6",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C6",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C6": [
+      {
+        "gameweek": 9,
+        "opponent": "C5",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C5",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C7": [
+      {
+        "gameweek": 9,
+        "opponent": "C8",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C8",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C8": [
+      {
+        "gameweek": 9,
+        "opponent": "C7",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C7",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C9": [
+      {
+        "gameweek": 9,
+        "opponent": "C10",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C10",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C10": [
+      {
+        "gameweek": 9,
+        "opponent": "C9",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C9",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C11": [
+      {
+        "gameweek": 9,
+        "opponent": "C12",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C12",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C12": [
+      {
+        "gameweek": 9,
+        "opponent": "C11",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C11",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C13": [
+      {
+        "gameweek": 9,
+        "opponent": "C14",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C14",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C14": [
+      {
+        "gameweek": 9,
+        "opponent": "C13",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C13",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C15": [
+      {
+        "gameweek": 9,
+        "opponent": "C16",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C16",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C16": [
+      {
+        "gameweek": 9,
+        "opponent": "C15",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C15",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C17": [
+      {
+        "gameweek": 9,
+        "opponent": "C18",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C18",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C18": [
+      {
+        "gameweek": 9,
+        "opponent": "C17",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C17",
+        "home": false,
+        "fdr": 2
+      }
+    ],
+    "C19": [
+      {
+        "gameweek": 9,
+        "opponent": "C20",
+        "home": true,
+        "fdr": 3
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C20",
+        "home": true,
+        "fdr": 3
+      }
+    ],
+    "C20": [
+      {
+        "gameweek": 9,
+        "opponent": "C19",
+        "home": false,
+        "fdr": 2
+      },
+      {
+        "gameweek": 10,
+        "opponent": "C19",
+        "home": false,
+        "fdr": 2
+      }
+    ]
   },
   "gameweeks": [
     9,

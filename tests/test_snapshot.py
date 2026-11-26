@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from datetime import datetime, timezone
 from dataclasses import replace
 from pathlib import Path
@@ -16,9 +18,12 @@ NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
 DEADLINE = pd.Timestamp("2026-11-14T11:00Z")
 
 
+FIXTURES = {"T1": [{"gameweek": 11, "opponent": "T2", "home": True, "fdr": 3}]}
+
+
 def _build(s, report=None):
     return snapshot.build(s, entry_id=42, deadline=DEADLINE, now=NOW, report=report, notes=["n"],
-                          report_name="r.md", model="m", data_pulled_at=NOW)
+                          report_name="r.md", model="m", data_pulled_at=NOW, fixtures=FIXTURES)
 
 
 def _owned(s):
@@ -33,7 +38,7 @@ def _owned(s):
 def test_snapshot_shape_and_json_safe(session):
     s = _owned(session)
     snap = json.loads(json.dumps(_build(s)))
-    assert snap["schema"] == 1 and snap["entry"] == 42 and snap["gameweeks"] == GWS
+    assert snap["schema"] == 2 and snap["entry"] == 42 and snap["gameweeks"] == GWS
     assert snap["deadline"].startswith("2026-11-14T11:00") and snap["team_name"] == "T"
     assert len(snap["players"]) == len(s.ctx.players)
     assert all(len(p["points"]) == len(snap["gameweeks"]) for p in snap["players"])
@@ -131,5 +136,46 @@ def test_write_is_atomic(tmp_path, monkeypatch):
 def test_build_records_data_pulled_at(session):
     pulled = datetime(2026, 11, 10, 12, 5)  # naive: treated as UTC
     snap = snapshot.build(session, entry_id=42, deadline=DEADLINE, now=NOW, report=None, notes=[],
-                          report_name="r.md", model="m", data_pulled_at=pulled)
+                          report_name="r.md", model="m", data_pulled_at=pulled, fixtures={})
     assert snap["data_pulled_at"] == "2026-11-10T12:05:00+00:00"
+
+
+def test_schema2_has_rules_settings_fixtures(session):
+    s = _owned(session)
+    snap = _build(s)
+    assert set(snap["rules"]) == {"composition", "xi_min", "xi_max", "starting_xi", "max_per_club", "hit_cost",
+                                  "max_free_transfers"}
+    assert snap["settings"] == s.ctx.settings.to_dict() and snap["fixtures"] == FIXTURES
+
+
+def test_fixtures_by_team_double_and_blank():
+    teams = pd.DataFrame({"id": [1, 2, 3], "short_name": ["AAA", "BBB", "CCC"]})
+    fx = pd.DataFrame({"event": pd.array([11, 11, 12, 13], dtype="Int64"), "team_h": [1, 2, 1, 1], "team_a": [2, 1, 3, 3],
+                       "team_h_difficulty": [2, 4, 3, 2], "team_a_difficulty": [5, 3, 4, 5],
+                       "kickoff_time": pd.to_datetime(["2026-11-14", "2026-11-17", "2026-11-21", "2026-11-28"], utc=True)})
+    out = snapshot.fixtures_by_team(fx, teams, [11, 12])
+    assert out["AAA"] == [{"gameweek": 11, "opponent": "BBB", "home": True, "fdr": 2},
+                          {"gameweek": 11, "opponent": "BBB", "home": False, "fdr": 3},
+                          {"gameweek": 12, "opponent": "CCC", "home": True, "fdr": 3}]
+    assert out["BBB"][0]["home"] is False and out["BBB"][0]["fdr"] == 5
+    assert [f["gameweek"] for f in out["CCC"]] == [12] and out["CCC"][0]["fdr"] == 4
+
+
+def test_fixtures_by_team_missing_fdr_is_none():
+    teams = pd.DataFrame({"id": [1, 2], "short_name": ["AAA", "BBB"]})
+    fx = pd.DataFrame({"event": [11], "team_h": [1], "team_a": [2], "team_h_difficulty": [float("nan")],
+                       "team_a_difficulty": [4.0], "kickoff_time": pd.to_datetime(["2026-11-14"], utc=True)})
+    out = snapshot.fixtures_by_team(fx, teams, [11])
+    assert out["AAA"][0]["fdr"] is None and out["BBB"][0]["fdr"] == 4
+
+
+def test_points_unrounded(session):
+    s = _owned(session)
+    pid = next(iter(s.ctx.owned))
+    p = next(p for p in _build(s)["players"] if p["id"] == pid)
+    assert p["points"] == [float(v) for v in s.table.loc[pid]]
+
+
+def test_plan_json_imports_without_reasoning():
+    code = "import sys; sys.modules['reasoning'] = None; import orchestration.plan_json"
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=Path(__file__).parent.parent)

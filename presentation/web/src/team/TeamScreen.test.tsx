@@ -1,15 +1,15 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import fixture from "../test/snapshot.json";
 import type { SnapshotResponse } from "../types";
 import { TeamScreen } from "./TeamScreen";
 
-vi.mock("../api", () => ({ getLatestRun: () => Promise.resolve(null), getRun: vi.fn(), startRun: vi.fn(), ApiError: class extends Error {} }));
+vi.mock("../api", () => ({ getLatestRun: () => Promise.resolve(null), getUserPlan: () => Promise.resolve(null), postPlanCheck: vi.fn(), getRun: vi.fn(), startRun: vi.fn(), ApiError: class extends Error {} }));
 
 const snap = () => structuredClone(fixture) as SnapshotResponse;
 const NOW = new Date("2026-11-12T21:00:00Z");
 const show = (s: SnapshotResponse) => render(<TeamScreen data={s} now={NOW} onSettings={() => {}} onReload={() => {}} />);
-const CAPTION = "Predicted points for your team now, and with the coach's plan";
+const CAPTION = "Predicted points this week for the team shown";
 const headline = () => screen.getByRole("group", { name: "Predicted points" });
 const planTab = () => screen.getByRole("tab", { name: "Coach's plan" });
 
@@ -26,20 +26,35 @@ const withTransfer = () => {
   return s;
 };
 
-it("shows the header and both headline figures to one decimal", () => {
+it("shows the header and Your team's figure to one decimal, with no difference", () => {
   show(withTransfer());
   expect(screen.getByRole("heading", { name: "Test FC" })).toBeInTheDocument();
   expect(screen.getByText("Gameweek 9 deadline Sat 11:00 (38h)")).toBeInTheDocument();
   expect(within(headline()).getByText("29.0")).toBeInTheDocument();
-  expect(within(headline()).getByText("31.5")).toHaveClass("gain");
+  expect(within(headline()).queryByText(/vs your team|same as/)).toBeNull();
+  expect(within(headline()).queryByText("31.5")).toBeNull();
   expect(screen.getByText(CAPTION)).toBeInTheDocument();
 });
 
-it("colours a loss", () => {
+it("shows the coach's plan figure and its gain on the plan tab", () => {
+  show(withTransfer());
+  fireEvent.click(planTab());
+  expect(within(headline()).getByText("31.5")).toBeInTheDocument();
+  expect(within(headline()).getByText("+2.5 vs your team")).toHaveClass("gain");
+  expect(within(headline()).queryByText("29.0")).toBeNull();
+});
+
+it("shows a loss with a true minus, and zero as same as your team", () => {
   const s = snap();
   s.plan.weeks[0].points = 27;
   show(s);
-  expect(within(headline()).getByText("27.0")).toHaveClass("loss");
+  fireEvent.click(planTab());
+  expect(within(headline()).getByText("27.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("−2.0 vs your team")).toHaveClass("loss");
+  cleanup();
+  show(snap());
+  fireEvent.click(planTab());
+  expect(within(headline()).getByText("same as your team")).toBeInTheDocument();
 });
 
 it("shows a Bench Boost week's points, bench included, not the XI-only figure", () => {
@@ -48,7 +63,9 @@ it("shows a Bench Boost week's points, bench included, not the XI-only figure", 
   s.plan.weeks[0].projected_points = 30;
   s.plan.weeks[0].points = 38.04;
   show(s);
-  expect(within(headline()).getByText("38.0")).toHaveClass("gain");
+  fireEvent.click(planTab());
+  expect(within(headline()).getByText("38.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("+9.0 vs your team")).toHaveClass("gain");
   expect(within(headline()).queryByText("30.0")).toBeNull();
 });
 
@@ -132,7 +149,8 @@ it("shows only the plan figure without a current team", () => {
   s.current = null;
   show(s);
   expect(within(headline()).getAllByText("29.0")).toHaveLength(1);
-  expect(screen.getByText("Predicted points with the coach's plan")).toBeInTheDocument();
+  expect(within(headline()).queryByText(/vs your team|same as/)).toBeNull();
+  expect(screen.getByText(CAPTION)).toBeInTheDocument();
   expect(screen.queryByRole("tab", { name: "Your team" })).toBeNull();
   expect(planTab()).toHaveAttribute("aria-selected", "true");
 });

@@ -1,4 +1,5 @@
-"""API behind Supabase login: the latest coach run and spend settings for the signed-in manager."""
+"""API behind Supabase login: the latest coach run, spend settings and the owner's checked swaps for the signed-in
+manager."""
 from __future__ import annotations
 
 import json
@@ -6,6 +7,7 @@ import os
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
@@ -15,6 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ingestion import storage, transform
 from ingestion.env import load_env
+from orchestration import swaps
 from orchestration.appdb import AppDB
 from presentation.api import views
 from presentation.api.auth import RateLimiter, Verifier
@@ -25,11 +28,19 @@ load_env()
 
 STEPS_EXPECTED = ["data", "predictions and initial solve", "news", "adjusted predictions and headline solve",
                   "chip scan", "write-up"]
+DEADLINE_PASSED = "This gameweek's deadline has passed."
 STALE_RUN = timedelta(minutes=70)  # same cutoff as AppDB.active_run
 
 
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
+
+
+class CheckBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    snapshot: str = Field(max_length=64)
+    swaps: list[tuple[int, int]] = Field(max_length=15)
+    chip: Literal["wildcard", "freehit"] | None = None
 
 
 class SettingsPatch(BaseModel):
@@ -50,6 +61,7 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
     start_lock = threading.Lock()
     verifier = verifier or Verifier(os.environ["SUPABASE_URL"])
     general, patches, starts = RateLimiter(60, 60), RateLimiter(20, 3600), RateLimiter(5, 86400)
+    checks, busy = RateLimiter(10, 3600), {}
     if allowed_origin:
         app.add_middleware(CORSMiddleware, allow_origins=[allowed_origin], allow_methods=["GET", "POST", "PATCH"],
                            allow_headers=["Authorization", "Content-Type"])
@@ -79,6 +91,16 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
         pulled = run["data_pulled_at"]
         age = round((utcnow() - pulled).total_seconds() / 3600, 1) if pulled else None
         return run | {"steps_expected": STEPS_EXPECTED, "data_age_hours": age}
+
+    def own(entry: int, user: tuple[str, list[int]]) -> None:
+        if entry not in user[1]:
+            raise HTTPException(403, "Not your team.")
+
+    def plan_view(plan: dict | None) -> dict | None:
+        if plan is None:
+            return None
+        latest = views.latest_snapshot_path(data_dir / "reports", plan["entry"])
+        return plan | {"stale": latest is None or plan["snapshot"] != latest.name}
 
     @app.get("/api/health")
     def health():
@@ -152,6 +174,51 @@ def create_app(data_dir: Path = storage.DATA_DIR, *, db=None, verifier=None, lau
         if entry not in user[1]:
             raise HTTPException(403, "Not your team.")
         return run_view(db.latest_run(entry))
+
+    @app.post("/api/entries/{entry}/plan-checks")
+    def plan_check(entry: int, body: CheckBody, user=Depends(current_user)):
+        own(entry, user)
+        m, path = views._NAME.match(body.snapshot), data_dir / "reports" / body.snapshot
+        if not (m and int(m[1]) == entry and path.is_file()):
+            raise HTTPException(404, "No such coach run.")
+        snap = json.loads(path.read_text(encoding="utf-8"))
+        if snap.get("schema", 1) < 2:
+            raise HTTPException(422, "This coach run is too old to check: run the coach again.")
+        deadline = datetime.fromisoformat(snap["deadline"])
+        if deadline <= utcnow():
+            raise HTTPException(409, DEADLINE_PASSED)
+        lock = busy.setdefault(user[0], threading.Lock())
+        if not lock.acquire(blocking=False):
+            return JSONResponse({"detail": "A check is already running.", "reason": "busy"}, status_code=409)
+        try:
+            if not checks.allow(user[0]):
+                raise HTTPException(429, "Too many checks. Try again later.")
+            try:
+                result = swaps.check(snap, body.swaps, body.chip)
+            except swaps.SwapError as exc:
+                raise HTTPException(422, str(exc)) from None
+            check_id = db.save_check(entry, snap["gameweek"], body.snapshot, deadline,
+                                     [list(s) for s in body.swaps], body.chip, result)
+        finally:
+            lock.release()
+        return {"id": check_id} | result
+
+    @app.post("/api/plan-checks/{check_id}/adopt")
+    def adopt(check_id: int, user=Depends(current_user)):
+        row = db.get_check(check_id)
+        if row is None or row["entry"] not in user[1]:
+            raise HTTPException(404, "No such check.")
+        if row["deadline"] <= utcnow():
+            raise HTTPException(409, DEADLINE_PASSED)
+        return plan_view(db.adopt(check_id, utcnow()))
+
+    @app.get("/api/entries/{entry}/user-plan")
+    def user_plan(entry: int, user=Depends(current_user)):
+        own(entry, user)
+        latest = views.latest_snapshot_path(data_dir / "reports", entry)
+        if latest is None:
+            return None
+        return plan_view(db.active_plan(entry, int(views._NAME.match(latest.name)[2]), utcnow()))
 
     return app
 

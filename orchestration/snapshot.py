@@ -1,4 +1,4 @@
-"""Structured JSON snapshot of one coach run (schema 1), written beside the Markdown report for the app."""
+"""Structured JSON snapshot of one coach run (schema 2), written beside the Markdown report for the app."""
 from __future__ import annotations
 
 import json
@@ -11,25 +11,17 @@ import pandas as pd
 
 from optimisation.model import InfeasibleError, Solution, solve
 from optimisation.planning import PlanContext
+from orchestration.plan_json import clean, week_dict
 from reasoning.report import Report, plan_exact, sections
-from reasoning.tools import Session, _clean
+from reasoning.tools import Session
 
-SCHEMA = 1
+SCHEMA = 2
 
 
 def _iso(t) -> str:
     t = pd.Timestamp(t)
     t = t.tz_localize("UTC") if t.tzinfo is None else t.tz_convert("UTC")
     return t.isoformat()
-
-
-def week_dict(s: Solution, table: pd.DataFrame) -> dict:
-    """`points` is the week's predicted FPL points: projected_points (XI, captain bonus incl. Triple Captain,
-    minus hits) plus the whole bench on a Bench Boost week. The plan objective never is."""
-    bench = table[s.gameweek].reindex(s.bench).fillna(0.0).sum() if s.chip == "bboost" else 0.0
-    return _clean({k: getattr(s, k) for k in (
-        "gameweek", "squad", "starting", "bench", "captain", "vice_captain", "transfers_in", "transfers_out",
-        "hits", "chip", "projected_points", "money_left", "free_transfers_next")} | {"points": s.projected_points + bench})
 
 
 def current_week(ctx: PlanContext, table: pd.DataFrame) -> Solution | None:
@@ -51,7 +43,7 @@ def _players(session: Session) -> list[dict]:
     ctx = session.ctx
     info = ctx.players.set_index("id")
     ids = list(info.index)
-    points = session.table.reindex(ids).fillna(0.0).round(1)
+    points = session.table.reindex(ids).fillna(0.0)
     pred = session.pred[session.pred["gameweek"] == session.table.columns[0]]  # a blank first week -> None
     sort_cols = ["kickoff"] if "kickoff" in pred.columns else []
     p60 = pred.sort_values(sort_cols).groupby("player_id")["p60"].first() if "p60" in pred.columns else pd.Series(dtype=float)
@@ -65,20 +57,39 @@ def _players(session: Session) -> list[dict]:
             for i, r in cols.iterrows()]
 
 
+def _fdr(v) -> int | None:
+    return None if pd.isna(v) else int(v)
+
+
+def fixtures_by_team(fixtures: pd.DataFrame, teams: pd.DataFrame, gameweeks: list[int]) -> dict:
+    """{team short name: [{gameweek, opponent, home, fdr}]} for `gameweeks`, kickoff order (doubles give two rows,
+    blanks none)."""
+    short = teams.set_index("id")["short_name"]
+    f = fixtures[fixtures["event"].isin(gameweeks)].sort_values("kickoff_time")
+    out: dict[str, list[dict]] = {n: [] for n in short}
+    for r in f.itertuples():
+        out[short[r.team_h]].append({"gameweek": int(r.event), "opponent": short[r.team_a], "home": True,
+                                     "fdr": _fdr(r.team_h_difficulty)})
+        out[short[r.team_a]].append({"gameweek": int(r.event), "opponent": short[r.team_h], "home": False,
+                                     "fdr": _fdr(r.team_a_difficulty)})
+    return out
+
+
 def build(session: Session, *, entry_id: int, deadline: pd.Timestamp, now: datetime, report: Report | None,
-          notes: list[str], report_name: str, model: str, data_pulled_at) -> dict:
+          notes: list[str], report_name: str, model: str, data_pulled_at, fixtures: dict) -> dict:
     """`data_pulled_at` is the data pull this run used (metadata pulled_at read after the freshness check)."""
     ctx = session.ctx
     state = ctx.state or {}
     current = current_week(ctx, session.table)
     scan = session.chip_scan
-    return _clean({
+    return clean({
         "schema": SCHEMA, "entry": entry_id, "team_name": state.get("team_name"),
         "gameweek": int(session.table.columns[0]), "deadline": _iso(deadline), "generated_at": _iso(now),
         "data_pulled_at": None if data_pulled_at is None else _iso(data_pulled_at),
         "report": report_name, "model": model, "exact": plan_exact(session),
         "state": {"bank": state.get("bank"), "free_transfers": ctx.free,
                   "chips_available": state.get("chips_available", []), "hit_cost": ctx.rules.hit_cost},
+        "rules": asdict(ctx.rules), "settings": ctx.settings.to_dict(), "fixtures": fixtures,
         "gameweeks": [int(g) for g in session.table.columns],
         "players": _players(session),
         "current": week_dict(current, session.table) if current else None,
