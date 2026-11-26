@@ -80,8 +80,12 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
     setTabId("plan");
   };
   const yours = tab.id === "plan" && userPlan && whose === "yours" ? userPlan : null;
-  // The headline is this week's points for the team on show, against your current team.
-  const shownPoints = swapPoints ?? (tab.id === "team" ? data.current!.points : yours ? yours.result.weeks[0].points : plan.points);
+  // The headline is this week's points for the team on show, against your current team. An adopted plan's stored
+  // points (net of hits, bench on Bench Boost: the same basis as plan.points) come from its own run; when it is stale
+  // they are re-scored on this run, and with no re-score there is no honest difference to show.
+  const rescored = yours?.stale ? rescoredNet(data, yours.result.weeks[0]) : null;
+  const shownPoints = swapPoints ?? (tab.id === "team" ? data.current?.points ?? plan.points : yours ? rescored ?? yours.result.weeks[0].points : plan.points);
+  const vs = tab.id === "team" || (yours?.stale && rescored === null) ? null : data.current?.points;
 
   const select = (i: number) => {
     setTabId(tabs[i].id);
@@ -108,7 +112,7 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
         <RunNow entry={data.entry} onDone={onReload} onSettings={onSettings} />
       </header>
       <div className="team-grid">
-        <Headline points={shownPoints} vs={tab.id === "team" ? null : data.current?.points} />
+        <Headline points={shownPoints} vs={vs} />
         <section className="team-pitch" aria-label="Pitch">
           <div className="tabs" role="tablist" aria-label="Which team to show">
             {tabs.map((t, i) => (
@@ -146,7 +150,7 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
                 {yours.stale && (
                   <div className="stale-plan">
                     <p className="stale-title">Based on an older run</p>
-                    <Rescored snap={data} week={yours.result.weeks[0]} coach={plan.points} />
+                    <Rescored net={rescored} coach={plan.points} />
                     <button type="button" disabled={checking(recheckKey)} onClick={() => runRecheck(yours)}>
                       Re-check on latest run
                     </button>
@@ -177,14 +181,18 @@ export function TeamScreen({ data, now = new Date(), onSettings, onReload }: { d
   );
 }
 
-/** The owner's week-1 squad re-scored on this run's predictions, net of its hits like the coach's figure; hidden when
+/** The owner's week-1 squad re-scored on this run's predictions, net of its hits like the coach's figure; null when
  * this run has no swap rules, does not cover that gameweek or the squad no longer makes an XI. */
-function Rescored({ snap, week, coach }: { snap: Snapshot; week: Week; coach: number }) {
-  let row;
-  try { row = swappable(snap) ? rescore(snap, [week])[0] : undefined; } catch { return null; }
-  if (!swappable(snap) || !row) return null;
-  const net = row.points - week.hits * snap.rules.hit_cost;
-  return <p>{`Re-scored on the latest predictions: ${net.toFixed(1)} this week vs the coach's new plan ${coach.toFixed(1)}`}</p>;
+function rescoredNet(snap: Snapshot, week: Week): number | null {
+  try {
+    const row = swappable(snap) ? rescore(snap, [week])[0] : undefined;
+    return row && swappable(snap) ? row.points - week.hits * snap.rules.hit_cost : null;
+  } catch { return null; }
+}
+
+/** The headline shows the re-scored figure; this line only sets it beside the coach's new plan. */
+function Rescored({ net, coach }: { net: number | null; coach: number }) {
+  return net === null ? null : <p>{`Re-scored on the latest predictions. The coach's new plan: ${coach.toFixed(1)} this week`}</p>;
 }
 
 function PlanMoves({ snap, week }: { snap: Snapshot; week: Week }) {

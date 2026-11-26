@@ -14,6 +14,7 @@ vi.mock("../api", () => ({
 }));
 const { ApiError } = await import("../api");
 
+const headline = () => screen.getByRole("group", { name: "Predicted points" });
 const NOW = new Date("2026-11-12T21:00:00Z");
 const snap = (edit: (s: SnapshotResponse) => void = () => {}) => {
   const s = structuredClone(fixture) as SnapshotResponse;
@@ -209,10 +210,34 @@ it("shows a stale plan re-scored beside the coach's new plan and re-checks it on
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
   expect(screen.getByText("Based on an older run")).toBeInTheDocument();
-  expect(screen.getByText("Re-scored on the latest predictions: 31.0 this week vs the coach's new plan 29.0")).toBeInTheDocument();
+  expect(screen.getByText("Re-scored on the latest predictions. The coach's new plan: 29.0 this week")).toBeInTheDocument();
+  expect(within(headline()).getByText("31.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("+2.0 vs your team")).toBeInTheDocument();
+  expect(screen.getAllByText("31.0")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Re-check on latest run" }));
   expect(m.postPlanCheck).toHaveBeenCalledWith(42, "42_gw9_20261110-1200.json", [[1036, 1030]], null);
   expect(await screen.findByRole("alert")).toHaveTextContent("This plan may no longer be legal on the latest run");
+});
+
+it("shows a fresh adopted plan's points and difference in the headline", async () => {
+  m.getUserPlan.mockResolvedValue(userPlan());
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  expect(within(headline()).getByText("31.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("+2.0 vs your team")).toBeInTheDocument();
+});
+
+it("shows an adopted Bench Boost plan's stored points, bench included", async () => {
+  const p = userPlan();
+  p.result.weeks[0].chip = "bboost";
+  p.result.weeks[0].points = 40;
+  m.getUserPlan.mockResolvedValue(p);
+  show();
+  fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
+  expect(within(headline()).getByText("40.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("+11.0 vs your team")).toBeInTheDocument();
 });
 
 it("has no switch without an adopted plan", async () => {
@@ -229,7 +254,10 @@ it("re-scores a stale plan net of its hits, and hides the line for a gameweek th
   const { unmount } = show();
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
-  expect(screen.getByText("Re-scored on the latest predictions: 27.0 this week vs the coach's new plan 29.0")).toBeInTheDocument();
+  expect(screen.getByText("Re-scored on the latest predictions. The coach's new plan: 29.0 this week")).toBeInTheDocument();
+  expect(within(headline()).getByText("27.0")).toBeInTheDocument();
+  expect(within(headline()).getByText("−2.0 vs your team")).toBeInTheDocument();
+  expect(screen.getAllByText("27.0")).toHaveLength(1);
   unmount();
   const q = userPlan({ stale: true });
   q.result.weeks[0].gameweek = 99;
@@ -239,6 +267,8 @@ it("re-scores a stale plan net of its hits, and hides the line for a gameweek th
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
   expect(screen.getByText("Based on an older run")).toBeInTheDocument();
   expect(screen.queryByText(/Re-scored/)).toBeNull();
+  expect(within(headline()).getByText("31.0")).toBeInTheDocument();
+  expect(within(headline()).queryByText(/vs your team|same as/)).toBeNull();
 });
 
 it("re-scores a stale Bench Boost plan with its bench, as the plan's points", async () => {
@@ -252,7 +282,9 @@ it("re-scores a stale Bench Boost plan with its bench, as the plan's points", as
   show(s);
   fireEvent.click(screen.getByRole("tab", { name: "Coach's plan" }));
   fireEvent.click(await screen.findByRole("button", { name: "Yours" }));
-  expect(screen.getByText(`Re-scored on the latest predictions: ${(31 + bench).toFixed(1)} this week vs the coach's new plan 29.0`)).toBeInTheDocument();
+  expect(screen.getByText(`Re-scored on the latest predictions. The coach's new plan: 29.0 this week`)).toBeInTheDocument();
+  expect(within(headline()).getByText((31 + bench).toFixed(1))).toBeInTheDocument();
+  expect(within(headline()).getByText(`+${(2 + bench).toFixed(1)} vs your team`)).toBeInTheDocument();
 });
 
 it("hides the re-scored line instead of failing when the stored squad makes no XI", async () => {
