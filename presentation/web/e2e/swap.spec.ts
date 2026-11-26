@@ -54,7 +54,8 @@ test("shows a stale plan and re-checks it on the latest run", async ({ page }) =
   await page.getByRole("tab", { name: "Coach's plan" }).click();
   await page.getByRole("button", { name: "Yours" }).click();
   await expect(page.getByText("Based on an older run")).toBeVisible();
-  await expect(page.getByText("Re-scored on the latest predictions: 27.0 this week vs the coach's new plan 29.0")).toBeVisible();
+  await expect(page.getByText("Re-scored on the latest predictions. The coach's new plan: 29.0 this week")).toBeVisible();
+  await expect(page.getByRole("group", { name: "Predicted points" }).locator(".points")).toHaveText("27.0");
   await page.getByRole("button", { name: "Re-check on latest run" }).click();
   await expect(page.getByText("This week: 29.4 vs coach 29.0")).toBeVisible();
   await expect(page.getByRole("button", { name: "Adopt this plan" })).toBeEnabled();
